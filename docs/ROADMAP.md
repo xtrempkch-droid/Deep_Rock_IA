@@ -68,8 +68,8 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
       *(início previsto: a definir)*
 
 ### Prioridade Média
-- [ ] **Rebasear o PR #1 do Dependabot** (o `container` falhou por base
-      desatualizada, anterior à correção do `pkg-config`).
+- [ ] **Mesclar o PR #1 do Dependabot** — a branch foi rebaseada sobre `main`
+      (bumps de action verificados com `git ls-remote`); aguarda CI verde.
 - [ ] **Suporte a `nvme` tuning** — `mq-deadline` vs `none` scheduler para
       SSD NVMe, e `nr_requests`.
 - [ ] **Benchmark automatizado** — script que roda `llama-bench`, salva CSV e

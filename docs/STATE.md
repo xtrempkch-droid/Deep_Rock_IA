@@ -64,13 +64,14 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 | Workflow      | Estado | Evidência |
 |---------------|--------|-----------|
 | `validate`    | ✅ **verde** | Run #1 (main, `6da0c35`) e #2: 4/4 jobs (Lint, Regras, Dry-run xeon, Dry-run ryzen). Também verde na tag `v0.2.0` e no PR do Dependabot. |
-| `build-llama` | ✅ **verde (build real!)** | Run #1 na tag `v0.2.0` (`4cde4bb`): **6m04s**, os dois perfis compilaram, os binários executaram e a **inferência real** rodou. |
-| `container`   | ✅ **verde** | Run #3 (main, `4cde4bb`): 9m14s · Run #4 (tag `v0.2.0`): 8m48s — imagens publicadas no GHCR. |
+| `build-llama` | ✅ **verde (build real!)** | Run #1 na tag `v0.2.0` (`4cde4bb`): **6m04s** · Run #2 (manual, `main`): ✅ — os dois perfis compilam, os binários executam e a **inferência real** roda. |
+| `container`   | ✅ **verde** | Runs #3 (main), #4 (tag `v0.2.0`) e #5 (docs): ✅ — imagens publicadas no GHCR. |
 
-> ⚠️ **Dependabot PR #1** (`ci(deps): bump the actions group`): o run de
-> `container` nesse PR ficou ❌ porque a branch foi criada **antes** da correção
-> do `pkg-config` (base desatualizada). O `validate` no PR passou. É preciso
-> rebasear a branch — **não** é um problema de código.
+> **PR #1 do Dependabot** (`ci(deps): bump the actions group`): os runs
+> `container` #1 e #2 falharam por causa da base desatualizada (antes da
+> correção do `pkg-config`). A branch foi **rebaseada sobre `main`** e o PR
+> está re-rodando. As 5 versões de action foram verificadas com
+> `git ls-remote` — todas existem.
 
 ### 3.2 Histórico das execuções do CI (2026-10-07)
 
@@ -107,9 +108,10 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 7. **Métricas de performance ainda não medidas.** O CI prova que o llama.cpp
    compila e roda; **não** prova quantos tokens/s o hardware entrega. As
    seções 5, 6 e 7.6 do `docs/TUTORIAL.md` seguem `pendente`.
-8. **PR #1 do Dependabot está com o `container` ❌** porque a branch é
-   anterior à correção do `pkg-config` (base desatualizada). Rebasear a
-   branch resolve — não há problema de código.
+8. **PR #1 do Dependabot:** os runs históricos de `container` (##1 e #2)
+   falharam por base desatualizada, anterior à correção do `pkg-config`.
+   A branch foi rebaseada sobre `main` e o PR está re-rodando — sem problema
+   de código. (Bumps de action verificados com `git ls-remote`.)
 9. **A imagem do GHCR não foi validada no hardware alvo.** Ela foi construída
    e publicada com sucesso no CI, mas ninguém ainda a executou no Xeon nem no
    Ryzen.
