@@ -1,0 +1,112 @@
+name: container
+
+# Constrói a imagem de runtime do llama.cpp (docker/Dockerfile) e publica no
+# GHCR. Duas variantes:
+#   * portable → AVX2 genérico (roda no Xeon E5-2678 v3 E no Ryzen 5 3500X)
+#   * znver2   → otimizada para o Ryzen 5 3500X (Zen 2)
+#
+# ⚠️ Nunca publicamos variante com AVX-512: nenhum dos hardwares alvo suporta.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "docker/**"
+      - ".github/workflows/container.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Imagem (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: portable
+            cflags: ""
+            suffix: ""
+          - variant: znver2
+            cflags: "-march=znver2 -mtune=znver2"
+            suffix: "-znver2"
+    steps:
+      - uses: actions/checkout@v4
+
+      # GHCR exige nome de imagem em minúsculas.
+      - name: Definir nome da imagem
+        id: vars
+        run: |
+          set -euo pipefail
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ai-cpu-os-llama" >> "$GITHUB_OUTPUT"
+
+      - name: Definir tags
+        id: tags
+        run: |
+          set -euo pipefail
+          image="${{ steps.vars.outputs.image }}"
+          suffix="${{ matrix.suffix }}"
+          short_sha="$(git rev-parse --short=12 HEAD)"
+          list="${image}:sha-${short_sha}${suffix}"
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            list="${list}"$'\n'"${image}:latest${suffix}"
+          fi
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            list="${list}"$'\n'"${image}:${GITHUB_REF_NAME}${suffix}"
+          fi
+          first="$(head -n1 <<< "$list")"
+          {
+            echo "list<<EOF"
+            printf '%s\n' "$list"
+            echo "EOF"
+            echo "first=${first}"
+          } >> "$GITHUB_OUTPUT"
+          printf 'Tags:\n%s\n' "$list"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login no GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (e push fora de PR)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          # Em PR só validamos o build (sem publicar); usamos load para poder rodar.
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ steps.tags.outputs.list }}
+          build-args: |
+            CMAKE_C_FLAGS=${{ matrix.cflags }}
+            CMAKE_CXX_FLAGS=${{ matrix.cflags }}
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
+          provenance: false
+          labels: |
+            org.opencontainers.image.title=ai-cpu-os llama.cpp runtime
+            org.opencontainers.image.description=Inferência LLM 100% CPU (AVX2, sem AVX-512)
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      # Prova que a imagem construída realmente executa nesta CPU.
+      - name: Smoke da imagem (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint llama-bench \
+            "${{ steps.tags.outputs.first }}" --help > /dev/null
+          echo "OK: imagem executa llama-bench."

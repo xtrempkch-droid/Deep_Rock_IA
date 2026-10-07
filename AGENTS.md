@@ -68,8 +68,20 @@ ai-cpu-os/
 ├── README.md               # Visão geral, uso, avisos, contribuição
 ├── AGENTS.md               # ← você está aqui (ponto de entrada)
 ├── LICENSE                 # MIT
+├── Makefile                # Atalhos locais (make ci, lint, build-xeon, docker…)
 ├── build.sh                # Script principal (orquestra tudo)
 ├── detect-hardware.sh      # Detecção de CPU/RAM/canal/disco + escolha de perfil
+├── .github/
+│   ├── workflows/
+│   │   ├── validate.yml    # Lint + dry-run + guarda-corpo das regras (push/PR)
+│   │   ├── build-llama.yml # Compila o llama.cpp por perfil + Release (tags/manual)
+│   │   └── container.yml   # Imagem de runtime no GHCR (portable / znver2)
+│   ├── ISSUE_TEMPLATE/     # Templates de issue (bug / feature)
+│   ├── PULL_REQUEST_TEMPLATE.md
+│   └── dependabot.yml      # Atualização de actions e da imagem base
+├── docker/
+│   ├── Dockerfile          # Runtime do llama.cpp (GGML_NATIVE=OFF — ver docs/CI.md)
+│   └── docker-compose.example.yml
 ├── docs/
 │   ├── ROADMAP.md          # Concluído / Em progresso / Planejado / Ideias
 │   ├── ARCHITECTURE.md     # Diagramas, fluxos, decisões de design
@@ -77,6 +89,7 @@ ai-cpu-os/
 │   ├── HARDWARE.md         # Detalhes técnicos do hardware alvo
 │   ├── TUNING.md           # Explicação de cada otimização
 │   ├── TROUBLESHOOTING.md  # Problemas conhecidos e soluções
+│   ├── CI.md               # Como o GitHub compila e valida o sistema
 │   └── TUTORIAL.md         # TUTORIAL explicado (obrigatório por marco/versão)
 ├── profiles/
 │   ├── xeon/               # Servidor de inferência
@@ -90,7 +103,8 @@ ai-cpu-os/
 │       ├── docker-setup.sh # Docker Engine + Compose
 │       ├── registry-setup.sh # Registry privado localhost:5000
 │       ├── gitea-compose.yml # Gitea via docker compose
-│       └── build-runner.sh # Build Docker + push p/ registry local
+│       ├── build-runner.sh # Build Docker + push p/ registry local
+│       └── llama-build.sh  # Compila o llama.cpp com -march=znver2 (Zen 2)
 ├── common/
 │   ├── kernel-tuning.sh    # sysctl + cmdline + io_uring
 │   ├── hugepages.sh        # Transparent/static huge pages
@@ -112,6 +126,7 @@ ai-cpu-os/
 | Entender uma otimização específica     | `docs/TUNING.md`                             |
 | Resolver um problema                   | `docs/TROUBLESHOOTING.md`                    |
 | **Aprender o projeto do zero (passo a passo explicado)** | **`docs/TUTORIAL.md`**        |
+| Como o CI compila/valida o sistema     | `.github/workflows/`, `docs/CI.md`, `Makefile` |
 | Scripts principais                     | `build.sh`, `detect-hardware.sh`             |
 | Perfil Xeon (inferência)               | `profiles/xeon/`                             |
 | Perfil Ryzen (build/registry/Gitea)    | `profiles/ryzen/`                            |
@@ -147,6 +162,13 @@ Estas regras são **obrigatórias**:
 10. **NUNCA** declarar um marco/versão "concluído" sem que o
     `docs/TUTORIAL.md` correspondente esteja atualizado e coerente com o
     estado real (incluindo o que **não** foi testado).
+11. **ANTES** de abrir um Pull Request, rodar `make ci` localmente e garantir
+    o CI verde (workflow `validate`). Nunca faça merge com CI vermelho.
+    Se você alterar os jobs, atualize `docs/CI.md`.
+12. **NUNCA** habilitar AVX-512 (`-mavx512*`, `GGML_AVX512=ON`) em código,
+    script ou imagem: nenhum dos dois hardwares alvo suporta (o build faz
+    `SIGILL`). Em containers, `GGML_NATIVE` deve permanecer `OFF` — dentro do
+    Docker o CMake detectaria a CPU do runner de CI, não a do alvo.
 
 ---
 
@@ -160,9 +182,13 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-07
-- **O que mudou:** Adicionada a diretriz 9/10 (tutorial obrigatório por
-  marco/versão) e criado `docs/TUTORIAL.md` — tutorial explicado do zero.
-  Os scripts e a documentação continuam **não testados em hardware real**
-  (ver `docs/STATE.md`).
+- **O que mudou:** Adicionada a esteira de CI/CD (`.github/workflows/`:
+  `validate`, `build-llama`, `container`), `Makefile`, `docker/` e
+  `docs/CI.md`. Novas regras 11 (CI verde antes do PR) e 12 (nunca AVX-512;
+  `GGML_NATIVE=OFF` em containers). Criado `profiles/ryzen/llama-build.sh`
+  e adicionado `--march` ao build compartilhado. Os scripts e a documentação
+  continuam **não testados em hardware real** (ver `docs/STATE.md`).
+- **Data anterior:** 2026-10-07 — Criação do `docs/TUTORIAL.md` e da diretriz
+  de tutorial obrigatório por marco/versão.
 - **Data anterior:** 2026-10-07 — Criação inicial do repositório (todos os
   scripts, perfis e documentação da versão `0.1.0-alpha`).

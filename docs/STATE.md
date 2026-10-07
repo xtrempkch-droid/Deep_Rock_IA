@@ -47,8 +47,24 @@
 | `profiles/ryzen/build-runner.sh`      | ✅      | ✅                 | ❌                  |
 | `tests/smoke-test.sh`                 | ✅      | ✅                 | ❌                  |
 | `docs/TUTORIAL.md`                    | ✅      | ⚠️ (revisão manual)| ❌                  |
+| `profiles/ryzen/llama-build.sh`       | ✅      | ✅                 | ❌                  |
+| `docker/Dockerfile`                   | ✅      | ⚠️ (buildx --check)| ❌                  |
+| `.github/workflows/*.yml`             | ✅      | ⚠️ (yamllint)      | ❌ (1º run pendente)|
+| `Makefile`                            | ✅      | ⚠️ (make -n/test)  | ❌                  |
 
 Legenda: ✅ sim · ❌ não · ⚠️ parcial
+
+> **Lint:** todos os scripts passam em `shellcheck -x -S warning` sem
+> nenhum aviso (verificado localmente em 2026-10-07 com shellcheck 0.11.0).
+> O CI (`validate`) passa a garantir isso a cada push/PR.
+
+### 3.1 Status do CI/CD
+
+| Workflow             | Estado | Observação |
+|----------------------|--------|------------|
+| `validate`           | ✅ escrito e validado localmente (`make ci`) | 1º run no GitHub pendente |
+| `build-llama`        | ✅ escrito, validado por dry-run local | Build real nunca executado (`build` custa minutos) |
+| `container`          | ✅ escrito, validado por yamllint | Imagem nunca construída/publicada |
 
 ---
 
@@ -69,6 +85,13 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
    modo degradado (erro claro).
 6. **Single channel no Ryzen** não é corrigível por software — é alertado,
    não resolvido.
+7. **O CI nunca foi executado no GitHub ainda.** Os workflows foram
+   validados localmente (`make ci`, `yamllint`), mas o 1º run real — e
+   principalmente o `build-llama` (que compila de verdade) — está pendente.
+   Não confunda "lint limpo" com "build comprovado".
+8. **A imagem do GHCR nunca foi construída.** O `docker/Dockerfile` passou
+   apenas por checagem estática; o build real de imagem é o maior risco
+   não validado da esteira de CI/CD.
 
 ---
 
@@ -89,6 +112,17 @@ Tempo de build do llama.cpp: *(pendente)*
 ## 6. Próxima ação imediata
 
 > **👉 ESTA É A SEÇÃO REFERENCIADA PELO `AGENTS.md`.**
+
+**Passo 0 — Deixar o CI verde no GitHub (rápido, sem risco).**
+
+```bash
+make ci                    # reproduz o workflow 'validate' localmente
+git push origin main       # dispara o workflow 'validate' no GitHub
+```
+
+Depois, em *Actions*, confirme: (a) `validate` verde; (b) dispare
+`build-llama` manualmente (*Run workflow*) para comprovar de verdade que o
+llama.cpp compila e roda com as flags dos dois perfis.
 
 **Passo 1 — Subir uma VM Debian 12 e validar `detect-hardware.sh` + `build.sh
 --dry-run`.**
@@ -141,3 +175,5 @@ Ao terminar qualquer tarefa:
 |------------|------------------------------------------------------------|
 | 2026-10-07 | Criação do arquivo junto com o repositório `0.1.0-alpha`.   |
 | 2026-10-07 | Commit inicial `85a083e` realizado; 26 arquivos versionados. |
+| 2026-10-07 | Projeto publicado no GitHub (`main` + tag `v0.1.0-alpha`); adicionado `docs/TUTORIAL.md` e a diretriz de tutorial por marco. |
+| 2026-10-07 | Adicionada a esteira de CI/CD (`validate`, `build-llama`, `container`), `Makefile`, `docker/`, `docs/CI.md` e templates. Corrigidos todos os avisos do shellcheck. |

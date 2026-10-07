@@ -204,6 +204,57 @@ tests/smoke-test.sh  (validação rápida)
 6. **Ensinar, não só entregar:** ao fechar cada marco/versão, o tutorial
    explicado (`docs/TUTORIAL.md`) é atualizado — ele é a porta de entrada
    didática do projeto (Regra 9 do `AGENTS.md`).
+7. **O que é verificável, é verificado:** toda regra do `AGENTS.md` que puder
+   ser checada por máquina vira um job do CI (`project-rules`), em vez de
+   confiar em disciplina humana.
+
+---
+
+## 7. CI/CD — a esteira que compila e valida
+
+O CI é parte da arquitetura: ele é o que garante que os scripts e a memória
+do projeto não se degradem. Detalhes completos em [`docs/CI.md`](CI.md).
+
+```text
+                    push / pull_request
+                             │
+              ┌──────────────▼──────────────┐
+              │      validate.yml           │  rápido (minutos)
+              │  ├─ lint  (bash/shellcheck/ │
+              │  │        python/yamllint)  │
+              │  ├─ dry-run (xeon + ryzen)  │
+              │  └─ project-rules           │  ◀── guarda as regras do AGENTS.md
+              └──────────────┬──────────────┘
+                             │ (merge só com verde)
+                             ▼
+   tag v* / manual / semanal
+              ┌─────────────────────────────┐
+              │      build-llama.yml        │  minutos (2 builds)
+              │  ├─ xeon  (AVX2)            │
+              │  ├─ ryzen (znver2)          │
+              │  ├─ executa binários        │  ◀── pega SIGILL cedo
+              │  ├─ inferência real (tiny)  │  ◀── prova fim-a-fim
+              │  └─ Release: .tar.gz        │
+              └──────────────┬──────────────┘
+                             │
+              push main / tag / PR em docker/**
+                             ▼
+              ┌─────────────────────────────┐
+              │      container.yml          │  GHCR
+              │  ├─ :latest  (AVX2 portável)│
+              │  └─ :znver2  (Zen 2)        │
+              └─────────────────────────────┘
+```
+
+### Decisão crítica: `GGML_NATIVE=OFF` em containers
+
+No host, `GGML_NATIVE=ON` é o ideal — o CMake lê a ISA da **CPU alvo**.
+Dentro do Docker, porém, "native" significa a CPU do **runner de CI**, que
+pode ser Zen 4/5 **com AVX-512**. Isso geraria um binário que sofre `SIGILL`
+no Xeon E5-2678 v3 e no Ryzen 5 3500X.
+
+Por isso a imagem habilita `AVX2`/`FMA`/`F16C` **explicitamente** e mantém
+`GGML_NATIVE=OFF` (Regra 12 do `AGENTS.md`).
 
 ---
 
@@ -212,3 +263,10 @@ tests/smoke-test.sh  (validação rápida)
 | Data       | Mudança                                        |
 |------------|------------------------------------------------|
 | 2026-10-07 | Versão inicial da arquitetura (`0.1.0-alpha`). |
+| 2026-10-07 | Adicionado o tutorial didático como componente (2.6) e o princípio 6. |
+| 2026-10-07 | Adicionada a seção 7 (CI/CD) e o princípio 7. **Código removido:**
+   variáveis mortas (`SCRIPT_DIR` em `detect-hardware.sh` e
+   `llama-build.sh`; `locators` em `detect-hardware.sh`). Motivo: zerar os
+   avisos do `shellcheck` exigidos pelo novo workflow `validate` — o código
+   indicado nunca era lido, então nenhum comportamento mudou. Adicionado
+   `--march` ao build compartilhado (habilita `znver2` no perfil ryzen). |

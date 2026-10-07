@@ -1,0 +1,29 @@
+---
+# Configuração do yamllint para o ai-cpu-os.
+# Rodamos com: yamllint -c .yamllint.yml .github/ docker/ profiles/
+extends: default
+
+ignore: |
+  .git/
+
+rules:
+  # Nossos YAMLs têm descrições longas em comentários; 120 é um bom teto.
+  line-length:
+    max: 120
+    allow-non-breakable-words: true
+
+  # Os workflows do GitHub usam a chave `on:` (que o yamllint trataria como
+  # booleano truthy). Desabilitamos a checagem de chaves.
+  truthy:
+    allowed-values: ["true", "false", "on", "yes", "no"]
+    check-keys: false
+
+  # Não exigimos o marcador de início de documento (---) em todo arquivo.
+  document-start: disable
+
+  # Comentários alinhados de forma variada nos exemplos; irrelevante para nós.
+  comments-indentation: disable
+
+  # Blocos de comentário longos são intencionais (documentação embutida).
+  comments:
+    min-spaces-from-content: 1

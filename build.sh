@@ -307,7 +307,9 @@ run_tests() {
     log_warn "smoke-test.sh não encontrado; pulando."
     return 0
   fi
-  run "Rodando smoke-test" bash "$t" $([[ $DRY_RUN -eq 1 ]] && echo "--dry-run") || {
+  local -a flags=()
+  mapfile -t flags < <(child_flags)
+  run "Rodando smoke-test" bash "$t" "${flags[@]+"${flags[@]}"}" || {
     log_warn "Smoke-test reportou falhas (não fatais nesta fase). Veja a saída acima."
   }
 }

@@ -37,6 +37,8 @@
 | 10 | [Manutenção e reversão](#10-manutenção-e-reversão) | Todos |
 | 11 | [Problemas rápidos](#11-problemas-rápidos) | Todos |
 | 12 | [Glossário](#12-glossário) | Todos |
+| 13 | [Mapa do que você aprendeu](#13-mapa-do-que-você-aprendeu--próximos-passos) | Todos |
+| A | [Apêndice A — CI/CD no GitHub](#apêndice-a--cicd-no-github) | Todos |
 
 ---
 
@@ -774,6 +776,91 @@ Você agora sabe:
 
 ---
 
+## Apêndice A — CI/CD no GitHub
+
+> **Objetivo desta seção:** você não precisa compilar nada para começar. O
+> GitHub pode compilar por você e entregar os binários prontos.
+> Detalhes técnicos completos: [`docs/CI.md`](CI.md).
+
+### A.1 Como o GitHub costuma agir
+
+O repositório tem três workflows:
+
+| Workflow | Dispara | O que faz |
+|----------|---------|-----------|
+| `validate` | todo push/PR | Lint (bash/shellcheck/python/yaml), `--dry-run` dos 2 perfis e conferência das regras do projeto. |
+| `build-llama` | manual, tags `v*`, semanal | Compila o llama.cpp para `xeon` e `ryzen`, executa os binários e roda uma **inferência real** com um modelo minúsculo. |
+| `container` | push em `main`, tags, PR em `docker/**` | Publica a imagem de runtime no GHCR. |
+
+### A.2 Ver o resultado no GitHub
+
+1. Abra o repositório → aba **Actions**.
+2. Para cada workflow você vê o histórico: ✅ verde / ❌ vermelho.
+3. Clique numa execução → job → expanda os logs.
+
+### A.3 Baixar os binários já compilados
+
+Esta é a forma mais rápida de pular o passo de compilação (seção 7.2):
+
+1. Aba **Actions** → workflow **build-llama** → **Run workflow** (se ainda
+   não houver execução).
+2. Quando terminar, abra a execução → seção **Artifacts**.
+3. Baixe `ai-cpu-os-llama-xeon` (ou `-ryzen`) e descompacte **na máquina
+   alvo**:
+
+```bash
+mkdir -p /opt/llama.cpp && cd /opt/llama.cpp
+tar -xzf ~/Downloads/ai-cpu-os-llama-xeon-*.tar.gz --strip-components=1
+./bin/llama-server --help | head        # confirme que executa
+```
+
+> ⚠️ O artefato é compilado para a ISA do hardware alvo. O pacote `xeon`
+> (AVX2 genérico) também roda no Ryzen; o pacote `ryzen` usa `znver2` e
+> **não** roda em CPUs mais antigas que Zen 2.
+
+### A.4 Publicar uma versão (release)
+
+```bash
+make ci                                     # 1. CI local verde
+git tag -a v0.2.0 -m "ai-cpu-os 0.2.0: <resumo>"
+git push origin v0.2.0                      # 2. dispara build + release
+```
+
+O `build-llama` cria a Release, roda a inferência de prova e anexa os dois
+`.tar.gz`. O `container` publica `:v0.2.0` e `:v0.2.0-znver2` no GHCR.
+
+> **Regra do projeto:** não declare uma versão sem o `docs/TUTORIAL.md`
+> atualizado (Regras 9 e 10 do [`AGENTS.md`](../AGENTS.md)). Em outras
+> palavras: **este próprio documento**. Se você acabou de validar um perfil em
+> hardware, volte e transforme os "pendente" em números reais.
+
+### A.5 Rodar a imagem do GHCR (opcional)
+
+```bash
+sed 's/<owner>/SEU-USUARIO/' docker/docker-compose.example.yml > docker/docker-compose.yml
+docker compose -f docker/docker-compose.yml up -d
+curl -s http://127.0.0.1:8080/health
+```
+
+> ⚠️ **Lembre-se:** o container **não** tem acesso ao tuning do host
+> (governor, huge pages, C-states). Ele é útil para portabilidade e testes;
+> para o máximo de tokens/s, use o serviço nativo.
+
+### A.6 O que o CI **não** verifica
+
+| Item | Por quê |
+|------|---------|
+| Governor, sysctl, huge pages | Exige host privilegiado; não é reproduzível em runner. |
+| Desativação de C-states | Exige **reboot** — impossível no CI. |
+| Detecção de single channel | Depende do SMBIOS/DMI do hardware real. |
+| Ganho real de tokens/s | Depende do hardware; só `llama-bench` no alvo mede isso. |
+
+Ou seja: **CI verde não significa "validado em hardware"**. Significa "os
+scripts são válidos e o llama.cpp compila e roda". A validação de performance
+continua sendo a seção 7.6 deste tutorial, no hardware de verdade.
+
+---
+
 ## Manutenção deste documento
 
 > **Diretriz (Regra 9 do `AGENTS.md`):** ao concluir um **marco** (perfil
@@ -792,3 +879,4 @@ Você agora sabe:
 | Data | Mudança |
 |------|---------|
 | 2026-10-07 | Criação inicial (v0.1.0-alpha) — tutorial completo; nada testado em hardware ainda. |
+| 2026-10-07 | Adicionado o Apêndice A (CI/CD: workflows, artefatos, release, limitações do CI). |

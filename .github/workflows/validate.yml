@@ -1,0 +1,179 @@
+name: validate
+
+# Validação rápida em todo push/PR: lint de scripts, dry-run dos perfis e
+# guarda-corpo das regras do projeto (ver AGENTS.md e docs/CI.md).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint: sintaxe bash, shellcheck, compilação Python e yamllint.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint (bash, shellcheck, python, yaml)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar ferramentas de lint
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends shellcheck yamllint
+
+      - name: Coletar scripts
+        id: scripts
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find . -name '*.sh' -not -path './.git/*' | sort)
+          printf 'Encontrados %d scripts:\n' "${#files[@]}"
+          printf '  %s\n' "${files[@]}"
+          {
+            echo "list<<EOF"
+            printf '%s\n' "${files[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: bash -n (sintaxe)
+        env:
+          SCRIPTS: ${{ steps.scripts.outputs.list }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r f; do
+            [[ -z "$f" ]] && continue
+            bash -n "$f"
+          done <<< "$SCRIPTS"
+          echo "Sintaxe OK."
+
+      - name: shellcheck (severidade warning+)
+        env:
+          SCRIPTS: ${{ steps.scripts.outputs.list }}
+        run: |
+          set -euo pipefail
+          mapfile -t files <<< "$SCRIPTS"
+          shellcheck -x -S warning "${files[@]}"
+          echo "shellcheck OK."
+
+      - name: Python (compilação)
+        run: |
+          set -euo pipefail
+          python3 -m compileall -q profiles/
+          echo "Python OK."
+
+      - name: YAML (yamllint)
+        run: |
+          set -euo pipefail
+          yamllint -c .yamllint.yml .github/ docker/ profiles/
+          echo "YAML OK."
+
+  # ---------------------------------------------------------------------------
+  # Dry-run: prova que a orquestração funciona nos dois perfis sem alterar nada.
+  # ---------------------------------------------------------------------------
+  dry-run:
+    name: Dry-run (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [xeon, ryzen]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tornar scripts executáveis
+        run: |
+          set -euo pipefail
+          chmod +x build.sh detect-hardware.sh \
+                   common/*.sh profiles/*/*.sh profiles/xeon/shell-ia.py tests/*.sh
+
+      - name: detect-hardware.sh
+        run: ./detect-hardware.sh
+
+      - name: build.sh --dry-run (${{ matrix.profile }})
+        run: |
+          set -euo pipefail
+          sudo ./build.sh --profile "${{ matrix.profile }}" \
+               --dry-run --yes --skip-tests
+
+      - name: smoke-test.sh --dry-run
+        run: |
+          set -euo pipefail
+          bash tests/smoke-test.sh --dry-run --profile "${{ matrix.profile }}"
+
+  # ---------------------------------------------------------------------------
+  # Guarda-corpo das regras do projeto (AGENTS.md).
+  # Impede que alguém remova arquivos obrigatórios ou a diretriz do tutorial.
+  # ---------------------------------------------------------------------------
+  project-rules:
+    name: Regras do projeto
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Arquivos obrigatórios presentes
+        run: |
+          set -euo pipefail
+          required=(
+            README.md AGENTS.md LICENSE
+            build.sh detect-hardware.sh
+            docs/ROADMAP.md docs/ARCHITECTURE.md docs/STATE.md
+            docs/HARDWARE.md docs/TUNING.md docs/TROUBLESHOOTING.md
+            docs/TUTORIAL.md docs/CI.md
+            profiles/xeon/install.sh profiles/xeon/llama-build.sh
+            profiles/xeon/sysctl.conf profiles/xeon/shell-ia.py
+            profiles/xeon/ai-server.service
+            profiles/ryzen/install.sh profiles/ryzen/llama-build.sh
+            profiles/ryzen/docker-setup.sh profiles/ryzen/registry-setup.sh
+            profiles/ryzen/gitea-compose.yml profiles/ryzen/build-runner.sh
+            common/kernel-tuning.sh common/hugepages.sh common/governor.sh
+            tests/smoke-test.sh
+          )
+          fail=0
+          for f in "${required[@]}"; do
+            if [[ ! -f "$f" ]]; then
+              echo "::error file=$f::arquivo obrigatório ausente"
+              fail=1
+            fi
+          done
+          [[ $fail -eq 0 ]] || exit 1
+          echo "OK: ${#required[@]} arquivos obrigatórios presentes."
+
+      - name: Diretriz do tutorial (Regra 9 do AGENTS.md)
+        run: |
+          set -euo pipefail
+          grep -q 'docs/TUTORIAL.md' AGENTS.md \
+            || { echo "::error::AGENTS.md não referencia docs/TUTORIAL.md"; exit 1; }
+          grep -qi 'marco' AGENTS.md \
+            || { echo "::error::AGENTS.md perdeu a diretriz de tutorial por marco"; exit 1; }
+          grep -q 'TUTORIAL' README.md \
+            || { echo "::error::README.md não referencia o tutorial"; exit 1; }
+          echo "Diretriz do tutorial OK."
+
+      - name: set -euo pipefail em todos os scripts
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r f; do
+            grep -q 'set -euo pipefail' "$f" \
+              || { echo "::error file=$f::$f não usa set -euo pipefail"; fail=1; }
+          done < <(find . -name '*.sh' -not -path './.git/*' | sort)
+          [[ $fail -eq 0 ]] || exit 1
+          echo "OK: todos os scripts são 'set -euo pipefail'."
+
+      - name: Docs vivas — campos esperados
+        run: |
+          set -euo pipefail
+          grep -q 'Próxima ação imediata' docs/STATE.md
+          grep -q 'Última atualização' docs/STATE.md
+          grep -q 'Concluído' docs/ROADMAP.md
+          grep -q 'Em Progresso' docs/ROADMAP.md
+          grep -q 'Métricas de performance' docs/STATE.md
+          echo "Docs vivas OK."

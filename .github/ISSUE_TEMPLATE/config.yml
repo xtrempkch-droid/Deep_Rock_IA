@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Tutorial explicado
+    url: https://github.com/OWNER/REPO/blob/main/docs/TUTORIAL.md
+    about: Comece por aqui — fluxo completo do zero, explicado passo a passo.
+  - name: 🔧 Problemas conhecidos e soluções
+    url: https://github.com/OWNER/REPO/blob/main/docs/TROUBLESHOOTING.md
+    about: Consulte antes de abrir uma issue — muitos erros já têm solução.
+  - name: 📊 Estado atual do projeto
+    url: https://github.com/OWNER/REPO/blob/main/docs/STATE.md
+    about: O que já foi testado (e o que NÃO foi) + próxima ação imediata.

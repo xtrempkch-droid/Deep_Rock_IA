@@ -1,0 +1,59 @@
+name: ✨ Feature request / otimização
+description: Sugira uma melhoria ou uma nova micro-otimização ("1% importa")
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A filosofia do projeto é acumular **ganhos de 1%**. Toda sugestão deve
+        vir com o **porquê** técnico — se possível, com números.
+
+        Consulte [`docs/ROADMAP.md`](../blob/main/docs/ROADMAP.md) para ver o
+        que já está planejado.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área
+      options:
+        - kernel / sysctl
+        - memória / huge pages
+        - escalonamento (governor/C-states)
+        - build do llama.cpp
+        - shell-IA (Python)
+        - Docker / registry / Gitea
+        - CI/CD
+        - documentação
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposta
+      description: O que você sugere fazer?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Por que funciona (fundamento técnico)
+      description: Explique o mecanismo. Se mediu, cole antes/depois.
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Riscos e efeitos colaterais
+      description: Consumo de energia? Compatibilidade? Requer reboot? Pode quebrar algo?
+    validations:
+      required: true
+  - type: dropdown
+    id: devices
+    attributes:
+      label: Aplica-se a qual perfil?
+      options:
+        - xeon
+        - ryzen
+        - ambos
+    validations:
+      required: true

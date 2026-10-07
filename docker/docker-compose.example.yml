@@ -1,0 +1,58 @@
+# docker/docker-compose.example.yml — exemplo de execução da imagem do GHCR
+#
+# Copie para `docker-compose.yml`, ajuste a imagem/modelo e rode:
+#   docker compose -f docker/docker-compose.yml up -d
+#
+# ⚠️ AVISO DE FILOSOFIA DO PROJETO
+#   O ai-cpu-os foi desenhado para rodar NATIVO (o tuning de kernel — governor,
+#   huge pages, C-states, sysctl — é do HOST e não se aplica dentro de um
+#   container). A imagem existe para portabilidade, CI e testes rápidos.
+#   Para o máximo de tokens/s, prefira o ai-server.service nativo.
+
+services:
+  llama:
+    # Substitua <owner> pelo dono do repositório (minúsculas, exigência do GHCR).
+    # Variantes publicadas pelo workflow `container`:
+    #   :latest          → portátil (AVX2 genérico; roda no Xeon e no Ryzen)
+    #   :znver2          → otimizada para o Ryzen 5 3500X (Zen 2)
+    #   :sha-<commit>    → referência imutável
+    image: ghcr.io/<owner>/ai-cpu-os-llama:latest
+    container_name: llama-server
+    restart: unless-stopped
+
+    # Bind apenas em localhost: o serviço não deve ficar exposto na LAN.
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    volumes:
+      # Somente leitura: o container nunca precisa escrever no modelo.
+      - ./models:/models:ro
+
+    # Ajuste threads/ctx ao hardware:
+    #   Xeon E5-2678 v3 (12c/24t)  → --threads 24 (teste também 12)
+    #   Ryzen 5 3500X  (6c/6t)     → --threads 6
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "--threads"
+      - "24"
+      - "--ctx-size"
+      - "4096"
+      - "--n-gpu-layers"
+      - "0"
+      - "--no-mmap"
+      - "-m"
+      - "/models/model.gguf"
+
+    # Inferência em CPU é intensiva: o padrão (1024) é suficiente, mas
+    # aumentamos para evitar falhas ao abrir conexões.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    # Sem GPU: não peça ao Docker para reservar dispositivos.
+    # Se você tentar usar a RX 580 aqui, lembre-se: ela é instável sob carga
+    # de computação e deve servir apenas como saída de vídeo.

@@ -1,0 +1,80 @@
+name: 🐛 Bug report
+description: Reporte um comportamento incorreto (script falhou, tuning não aplicou, etc.)
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por reportar! Antes de continuar, consulte
+        [`docs/TROUBLESHOOTING.md`](../blob/main/docs/TROUBLESHOOTING.md) —
+        o problema pode já ter solução documentada.
+  - type: dropdown
+    id: profile
+    attributes:
+      label: Perfil
+      description: Qual perfil está em uso?
+      options:
+        - xeon (servidor de inferência)
+        - ryzen (build + registry + Gitea)
+        - ambos / comum
+        - não sei
+    validations:
+      required: true
+  - type: input
+    id: component
+    attributes:
+      label: Componente
+      description: Qual script/arquivo falhou?
+      placeholder: "ex.: build.sh, common/kernel-tuning.sh, profiles/xeon/llama-build.sh"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: O que aconteceu
+      description: Descreva o comportamento observado e o esperado.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Como reproduzir
+      description: Comandos exatos (inclua `--dry-run` se aplicável).
+      render: bash
+      placeholder: |
+        sudo ./build.sh --profile xeon --dry-run
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs relevantes
+      description: Saída com timestamp. Se aplicável, `/var/log/ai-cpu-os-build.log`.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Ambiente
+      description: Saída de `./detect-hardware.sh` e `uname -r`.
+      render: text
+      placeholder: |
+        uname -r:
+        CPU:
+        AVX2/AVX-512/AMX:
+        RAM e canais:
+        Distro:
+    validations:
+      required: true
+  - type: checkboxes
+    id: sanity
+    attributes:
+      label: Confirmações
+      options:
+        - label: Rodei `make ci` e ele passou localmente.
+        - label: Testei com `--dry-run` antes de aplicar de verdade.
+        - label: >-
+            Estou ciente de que os avisos de hardware (sem AVX-512, single
+            channel, RX 580) são limitações conhecidas e não bugs.

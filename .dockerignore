@@ -1,0 +1,8 @@
+# Contexto de build mínimo para docker/Dockerfile
+# O estágio de build clona o llama.cpp por conta própria; nada do repositório
+# é necessário além do Dockerfile. Excluímos tudo para acelerar o build.
+
+*
+!docker/
+!docker/Dockerfile
+!LICENSE

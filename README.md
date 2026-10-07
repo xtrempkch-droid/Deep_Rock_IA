@@ -7,6 +7,10 @@
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![shell](https://img.shields.io/badge/shell-bash%205.x-green)
 
+[![validate](https://github.com/xtrempkch-droid/Deep_Rock_IA/actions/workflows/validate.yml/badge.svg)](https://github.com/xtrempkch-droid/Deep_Rock_IA/actions/workflows/validate.yml)
+[![build-llama](https://github.com/xtrempkch-droid/Deep_Rock_IA/actions/workflows/build-llama.yml/badge.svg)](https://github.com/xtrempkch-droid/Deep_Rock_IA/actions/workflows/build-llama.yml)
+[![container](https://github.com/xtrempkch-droid/Deep_Rock_IA/actions/workflows/container.yml/badge.svg)](https://github.com/xtrempkch-droid/Deep_Rock_IA/actions/workflows/container.yml)
+
 ---
 
 ## 🧠 Filosofia — "1% importa"
@@ -130,6 +134,40 @@ Detalhes completos e a fundamentação técnica de cada item estão em
 
 ---
 
+## 🤖 CI/CD — o GitHub compila o sistema
+
+O repositório já vem com GitHub Actions para **validar**, **compilar** e
+**empacotar** o sistema automaticamente:
+
+| Workflow | Quando roda | O que faz |
+|----------|-------------|-----------|
+| **`validate`** | todo push/PR | `bash -n`, `shellcheck`, `python -m compileall`, `yamllint`, dry-run dos 2 perfis e guarda-corpo das regras do `AGENTS.md`. |
+| **`build-llama`** | manual, tags `v*`, semanal | Compila o llama.cpp para `xeon` (AVX2) e `ryzen` (`znver2`), **executa os binários** e roda uma **inferência real** com um modelo minúsculo. Em tags, anexa os `.tar.gz` à Release. |
+| **`container`** | push em `main`, tags, PR em `docker/**` | Publica a imagem de runtime no GHCR: `:latest` (portável) e `:znver2`. |
+
+**Rodar tudo localmente (idêntico ao CI):**
+
+```bash
+make help    # lista os alvos disponíveis
+make ci      # lint + docs + dry-run  (= workflow 'validate')
+```
+
+**Baixar os binários já compilados pelo GitHub:** acesse *Actions →
+build-llama → run mais recente → Artifacts* (`ai-cpu-os-llama-xeon` e
+`ai-cpu-os-llama-ryzen`), ou baixe de uma Release.
+
+> ⚠️ **O que o CI não testa:** tuning de kernel (governor, C-states, huge
+> pages, sysctl) exige host privilegiado e, para C-states, **reboot**.
+> Isso continua sendo validação manual em VM/hardware — ver
+> [`docs/STATE.md`](docs/STATE.md).
+>
+> ⚠️ **Imagem ≠ performance máxima:** o container não tem acesso ao tuning do
+> host. Para o máximo de tokens/s, use o `ai-server.service` nativo.
+
+Detalhes, decisões de design e troubleshooting: [`docs/CI.md`](docs/CI.md).
+
+---
+
 ## 📊 Como testar performance
 
 Depois do build, use o `llama-bench` para medir tokens/s:
@@ -193,6 +231,7 @@ Salve os resultados em `docs/STATE.md` na seção "Métricas de performance".
 | [`docs/TUNING.md`](docs/TUNING.md)              | Cada otimização explicada.                      |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Problemas conhecidos e soluções.           |
 | [`docs/TUTORIAL.md`](docs/TUTORIAL.md)          | **Tutorial explicado do zero** (obrigatório por marco/versão). |
+| [`docs/CI.md`](docs/CI.md)                      | Como o GitHub compila e valida o sistema (CI/CD). |
 
 ---
 

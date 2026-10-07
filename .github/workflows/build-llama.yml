@@ -1,0 +1,148 @@
+name: build-llama
+
+# Compila o llama.cpp com as flags EXATAS de cada hardware alvo e prova, de
+# verdade, que o binário roda (incluindo uma inferência real com um modelo
+# minúsculo). É o "GitHub compila o sistema".
+#
+# Disparo: manual (workflow_dispatch), tags (v*) e semanal.
+# Não roda em todo push de propósito: um build leva vários minutos.
+on:
+  workflow_dispatch:
+    inputs:
+      llama_ref:
+        description: "Ref (tag/branch/commit) do llama.cpp"
+        required: false
+        default: master
+        type: string
+  push:
+    tags: ["v*"]
+  schedule:
+    # Toda segunda-feira às 04:00 UTC — pega regressões do upstream.
+    - cron: "0 4 * * 1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-llama-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Padrão robusto: `github.event.inputs` existe no workflow_dispatch e é null
+  # nos demais eventos (push/schedule), caindo no fallback 'master'.
+  LLAMA_REF: ${{ github.event.inputs.llama_ref || 'master' }}
+
+jobs:
+  build:
+    name: Compilar (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: xeon
+            desc: "Haswell-EP: AVX2/FMA/F16C (sem AVX-512)"
+          - profile: ryzen
+            desc: "Zen 2: AVX2/FMA/F16C + -march=znver2"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Info do alvo
+        run: |
+          echo "Perfil: ${{ matrix.profile }} — ${{ matrix.desc }}"
+          echo "llama.cpp ref: ${LLAMA_REF}"
+          echo "--- CPU do runner (só informativo) ---"
+          lscpu | grep -E 'Model name|Flags' | head -2 || true
+
+      - name: Dependências de build
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake git libopenblas-dev
+
+      # Usa o PRÓPRIO script do projeto: valida ISA, decide flags e faz fallback.
+      # Sem cache, para manter o build determinístico e reprodutível (filosofia
+      # do projeto). O trigger é semanal/tag/manual, então o custo é aceitável.
+      - name: Compilar via script do projeto
+        run: |
+          set -euo pipefail
+          bash "profiles/${{ matrix.profile }}/llama-build.sh" \
+            --dir "$GITHUB_WORKSPACE/llama.cpp" \
+            --ref "$LLAMA_REF" \
+            --jobs 4 \
+            --yes
+
+      - name: Verificar binários e execução (pega SIGILL cedo)
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/llama.cpp/build/bin"
+          ls -la "$BIN"
+          for b in llama-server llama-cli llama-bench; do
+            test -x "$BIN/$b" || { echo "::error::binário ausente: $b"; exit 1; }
+          done
+          "$BIN/llama-bench" --help > /dev/null
+          echo "OK: binários compilados e executáveis nesta CPU."
+
+      - name: Baixar modelo minúsculo de teste
+        id: model
+        run: |
+          set -euo pipefail
+          url="https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf"
+          if curl -fsSL --retry 3 -o "$RUNNER_TEMP/tiny.gguf" "$url"; then
+            echo "ok=1" >> "$GITHUB_OUTPUT"
+            ls -la "$RUNNER_TEMP/tiny.gguf"
+          else
+            echo "::warning::modelo de teste indisponível (link pode ter mudado); pulando inferência real"
+            echo "ok=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Inferência real (prova fim-a-fim)
+        if: steps.model.outputs.ok == '1'
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/llama.cpp/build/bin"
+          # Se as flags de ISA estivessem erradas, isto falharia com SIGILL.
+          "$BIN/llama-bench" -m "$RUNNER_TEMP/tiny.gguf" -p 32 -n 16 -t 2
+
+      - name: Empacotar artefato
+        run: |
+          set -euo pipefail
+          safe_ref="${GITHUB_REF_NAME//\//-}"
+          name="ai-cpu-os-llama-${{ matrix.profile }}-${safe_ref}"
+          mkdir -p "dist/${name}"
+          cp -r llama.cpp/build/bin "dist/${name}/bin"
+          cp README.md "dist/${name}/README.md"
+          [[ -f llama.cpp/LICENSE ]] && cp llama.cpp/LICENSE "dist/${name}/LICENSE" || true
+          {
+            echo "ai-cpu-os — binários do llama.cpp (perfil ${{ matrix.profile }})"
+            echo "llama.cpp ref: ${LLAMA_REF}"
+            echo "commit: ${GITHUB_SHA}"
+            echo "Flags: ${{ matrix.desc }}"
+            echo
+            echo "Uso: ./bin/llama-server -m /caminho/modelo.gguf --threads N"
+          } > "dist/${name}/INFO.txt"
+          tar -czf "dist/${name}.tar.gz" -C dist "${name}"
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-cpu-os-llama-${{ matrix.profile }}
+          path: dist/*.tar.gz
+          retention-days: 14
+
+      # Em tags, anexa os binários à Release usando o gh CLI (sem actions de
+      # terceiros, para reduzir a superfície de confiança da cadeia de build).
+      - name: Publicar na Release (apenas em tags)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            gh release create "$tag" \
+              --title "ai-cpu-os ${tag}" \
+              --generate-notes
+          fi
+          gh release upload "$tag" dist/*.tar.gz --clobber
+          echo "Artefatos publicados na Release ${tag}."

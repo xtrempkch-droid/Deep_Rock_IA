@@ -16,9 +16,6 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly SCRIPT_DIR
-
 QUIET=0
 
 if [[ -t 1 ]]; then
@@ -109,9 +106,8 @@ detect_isa() {
   # AVX-512: basta uma das flags para considerar suporte (checamos a base)
   if has avx512f || has avx512d; then HAS_AVX512=1; fi
 
-  local yn
   yn() { [[ "$1" -eq 1 ]] && echo "SIM" || echo "NÃO"; }
-  log_info "AVX2:    $(yn $HAS_AVX2)"
+  log_info "AVX2:    $(yn "$HAS_AVX2")"
   log_info "FMA:     $(yn $HAS_FMA)"
   log_info "F16C:    $(yn $HAS_F16C)"
   log_info "AVX-512: $(yn $HAS_AVX512)"
@@ -175,10 +171,8 @@ detect_ram() {
     fi
   fi
 
-  # Override de canais: se dmidecode expôs Locator, tentamos contar canais distintos.
+  # Override de canais: se dmidecode expôs 'Bank Locator', tentamos contar canais distintos.
   if [[ -n "$dmidecode_out" ]]; then
-    local locators
-    locators="$(grep -E '^[[:space:]]*Locator:' <<<"$dmidecode_out" | sed 's/.*Locator: *//' | sort -u | wc -l || echo 0)"
     local banks
     banks="$(grep -E '^[[:space:]]*Bank Locator:' <<<"$dmidecode_out" | sed 's/.*Bank Locator: *//' | sort -u | wc -l || echo 0)"
     if [[ "$banks" -ge 2 && "$populated" -ge 2 ]]; then
