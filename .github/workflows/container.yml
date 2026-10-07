@@ -39,7 +39,7 @@ jobs:
             cflags: "-march=znver2 -mtune=znver2"
             suffix: "-znver2"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # GHCR exige nome de imagem em minúsculas.
       - name: Definir nome da imagem
@@ -71,18 +71,18 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           printf 'Tags:\n%s\n' "$list"
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Login no GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build (e push fora de PR)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile

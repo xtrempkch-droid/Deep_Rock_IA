@@ -23,7 +23,7 @@ jobs:
     name: Lint (bash, shellcheck, python, yaml)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Instalar ferramentas de lint
         run: |
@@ -86,7 +86,7 @@ jobs:
       matrix:
         profile: [xeon, ryzen]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Tornar scripts executáveis
         run: |
@@ -116,7 +116,7 @@ jobs:
     name: Regras do projeto
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Arquivos obrigatórios presentes
         run: |
