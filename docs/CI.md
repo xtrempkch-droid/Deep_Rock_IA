@@ -17,11 +17,39 @@ Portanto "compilar" no GitHub cobre três frentes diferentes:
 | **Validar** os scripts e a documentação | `validate.yml` | Erros de sintaxe/lint/regras barram o merge. |
 | **Compilar** o llama.cpp para cada hardware | `build-llama.yml` | Artefatos `.tar.gz` com os binários + execução real provando que rodam. |
 | **Empacotar** o runtime em container | `container.yml` | Imagem publicada no GHCR (`:latest` e `:znver2`). |
+| **🎯 Gerar a ISO de instalação** | `iso.yml` | ISO remasterizada (netinst + preseed + projeto), anexada à Release. |
 
 > ⚠️ **O que o CI NÃO consegue testar:** o tuning de kernel (governor,
 > C-states, huge pages, sysctl) exige um host com privilégios e — no caso dos
 > C-states — **reboot**. Isso continua sendo validação manual em VM/hardware
 > físico, conforme a Regra 5 do [`AGENTS.md`](../AGENTS.md).
+
+---
+
+### 1.1 A ISO (`iso.yml`) — o entregável final
+
+O workflow **`iso.yml`** não "compila" no sentido tradicional: ele **remasteriza
+uma ISO oficial do Debian** para produzir a imagem de instalação do ai-cpu-os.
+
+O que ele faz, em ordem:
+
+1. Instala `xorriso`, `isolinux` (fornece o `isohdpfx.bin` para o boot híbrido)
+   e `mtools` (patch do `grub.cfg` dentro da `efi.img`).
+2. `make iso-lint` — `bash -n` + `shellcheck` nos scripts da ISO.
+3. `make iso-dry-run` — simulação completa.
+4. Gera a ISO e publica o **SHA256**; grava um resumo na página da execução.
+5. Em **tags**, anexa a ISO (+ `.sha256`) à Release; em qualquer execução, deixa
+   como **artefato** (7 dias).
+
+**Sobre o disco do preseed:** o CI usa `/dev/vda` como placeholder (existe em
+VMs com virtio). Isso é **deliberadamente seguro**: se alguém instalar essa ISO
+gerada no CI em hardware real, o instalador **falha** (não existe `/dev/vda`)
+em vez de apagar o disco errado. Para instalar de verdade, regenere a ISO
+localmente com `--disk` apontando para o seu disco.
+
+> ⚠️ **O CI prova que a ISO *constrói* — não que ela *instala*.** Bootar e
+> instalar é o **Bloco M** de [`docs/VALIDATION.md`](VALIDATION.md), que exige
+> uma VM. Nenhum runner instala um SO razoavelmente.
 
 ---
 
@@ -167,6 +195,9 @@ make build-xeon   # compila o llama.cpp para o Xeon
 make build-ryzen  # compila o llama.cpp para o Ryzen (znver2)
 make docker       # constrói a imagem localmente
 make docker-check # lint do Dockerfile (docker buildx build --check)
+make iso-lint     # bash -n + shellcheck dos scripts da ISO
+make iso-dry-run  # simula a geração da ISO (não baixa nada pesado)
+make iso DISK=/dev/nvme0n1   # 🎯 gera a ISO de instalação (entregável final)
 ```
 
 > **Regra prática (Regra 11 do `AGENTS.md`):** rode `make ci` antes de abrir
@@ -346,3 +377,4 @@ use o `ai-server.service` nativo (perfil `xeon`) conforme o
 | 2026-10-07 | 2º run real (PR do Dependabot): o smoke da imagem falhou com `exit 127`. Causa: RPATH absoluto `/src/build/bin` nos binários do llama.cpp (libs compartilhadas). Corrigido com `cmake --install` + `CMAKE_INSTALL_RPATH` + `ldconfig` + auto-verificação na imagem (§ 8.2). |
 | 2026-10-07 | `build-llama` ✅ verde (6m04s) na tag `v0.2.0`, Release publicada com os binários; `container` ✅ verde em `main` e na tag. |
 | 2026-10-07 | Correção do RPATH validada: `container` ✅ em `main` (run #8) e no PR do Dependabot (run #9, com o smoke step executando). Nenhum workflow vermelho pendente. |
+| 2026-10-07 | Adicionado o workflow **`iso.yml`** (gera a ISO de instalação em tags/manual) e o **Bloco M** de validação em `docs/VALIDATION.md`. Nenhuma ISO foi construída ainda. |

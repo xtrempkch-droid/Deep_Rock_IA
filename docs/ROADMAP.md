@@ -36,6 +36,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | Release `ai-cpu-os v0.2.0` com os binários `.tar.gz` dos dois perfis      | 2026-10-07 | 2026-10-07 |
 | Correção do bug de RPATH na imagem Docker (achado pelo CI: `exit 127`)    | 2026-10-07 | 2026-10-07 |
 | Protocolo de testes em hardware: `docs/VALIDATION.md` (blocos A–L)        | 2026-10-07 | 2026-10-07 |
+| **ISO de instalação:** `iso/build-iso.sh` + preseed + serviço de 1º boot + `docs/ISO.md` | 2026-10-07 | 2026-10-07 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em
@@ -52,12 +53,16 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | Medição de baseline vs. pós-tuning com `llama-bench`        | 2026-10-07 | Depende dos dois itens acima para preencher `docs/STATE.md` |
 | Validar a Release `v0.2.0` (binários) e a imagem do GHCR no hardware alvo | 2026-10-07 | Primeiro uso real dos artefatos do CI |
 | Executar o protocolo `docs/VALIDATION.md` (blocos A–L) | 2026-10-07 | Roteiro preenchível pronto; **resultados pendentes** |
+| **🎯 Construir e bootar a ISO de instalação numa VM** (Bloco M) | 2026-10-07 | Entregável final; maior risco não validado do projeto |
 
 ---
 
 ## ⏳ Planejado
 
 ### Prioridade Alta
+- [ ] **🎯 Gerar a ISO e instalar numa VM** (Bloco M do `VALIDATION.md`) —
+      é o critério de conclusão do projeto e o maior risco não validado.
+- [ ] **Validar o boot UEFI da ISO** (com e sem `mtools`) e o `md5sum.txt`.
 - [ ] **Atualizar o tutorial ao validar cada perfil em hardware** — ao fechar
       o marco de validação do `xeon`/`ryzen`, revisar `docs/TUTORIAL.md`
       (diretriz obrigatória — Regra 9 do `AGENTS.md`). *(início previsto: a definir)*
@@ -71,6 +76,11 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
       *(início previsto: a definir)*
 
 ### Prioridade Média
+- [ ] **Variante air-gapped da ISO** — embutir o fonte do llama.cpp e os `.deb`
+      necessários para instalar **sem internet**.
+- [ ] **Variante com binário pré-compilado** — usar os `.tar.gz` da Release em
+      vez de compilar no primeiro boot (instalação muito mais rápida).
+- [ ] **Suporte a Ubuntu na ISO** (autoinstall/Subiquity) via `--distro ubuntu`.
 - [ ] **Mesclar o PR #1 do Dependabot** — rebaseado sobre `main` com a
       correção do RPATH e **✅ verde**; só falta clicar em *Merge*.
 - [ ] **Suporte a `nvme` tuning** — `mq-deadline` vs `none` scheduler para
@@ -111,3 +121,4 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | 2026-10-07 | Adicionada a esteira de CI/CD (validate, build-llama, container), `Makefile` e `docker/`. |
 | 2026-10-07 | Publicada a versão **`0.2.0`** (tag `v0.2.0`): marco de CI/CD. Correção do `pkg-config` descoberta pelo 1º run do CI. Ainda **sem validação em hardware**. |
 | 2026-10-07 | Correção do RPATH na imagem Docker + criação do protocolo `docs/VALIDATION.md` (blocos A–L) para a validação em hardware. |
+| 2026-10-07 | Registrado o **entregável final = ISO de instalação**; criada a implementação `iso/` e o `docs/ISO.md`. Ainda **não construída/bootada**. |

@@ -53,6 +53,9 @@
 | `docker/Dockerfile`                   | ✅      | ⚠️ (buildx --check)| ❌                  |
 | `.github/workflows/*.yml`             | ✅      | ⚠️ (yamllint)      | ❌ (1º run pendente)|
 | `Makefile`                            | ✅      | ⚠️ (make -n/test)  | ❌                  |
+| `iso/build-iso.sh` (gerador da ISO)   | ✅      | ✅ shellcheck      | ❌ (**nunca executado**)|
+| `iso/preseed/*` (preseed, 1º boot)    | ✅      | ⚠️ (templating)    | ❌ (**nunca bootado**)|
+| `docs/ISO.md`                         | ✅      | ⚠️ (revisão manual)| ❌                  |
 
 Legenda: ✅ sim · ❌ não · ⚠️ parcial
 
@@ -118,6 +121,15 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 10. **A Release `v0.2.0` contém binários compilados para o runner do CI**
     (x86-64 genérico AVX2). Funcionam nos alvos, mas foram produzidos em
     outra CPU; o `llama-bench` de prova rodou lá, não no Xeon/Ryzen.
+11. **⚠️ A ISO nunca foi construída.** `iso/build-iso.sh` e os templates do
+    preseed foram escritos e validados apenas em `--dry-run`; gerar a ISO
+    exige `xorriso`, ausente no ambiente de desenvolvimento. É o maior risco
+    em aberto e o **critério de conclusão do projeto**.
+12. **O boot UEFI da ISO é best-effort.** O patch do `grub.cfg` dentro da
+    `efi.img` exige `mtools` e nunca foi testado. O caminho BIOS (isolinux)
+    é o principal. Ver `docs/ISO.md` § 6.
+13. **O `md5sum.txt` regenerado nunca foi validado** por um instalador real
+    (o debian-installer usa esse arquivo para checar a integridade da mídia).
 
 ---
 
@@ -143,6 +155,14 @@ Tempo de build do llama.cpp: *(pendente)*
 `build-llama` (compilou os dois perfis + inferência real em 6m04s) e
 `container` (imagem publicada no GHCR). A Release `ai-cpu-os v0.2.0` foi
 publicada com os binários `.tar.gz` dos dois perfis. Ver § 3.1.
+
+> 🎯 **O projeto termina quando a ISO existir, instalar e bootar.** O script
+> [`iso/build-iso.sh`](../iso/build-iso.sh) e o preseed estão escritos e
+> validados em `--dry-run`, mas **nenhuma ISO foi construída nem bootada**
+> (não há `xorriso` no ambiente de desenvolvimento). Isso é o **Bloco M** de
+> [`docs/VALIDATION.md`](VALIDATION.md) e o maior risco em aberto do projeto.
+> Passos: `make iso-lint` → `make iso-dry-run` → `make iso DISK=/dev/nvme0n1`
+> → bootar em VM. Ver **`docs/ISO.md`**.
 
 > 📋 **Protocolo de testes pronto:** siga **[`docs/VALIDATION.md`](VALIDATION.md)**
 > — roteiro preenchível (blocos A–L: VM, detecção, build, tuning, servidor,
@@ -207,3 +227,4 @@ Ao terminar qualquer tarefa:
 | 2026-10-07 | Publicada a versão **`0.2.0`** (tag `v0.2.0`, commit `4cde4bb`): marco de CI/CD. **Nenhuma validação de hardware foi feita nesta versão** — ver § 2 e § 3.2. O `build-llama` e o `container` foram disparados pela tag. |
 | 2026-10-07 | 2º bug achado pelo CI: imagem quebrava com `exit code 127` (RPATH absoluto dos binários do llama.cpp). Corrigido em `b5d86bc` (ver § 3.2 e `docs/CI.md` § 8.2). PR do Dependabot ficou ✅ verde. |
 | 2026-10-07 | Criado **`docs/VALIDATION.md`**: protocolo preenchível de testes em hardware (blocos A–L). É o caminho para trazer os resultados e fechar a validação real. Ver § 6. |
+| 2026-10-07 | Registrado o **entregável final = ISO de instalação**; criado `iso/` (`build-iso.sh` + preseed + serviço de 1º boot) e `docs/ISO.md`. Nenhuma ISO gerada/bootada ainda. |

@@ -126,7 +126,10 @@ jobs:
             build.sh detect-hardware.sh
             docs/ROADMAP.md docs/ARCHITECTURE.md docs/STATE.md
             docs/HARDWARE.md docs/TUNING.md docs/TROUBLESHOOTING.md
-            docs/TUTORIAL.md docs/CI.md docs/VALIDATION.md
+            docs/TUTORIAL.md docs/CI.md docs/VALIDATION.md docs/ISO.md
+            iso/build-iso.sh iso/preseed/ai-cpu-os.cfg
+            iso/preseed/late-command.sh iso/preseed/firstboot.sh
+            iso/preseed/ai-cpu-os-firstboot.service
             profiles/xeon/install.sh profiles/xeon/llama-build.sh
             profiles/xeon/sysctl.conf profiles/xeon/shell-ia.py
             profiles/xeon/ai-server.service
@@ -157,16 +160,23 @@ jobs:
             || { echo "::error::README.md não referencia o tutorial"; exit 1; }
           echo "Diretriz do tutorial OK."
 
-      - name: set -euo pipefail em todos os scripts
+      - name: Modo estrito (set -e / set -euo pipefail) em todos os scripts
         run: |
           set -euo pipefail
           fail=0
           while IFS= read -r f; do
-            grep -q 'set -euo pipefail' "$f" \
-              || { echo "::error file=$f::$f não usa set -euo pipefail"; fail=1; }
+            if head -1 "$f" | grep -qE '^#!.*\bbash\b'; then
+              grep -q 'set -euo pipefail' "$f" \
+                || { echo "::error file=$f::$f (bash) não usa set -euo pipefail"; fail=1; }
+            else
+              # Script POSIX sh: o late-command.sh roda no debian-installer, cujo
+              # /bin/sh é dash — 'set -o pipefail' não existe lá e quebraria a ISO.
+              grep -qE '^set -eu' "$f" \
+                || { echo "::error file=$f::$f (sh) não usa set -eu"; fail=1; }
+            fi
           done < <(find . -name '*.sh' -not -path './.git/*' | sort)
           [[ $fail -eq 0 ]] || exit 1
-          echo "OK: todos os scripts são 'set -euo pipefail'."
+          echo "OK: todos os scripts estão em modo estrito (bash: set -euo pipefail; sh: set -eu)."
 
       - name: Docs vivas — campos esperados
         run: |
@@ -180,4 +190,11 @@ jobs:
           grep -q '_(preencher)_' docs/VALIDATION.md
           grep -q 'Bloco F' docs/VALIDATION.md
           grep -q 'Template de relatório' docs/VALIDATION.md
+          # A ISO é o entregável final: o AGENTS precisa dizer isso, e os
+          # templates do preseed não podem perder os marcadores de substituição.
+          grep -qi 'entregável final' AGENTS.md
+          grep -q 'build-iso.sh' AGENTS.md
+          grep -q '@@PROFILE@@' iso/preseed/firstboot.sh
+          grep -q 'late_command' iso/preseed/ai-cpu-os.cfg
+          grep -q 'firstboot-pending' iso/preseed/firstboot.sh
           echo "Docs vivas OK."

@@ -5,6 +5,11 @@ profiles/ryzen/data/
 *.gguf
 *.log
 
+# ISO (imagens e diretório de trabalho do gerador)
+iso/work/
+iso/out/
+*.iso
+
 # Python
 __pycache__/
 *.py[cod]

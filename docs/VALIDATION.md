@@ -51,6 +51,7 @@
 | J | Imagem do GHCR nos dois alvos | Xeon+Ryzen | ☐ não feito · ☐ ok · ☐ falhou |
 | K | Idempotência (rodar 2×) | Ambos | ☐ não feito · ☐ ok · ☐ falhou |
 | L | Reversão do tuning | Ambos | ☐ não feito · ☐ ok · ☐ falhou |
+| **M** | **🎯 Gerar e bootar a ISO de instalação** | VM | ☐ não feito · ☐ ok · ☐ falhou |
 
 ---
 
@@ -678,6 +679,134 @@ sudo systemctl disable --now ai-server
 
 ---
 
+## Bloco M — 🎯 ISO de instalação (entregável final)
+
+> **Este é o bloco que define o fim do projeto.** Ver [`docs/ISO.md`](ISO.md)
+> para as decisões de design e as limitações conhecidas.
+>
+> ⚠️ **Faça tudo em VM.** A ISO **apaga o disco** indicado em `--disk`.
+> Só depois de validar em VM use em hardware real.
+
+### M.1 Preparar a máquina de build (Debian/Ubuntu com xorriso)
+
+```bash
+sudo apt install -y xorriso curl coreutils isolinux mtools
+make iso-lint        # bash -n + shellcheck dos scripts da ISO
+make iso-dry-run     # simulação completa, não baixa nem altera nada
+```
+
+| Campo | Valor |
+|-------|-------|
+| `make iso-lint` passou? | _(preencher)_ |
+| `make iso-dry-run` sem erros? | _(preencher)_ |
+
+### M.2 Gerar a ISO
+
+```bash
+# --disk é o disco que será apagado NA MÁQUINA QUE INSTALAR a ISO.
+# Para testar em VM, use o disco virtual dela (ex.: /dev/vda).
+sudo bash iso/build-iso.sh --disk /dev/vda --profile auto --keep-work
+```
+
+O script imprime, no fim: caminho da ISO, **SHA256**, o Volume ID, e a
+**senha gerada** (se você não passou `--password-hash`). **Anote a senha.**
+
+| Campo | Valor |
+|-------|-------|
+| Download da ISO oficial funcionou? | _(preencher)_ |
+| SHA256 da ISO oficial conferiu? | _(preencher — esperado: sim)_ |
+| Tempo total do build | _(preencher)_ |
+| Caminho da ISO gerada | _(preencher)_ |
+| SHA256 da ISO gerada | _(preencher)_ |
+| Mensagens de WARN (ex.: isohdpfx, mtools) | _(preencher)_ |
+
+### M.3 Verificar o conteúdo da ISO (sem instalar)
+
+```bash
+# Deve listar: ai-cpu-os.cfg, late-command.sh, firstboot.sh, o .service
+xorriso -indev iso/out/ai-cpu-os-*.iso -find /preseed -type f -exec echo
+# Deve confirmar que o projeto foi embutido
+xorriso -indev iso/out/ai-cpu-os-*.iso -find /ai-cpu-os -maxdepth 1 -exec echo
+# Deve mostrar a entrada de boot automática
+xorriso -indev iso/out/ai-cpu-os-*.iso -extract /isolinux/isolinux.cfg /tmp/ && \
+  grep -A3 'ai-cpu-os-auto' /tmp/isolinux.cfg
+```
+
+| Campo | Valor |
+|-------|-------|
+| `/preseed` contém os 4 arquivos? | _(preencher)_ |
+| `/ai-cpu-os` presente? | _(preencher)_ |
+| Entrada `ai-cpu-os-auto` no `isolinux.cfg`? | _(preencher)_ |
+
+### M.4 Boot e instalação em VM (o teste que importa)
+
+```bash
+# VM UEFI e BIOS — teste as duas se possível
+qemu-system-x86_64 -m 4096 -enable-kvm \
+  -drive file=/tmp/alvo.qcow2,if=virtio,format=qcow2 \
+  -cdrom iso/out/ai-cpu-os-*.iso -boot d
+
+# Gravar em pendrive (⚠️ destrutivo — confira o /dev/sdX!)
+# sudo dd if=iso/out/ai-cpu-os-*.iso of=/dev/sdX bs=4M status=progress oflag=sync
+```
+
+**O que observar:**
+
+1. Aparece o menu com **"Instalar ai-cpu-os (automatico)"** e ele é o
+   **padrão** (10 s)?
+2. O instalador roda **sem perguntar nada** (preseed)?
+3. A instalação termina e a VM reinicia?
+4. No primeiro boot, o serviço `ai-cpu-os-firstboot` roda?
+
+| Campo | Valor |
+|-------|-------|
+| Boot BIOS (isolinux) | _(preencher)_ |
+| Boot UEFI | _(preencher — se falhar, ver docs/ISO.md § 6)_ |
+| Entrada automática foi o padrão? | _(preencher)_ |
+| Instalou sem perguntas? | _(preencher)_ |
+| Erros do instalador | _(preencher)_ |
+
+### M.5 Pós-instalação: primeiro boot (dentro do sistema instalado)
+
+```bash
+# Faça login com o usuário criado (padrão: ai-cpu-os) e a senha anotada.
+systemctl status ai-cpu-os-firstboot --no-pager
+cat /var/log/ai-cpu-os-firstboot.log
+cat /opt/ai-cpu-os/.firstboot-status
+cat /opt/ai-cpu-os/ISO-INFO.txt
+cat /var/log/ai-cpu-os-build.log
+cat /proc/cmdline   # deve conter max_cstate=1 se o tuning rodou
+sysctl vm.swappiness kernel.numa_balancing
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+```
+
+| Campo | Valor |
+|-------|-------|
+| O serviço rodou sozinho? | _(preencher)_ |
+| Perfil detectado (`xeon`/`ryzen`)? | _(preencher — em VM, provavelmente `xeon`)_ |
+| `.firstboot-status` = `ok`? | _(preencher)_ |
+| Sentinela `.firstboot-pending` removida? | _(preencher)_ |
+| Tuning aplicado (governor/sysctl)? | _(preencher)_ |
+| Compilou o llama.cpp? (perfil xeon) | _(preencher — pode levar 10-20 min)_ |
+| Funcionou sem rede? (teste proposital) | _(preencher — deve adiar para o próximo boot)_ |
+
+### M.6 Critério de "pronto"
+
+O bloco M só é **✅** quando:
+
+- [ ] A ISO gera sem erro e o SHA256 é registrado.
+- [ ] Boota em BIOS **e** o instalador não faz nenhuma pergunta.
+- [ ] Instala e o primeiro boot aplica o tuning sozinho.
+- [ ] Em VM, ao menos o `xeon` (inferência) ou o `ryzen` (Docker) funciona.
+- [ ] A senha gerada permite login e `sudo`.
+
+| Campo | Valor |
+|-------|-------|
+| Bloco M OK? | _(preencher)_ |
+| O que **não** foi validado | _(preencher)_ |
+
+---
+
 ## Consolidação (só depois de testar)
 
 Quando trouxer os resultados, estes arquivos devem ser atualizados
@@ -723,6 +852,7 @@ I (build-run): [não feito | ok | falhou]  observações:
 J (imagem):    [não feito | ok | falhou]  observações:
 K (idempot.):  [não feito | ok | falhou]  observações:
 L (reversão):  [não feito | ok | falhou]  observações:
+M (ISO):       [não feito | ok | falhou]  observações:
 
 --- Benchmark (Bloco F) ---
 Cole as linhas cruas do llama-bench (antes e depois):
@@ -746,3 +876,4 @@ Cole aqui (ou anexe o arquivo):
 | Data | Mudança |
 |------|---------|
 | 2026-10-07 | Criação do protocolo (blocos A–L) para a versão `v0.2.0`; nenhum resultado preenchido ainda. |
+| 2026-10-07 | Adicionado o **Bloco M** — geração e boot da ISO de instalação (entregável final do projeto). |

@@ -26,7 +26,7 @@ help: ## Lista os alvos disponíveis
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[32m%-16s\033[0m %s\n", $$1, $$2}'
 	@printf '\n'
 
-lint: bashn shellcheck python yaml ## Lint completo (bash, shellcheck, python, yaml)
+lint: bashn shellcheck python yaml iso-lint ## Lint completo (bash, shellcheck, python, yaml, iso)
 
 bashn: ## Verifica a sintaxe de todos os scripts (bash -n)
 	@set -euo pipefail; \
@@ -51,7 +51,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	for f in README.md AGENTS.md LICENSE docs/ROADMAP.md docs/ARCHITECTURE.md \
 	         docs/STATE.md docs/HARDWARE.md docs/TUNING.md \
 	         docs/TROUBLESHOOTING.md docs/TUTORIAL.md docs/CI.md \
-	         docs/VALIDATION.md; do \
+	         docs/VALIDATION.md docs/ISO.md; do \
 	  [[ -f "$$f" ]] || { echo "FALTANDO: $$f"; exit 1; }; \
 	done; \
 	echo "docs: OK"
@@ -69,6 +69,21 @@ build-xeon: ## Compila o llama.cpp para o Xeon E5-2678 v3 (AVX2)
 
 build-ryzen: ## Compila o llama.cpp para o Ryzen 5 3500X (znver2)
 	@bash profiles/ryzen/llama-build.sh --ref $(LLAMA_REF) --jobs $(JOBS)
+
+iso: ## Gera a ISO de instalação (entregável final); requer DISK=/dev/xxx
+	@if [ -z "$(DISK)" ]; then \
+	  echo "Defina o disco alvo: make iso DISK=/dev/nvme0n1"; exit 1; \
+	fi
+	@bash iso/build-iso.sh --disk $(DISK) --profile $(PROFILE)
+
+iso-dry-run: ## Simula a geração da ISO (seguro, não baixa nada pesado)
+	@bash iso/build-iso.sh --disk "$(or $(DISK),/dev/nvme0n1)" --profile $(PROFILE) --dry-run
+
+iso-lint: ## Verifica os scripts da ISO (bash -n + shellcheck)
+	@bash -n iso/build-iso.sh iso/preseed/firstboot.sh
+	@sh -n iso/preseed/late-command.sh
+	@shellcheck -x -S warning iso/build-iso.sh iso/preseed/late-command.sh
+	@echo "iso-lint: OK"
 
 docker: ## Constrói a imagem de runtime localmente
 	@docker build -f docker/Dockerfile -t $(IMAGE) .

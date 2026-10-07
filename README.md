@@ -135,6 +135,43 @@ Detalhes completos e a fundamentação técnica de cada item estão em
 
 ---
 
+## 🎯 Objetivo final: a ISO de instalação
+
+> **O fim do projeto não é "clonar e rodar um script".** É uma **ISO de
+> instalação** (Debian) que já traz o `ai-cpu-os` embutido: você dá boot na
+> ISO, a instalação é automática e o sistema **nasce afinado**.
+
+Enquanto a ISO não existir e não for validada, o projeto **não está
+terminado** — este é o critério de conclusão.
+
+```bash
+# Gerar a ISO (a partir de um Debian/Ubuntu com xorriso)
+sudo apt install -y xorriso curl isolinux mtools
+bash iso/build-iso.sh --disk /dev/nvme0n1 --profile auto --dry-run   # simular
+sudo bash iso/build-iso.sh --disk /dev/nvme0n1 --profile auto         # gerar
+
+# Testar em VM (sempre antes de máquina real)
+qemu-system-x86_64 -m 4096 -enable-kvm -cdrom iso/out/ai-cpu-os-*.iso -boot d
+```
+
+| Etapa | O que acontece |
+|-------|----------------|
+| 1. Build da ISO | Baixa a netinst oficial (verificando SHA256), injeta o projeto + preseed e remonta. |
+| 2. Instalação | `preseed` responde tudo automaticamente; o projeto vai para `/opt/ai-cpu-os`. |
+| 3. **Primeiro boot** | `ai-cpu-os-firstboot.service` detecta o **hardware real** e aplica o perfil (`auto` → `xeon`/`ryzen`). |
+
+> **Por que no primeiro boot, e não na instalação?** Porque o kernel do
+> instalador não é o do sistema final, o systemd do alvo não está rodando e o
+> hardware só é visto por completo depois. Detalhes e trade-offs em
+> [`docs/ISO.md`](docs/ISO.md) § 3.
+
+> ⚠️ **Estado:** a ISO **ainda não foi construída nem bootada**. O script foi
+> validado em `--dry-run`; a validação real é o Bloco M do
+> [`docs/VALIDATION.md`](docs/VALIDATION.md). A ISO **apaga o disco** indicado
+> em `--disk` — teste em VM primeiro.
+
+---
+
 ## 🤖 CI/CD — o GitHub compila o sistema
 
 O repositório já vem com GitHub Actions para **validar**, **compilar** e
@@ -145,6 +182,7 @@ O repositório já vem com GitHub Actions para **validar**, **compilar** e
 | **`validate`** | todo push/PR | `bash -n`, `shellcheck`, `python -m compileall`, `yamllint`, dry-run dos 2 perfis e guarda-corpo das regras do `AGENTS.md`. |
 | **`build-llama`** | manual, tags `v*`, semanal | Compila o llama.cpp para `xeon` (AVX2) e `ryzen` (`znver2`), **executa os binários** e roda uma **inferência real** com um modelo minúsculo. Em tags, anexa os `.tar.gz` à Release. |
 | **`container`** | push em `main`, tags, PR em `docker/**` | Publica a imagem de runtime no GHCR: `:latest` (portável) e `:znver2`. |
+| **`iso`** | manual, tags `v*` | 🎯 Gera a **ISO de instalação** (remaster da netinst + preseed) e anexa à Release. |
 
 **Rodar tudo localmente (idêntico ao CI):**
 
@@ -234,6 +272,7 @@ Salve os resultados em `docs/STATE.md` na seção "Métricas de performance".
 | [`docs/TUTORIAL.md`](docs/TUTORIAL.md)          | **Tutorial explicado do zero** (obrigatório por marco/versão). |
 | [`docs/CI.md`](docs/CI.md)                      | Como o GitHub compila e valida o sistema (CI/CD). |
 | [`docs/VALIDATION.md`](docs/VALIDATION.md)      | **Protocolo de testes em hardware** (preenchível — traga os resultados depois). |
+| [`docs/ISO.md`](docs/ISO.md)                    | 🎯 **A ISO de instalação** (entregável final): decisões, como gerar, limitações. |
 
 ---
 

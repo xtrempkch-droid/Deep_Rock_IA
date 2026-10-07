@@ -24,6 +24,22 @@ registry Docker privado e um servidor Gitea.
 Todo o sistema é gerado por **script** (`build.sh`), é **idempotente**, suporta
 `--dry-run` e documenta *cada* otimização com a razão técnica de existir.
 
+### 🎯 Entregável final: uma ISO de instalação
+
+> **O fim do projeto NÃO é "clonar e rodar um script".** O objetivo final é uma
+> **imagem ISO de instalação** de um SO (Debian/Ubuntu) **já com o ai-cpu-os
+> embutido**: você dá boot na ISO, a instalação é automática e o sistema nasce
+> afinado. Isso está implementado em `iso/` e especificado em `docs/ISO.md`.
+>
+> **Não é uma ideia futura — é o critério de conclusão do projeto.** Enquanto a
+> ISO não existir e não for validada, o projeto **não está terminado**, por mais
+> que os scripts estejam prontos.
+
+Arquitetura da ISO em uma frase: a ISO entrega o *software e a intenção*
+(o perfil); o **primeiro boot** entrega o *contexto* (o hardware real), porque é
+lá que `detect-hardware.sh` vê o SMBIOS completo e escolhe `xeon` ou `ryzen`
+corretamente. Ver `docs/ISO.md` § 3.
+
 ---
 
 ## 2. Filosofia: "1% importa"
@@ -75,13 +91,21 @@ ai-cpu-os/
 │   ├── workflows/
 │   │   ├── validate.yml    # Lint + dry-run + guarda-corpo das regras (push/PR)
 │   │   ├── build-llama.yml # Compila o llama.cpp por perfil + Release (tags/manual)
-│   │   └── container.yml   # Imagem de runtime no GHCR (portable / znver2)
+│   │   ├── container.yml   # Imagem de runtime no GHCR (portable / znver2)
+│   │   └── iso.yml         # 🎯 Gera a ISO de instalação (tags/manual)
 │   ├── ISSUE_TEMPLATE/     # Templates de issue (bug / feature)
 │   ├── PULL_REQUEST_TEMPLATE.md
 │   └── dependabot.yml      # Atualização de actions e da imagem base
 ├── docker/
 │   ├── Dockerfile          # Runtime do llama.cpp (GGML_NATIVE=OFF — ver docs/CI.md)
 │   └── docker-compose.example.yml
+├── iso/                    # 🎯 ENTREGÁVEL FINAL: ISO de instalação
+│   ├── build-iso.sh        # Remasteriza a ISO Debian netinst (preseed + projeto)
+│   └── preseed/            # Templates do preseed e do serviço de 1º boot
+│       ├── ai-cpu-os.cfg   # Respostas automáticas do debian-installer
+│       ├── late-command.sh # Copia o projeto p/ /opt/ai-cpu-os no alvo
+│       ├── firstboot.sh    # Aplica o tuning no primeiro boot (hardware real)
+│       └── ai-cpu-os-firstboot.service
 ├── docs/
 │   ├── ROADMAP.md          # Concluído / Em progresso / Planejado / Ideias
 │   ├── ARCHITECTURE.md     # Diagramas, fluxos, decisões de design
@@ -91,7 +115,8 @@ ai-cpu-os/
 │   ├── TROUBLESHOOTING.md  # Problemas conhecidos e soluções
 │   ├── CI.md               # Como o GitHub compila e valida o sistema
 │   ├── TUTORIAL.md         # TUTORIAL explicado (obrigatório por marco/versão)
-│   └── VALIDATION.md       # Protocolo de testes em hardware (preenchível)
+│   ├── VALIDATION.md       # Protocolo de testes em hardware (preenchível)
+│   └── ISO.md              # 🎯 A ISO de instalação (decisões e como gerar)
 ├── profiles/
 │   ├── xeon/               # Servidor de inferência
 │   │   ├── install.sh      # Instala deps + llama.cpp + serviço
@@ -129,6 +154,7 @@ ai-cpu-os/
 | **Aprender o projeto do zero (passo a passo explicado)** | **`docs/TUTORIAL.md`**        |
 | Como o CI compila/valida o sistema     | `.github/workflows/`, `docs/CI.md`, `Makefile` |
 | **Testar em hardware e registrar resultados** | **`docs/VALIDATION.md`**              |
+| **Gerar a ISO de instalação (entregável final)** | **`iso/build-iso.sh`**, **`docs/ISO.md`** |
 | Scripts principais                     | `build.sh`, `detect-hardware.sh`             |
 | Perfil Xeon (inferência)               | `profiles/xeon/`                             |
 | Perfil Ryzen (build/registry/Gitea)    | `profiles/ryzen/`                            |
@@ -152,6 +178,9 @@ Estas regras são **obrigatórias**:
 7. Todo script Bash: `set -euo pipefail`, logs com timestamp
    (`INFO/WARN/ERROR`), idempotência, `--dry-run` e confirmação antes de
    comandos destrutivos (salvo `--yes`).
+   *Exceção única:* scripts POSIX `sh` que rodam **dentro do instalador**
+   (caso de `iso/preseed/late-command.sh` — o `/bin/sh` do debian-installer é
+   dash, que não tem `pipefail`) usam `set -eu`. Isso é verificado pelo CI.
 8. Toda verificação de ISA deve consultar `/proc/cpuinfo` **em tempo de
    execução** — nunca assumir que uma flag existe.
 9. **OBRIGATÓRIO:** ao **concluir um marco** (ex.: um perfil validado em
@@ -171,6 +200,13 @@ Estas regras são **obrigatórias**:
     script ou imagem: nenhum dos dois hardwares alvo suporta (o build faz
     `SIGILL`). Em containers, `GGML_NATIVE` deve permanecer `OFF` — dentro do
     Docker o CMake detectaria a CPU do runner de CI, não a do alvo.
+13. **A ISO é o entregável final e define "terminado".** Qualquer trabalho deve
+    manter funcional o caminho `iso/build-iso.sh` → instalação → primeiro boot.
+    Se você mudar `build.sh`, `detect-hardware.sh`, os perfis ou o
+    `docker/`, **verifique se a ISO continua coerente** (o `late-command.sh`
+    copia o projeto inteiro; o `firstboot.sh` o executa). Ao mexer na ISO,
+    atualize **`docs/ISO.md`** e o **Bloco M** de `docs/VALIDATION.md`.
+    ⚠️ Nunca declare a ISO pronta sem tê-la **bootado e instalado** em VM.
 
 ---
 
@@ -184,11 +220,13 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-07
-- **O que mudou:** Criado **`docs/VALIDATION.md`** — protocolo preenchível de
-  testes em hardware (blocos A–L), para executar no Xeon/Ryzen e trazer os
-  resultados depois (consolidados em `docs/STATE.md` e `docs/TUTORIAL.md`).
-  Ligado no AGENTS/README/TUTORIAL/ROADMAP/Makefile e verificado pelo job
-  `project-rules` do CI.
+- **O que mudou:** Registrado o **entregável final = ISO de instalação**
+  (meta no § 1, regra 13) e criada a implementação em `iso/`
+  (`build-iso.sh` + preseed + serviço de primeiro boot) com a especificação
+  em **`docs/ISO.md`**. Nenhuma ISO foi gerada/bootada ainda — ver
+  `docs/STATE.md`.
+- **Data anterior:** 2026-10-07 — Criado `docs/VALIDATION.md` — protocolo
+  preenchível de testes em hardware (blocos A–L).
 - **Data anterior:** 2026-10-07 — Adicionada a esteira de CI/CD
   (`.github/workflows/`: `validate`, `build-llama`, `container`), `Makefile`,
   `docker/` e `docs/CI.md`. Novas regras 11 e 12.

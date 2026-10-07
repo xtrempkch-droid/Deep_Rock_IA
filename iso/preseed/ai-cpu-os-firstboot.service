@@ -1,0 +1,24 @@
+[Unit]
+Description=ai-cpu-os: aplicar tuning e instalar o perfil (primeiro boot)
+Documentation=file:///opt/ai-cpu-os/docs/ISO.md
+# Precisa de rede para clonar o llama.cpp (perfil xeon) e baixar pacotes.
+After=network-online.target
+Wants=network-online.target
+# Não atrapalha o boot: roda depois que o sistema já subiu.
+After=multi-user.target
+
+# Só executa enquanto a sentinela existir (garante "rodar uma vez só").
+ConditionPathExists=/opt/ai-cpu-os/.firstboot-pending
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/opt/ai-cpu-os/iso/firstboot.sh
+# A compilação do llama.cpp pode demorar bastante (10-20 min no Xeon).
+TimeoutStartSec=infinity
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-cpu-os-firstboot
+
+[Install]
+WantedBy=multi-user.target

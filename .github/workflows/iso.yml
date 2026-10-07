@@ -1,0 +1,122 @@
+name: iso
+
+# Gera a ISO de instalação do ai-cpu-os a partir da ISO oficial Debian netinst.
+#
+# Disparo: manual (workflow_dispatch) e em tags (v*) — igual ao build-llama,
+# porque baixar ~700 MB + remasterizar leva alguns minutos e queimaria
+# minutos de CI a cada push.
+#
+# O artefato servido aqui é uma **prova de que o caminho da ISO funciona** e
+# uma ISO genérica para uso em VM (o disco do preseed é /dev/vda, que existe
+# em VMs com virtio). Para instalar em hardware real, regenere localmente com
+# `--disk` apontando para o SEU disco — ver docs/ISO.md.
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Perfil gravado na ISO (auto = detecta no hardware real)"
+        required: false
+        default: auto
+        type: choice
+        options: [auto, xeon, ryzen]
+      disk:
+        description: "Disco do preseed (APENAS gravado na ISO; em VM virtio é /dev/vda)"
+        required: false
+        default: /dev/vda
+        type: string
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: iso-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-iso:
+    name: Gerar ISO (${{ inputs.profile || 'auto' }})
+    runs-on: ubuntu-latest
+    env:
+      ISO_PROFILE: ${{ inputs.profile || 'auto' }}
+      ISO_DISK: ${{ inputs.disk || '/dev/vda' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar ferramentas de remasterização
+        run: |
+          sudo apt-get update -qq
+          # isolinux -> isohdpfx.bin (boot híbrido BIOS+EFI)
+          # mtools   -> patch do grub.cfg dentro da efi.img (boot UEFI)
+          sudo apt-get install -y --no-install-recommends \
+            xorriso isolinux mtools curl coreutils
+          xorriso --version | head -1
+
+      - name: Lint dos scripts da ISO
+        run: make iso-lint
+
+      - name: Simulação (dry-run)
+        run: make iso-dry-run DISK="$ISO_DISK" PROFILE="$ISO_PROFILE"
+
+      - name: Gerar a ISO
+        run: |
+          set -euo pipefail
+          sudo bash iso/build-iso.sh \
+            --disk "$ISO_DISK" \
+            --profile "$ISO_PROFILE" \
+            --yes \
+            --out "$GITHUB_WORKSPACE/iso/out/ai-cpu-os-${ISO_PROFILE}.iso" \
+          2>&1 | tee /tmp/iso-build.log
+
+          iso="iso/out/ai-cpu-os-${ISO_PROFILE}.iso"
+          test -f "$iso" || { echo "::error::ISO não foi gerada"; exit 1; }
+          ls -la "$iso"
+          sha256sum "$iso" | tee "$iso.sha256"
+
+      - name: Relatório no resumo da execução
+        if: always()
+        run: |
+          {
+            echo "## ISO de instalação (ai-cpu-os)"
+            echo
+            echo "- Perfil gravado: \`$ISO_PROFILE\` (\`auto\` = detecta o hardware no 1º boot)"
+            echo "- Disco do preseed: \`$ISO_DISK\`"
+            echo
+            if [ -f "iso/out/ai-cpu-os-${ISO_PROFILE}.iso" ]; then
+              echo "### Artefato"
+              echo '```'
+              ls -lh "iso/out/ai-cpu-os-${ISO_PROFILE}.iso"
+              cat "iso/out/ai-cpu-os-${ISO_PROFILE}.iso.sha256"
+              echo '```'
+            fi
+            echo "### Avisos do build (WARN)"
+            echo '```'
+            grep -F '[WARN ]' /tmp/iso-build.log | tail -30 || echo "(nenhum)"
+            echo '```'
+            echo
+            echo "⚠️ **Não valide a ISO em máquina real antes de bootá-la em VM.**"
+            echo "Veja o Bloco M de \`docs/VALIDATION.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-cpu-os-iso-${{ env.ISO_PROFILE }}
+          path: |
+            iso/out/*.iso
+            iso/out/*.iso.sha256
+          retention-days: 7
+          compression-level: 0   # já é uma ISO comprimida
+
+      - name: Anexar à Release (apenas em tags)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "ai-cpu-os ${tag}" --generate-notes
+          fi
+          gh release upload "$tag" iso/out/*.iso iso/out/*.iso.sha256 --clobber
+          echo "ISO anexada à Release ${tag}."
