@@ -8,7 +8,7 @@
 ## 1. Versão
 
 - **Versão do projeto:** `0.1.0-alpha`
-- **Commit de referência:** `85a083e` (commit inicial — todos os arquivos gerados)
+- **Commit de referência:** tag `v0.1.0-alpha` (commit inicial — todos os arquivos gerados)
 - **Sistema operacional alvo testado:** Debian 12 Bookworm (a confirmar)
 
 ---
