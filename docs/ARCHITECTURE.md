@@ -93,6 +93,13 @@ fluem** e **por que decidimos assim** — incluindo alternativas descartadas.
 - `gitea-compose.yml` — Gitea (SQLite, :3000, SSH :2222).
 - `build-runner.sh` — build Docker com cache + push ao registry local.
 
+### 2.6 `docs/TUTORIAL.md` (documento de encerramento de marco/versão)
+- Não é um componente de código: é a **porta de entrada didática**.
+- Cobre o fluxo completo (preparar → detectar → simular → aplicar → usar →
+  medir) para os **dois** perfis, explicando o "o quê" e o "por quê".
+- **Obrigatório** criar/atualizar em cada marco/versão (Regras 9 e 10 do
+  `AGENTS.md`). Seu estado é refletido em `docs/STATE.md`.
+
 ---
 
 ## 3. Fluxo de dados — um comando vira ação
@@ -194,6 +201,9 @@ tests/smoke-test.sh  (validação rápida)
    justificativa em `docs/TUNING.md`.
 5. **Medir, não adivinhar:** toda mudança de performance registra número em
    `docs/STATE.md`.
+6. **Ensinar, não só entregar:** ao fechar cada marco/versão, o tutorial
+   explicado (`docs/TUTORIAL.md`) é atualizado — ele é a porta de entrada
+   didática do projeto (Regra 9 do `AGENTS.md`).
 
 ---
 

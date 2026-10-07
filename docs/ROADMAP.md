@@ -24,6 +24,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | `profiles/xeon/*` (install, llama-build, sysctl, shell-ia, service)   | 2026-10-07 | 2026-10-07 |
 | `profiles/ryzen/*` (install, docker, registry, gitea, build-runner)   | 2026-10-07 | 2026-10-07 |
 | `tests/smoke-test.sh`                                                 | 2026-10-07 | 2026-10-07 |
+| `docs/TUTORIAL.md` — tutorial explicado do zero + diretriz de `AGENTS.md` | 2026-10-07 | 2026-10-07 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em
@@ -44,6 +45,9 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 ## ⏳ Planejado
 
 ### Prioridade Alta
+- [ ] **Atualizar o tutorial ao validar cada perfil em hardware** — ao fechar
+      o marco de validação do `xeon`/`ryzen`, revisar `docs/TUTORIAL.md`
+      (diretriz obrigatória — Regra 9 do `AGENTS.md`). *(início previsto: a definir)*
 - [ ] **Empacotar como imagem/VM de referência** — gerar `qcow2` pré-afinada
       para pular a etapa de build. *(início previsto: a definir)*
 - [ ] **Validar persistência de kernel cmdline** — confirmar que

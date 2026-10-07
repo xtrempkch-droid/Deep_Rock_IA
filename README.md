@@ -175,7 +175,9 @@ Salve os resultados em `docs/STATE.md` na seção "Métricas de performance".
    idempotente.
 5. Teste em VM antes de sugerir mudanças de kernel.
 6. Atualize `docs/STATE.md` e `docs/ROADMAP.md`.
-7. Abra um Pull Request descrevendo **o que** mudou e **por que**.
+7. Se estiver fechando um **marco/versão**, atualize `docs/TUTORIAL.md`
+   (diretriz obrigatória — Regra 9 do [`AGENTS.md`](AGENTS.md)).
+8. Abra um Pull Request descrevendo **o que** mudou e **por que**.
 
 ---
 
@@ -190,6 +192,7 @@ Salve os resultados em `docs/STATE.md` na seção "Métricas de performance".
 | [`docs/HARDWARE.md`](docs/HARDWARE.md)          | Detalhes do hardware alvo.                      |
 | [`docs/TUNING.md`](docs/TUNING.md)              | Cada otimização explicada.                      |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Problemas conhecidos e soluções.           |
+| [`docs/TUTORIAL.md`](docs/TUTORIAL.md)          | **Tutorial explicado do zero** (obrigatório por marco/versão). |
 
 ---
 

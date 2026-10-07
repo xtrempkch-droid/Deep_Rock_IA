@@ -76,7 +76,8 @@ ai-cpu-os/
 │   ├── STATE.md            # Estado atual + métricas + PRÓXIMA AÇÃO
 │   ├── HARDWARE.md         # Detalhes técnicos do hardware alvo
 │   ├── TUNING.md           # Explicação de cada otimização
-│   └── TROUBLESHOOTING.md  # Problemas conhecidos e soluções
+│   ├── TROUBLESHOOTING.md  # Problemas conhecidos e soluções
+│   └── TUTORIAL.md         # TUTORIAL explicado (obrigatório por marco/versão)
 ├── profiles/
 │   ├── xeon/               # Servidor de inferência
 │   │   ├── install.sh      # Instala deps + llama.cpp + serviço
@@ -110,6 +111,7 @@ ai-cpu-os/
 | Detalhes de CPU/RAM/disco              | `docs/HARDWARE.md`                           |
 | Entender uma otimização específica     | `docs/TUNING.md`                             |
 | Resolver um problema                   | `docs/TROUBLESHOOTING.md`                    |
+| **Aprender o projeto do zero (passo a passo explicado)** | **`docs/TUTORIAL.md`**        |
 | Scripts principais                     | `build.sh`, `detect-hardware.sh`             |
 | Perfil Xeon (inferência)               | `profiles/xeon/`                             |
 | Perfil Ryzen (build/registry/Gitea)    | `profiles/ryzen/`                            |
@@ -135,6 +137,16 @@ Estas regras são **obrigatórias**:
    comandos destrutivos (salvo `--yes`).
 8. Toda verificação de ISA deve consultar `/proc/cpuinfo` **em tempo de
    execução** — nunca assumir que uma flag existe.
+9. **OBRIGATÓRIO:** ao **concluir um marco** (ex.: um perfil validado em
+   hardware) ou **publicar uma versão (release)**, é obrigatório
+   **criar/atualizar o tutorial explicado** em `docs/TUTORIAL.md`. O
+   tutorial deve cobrir o fluxo completo **do zero** (preparar o sistema →
+   aplicar → usar → medir), explicando **o que** cada passo faz e **por quê**,
+   em linguagem didática. Não é um documento "de uma vez só": evolui a cada
+   marco. O estado do tutorial deve ser refletido em `docs/STATE.md`.
+10. **NUNCA** declarar um marco/versão "concluído" sem que o
+    `docs/TUTORIAL.md` correspondente esteja atualizado e coerente com o
+    estado real (incluindo o que **não** foi testado).
 
 ---
 
@@ -148,6 +160,9 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-07
-- **O que mudou:** Criação inicial do repositório — todos os scripts, perfis e
-  documentação da versão `0.1.0-alpha` foram gerados. Nada foi testado em
-  hardware real ainda (ver `docs/STATE.md`).
+- **O que mudou:** Adicionada a diretriz 9/10 (tutorial obrigatório por
+  marco/versão) e criado `docs/TUTORIAL.md` — tutorial explicado do zero.
+  Os scripts e a documentação continuam **não testados em hardware real**
+  (ver `docs/STATE.md`).
+- **Data anterior:** 2026-10-07 — Criação inicial do repositório (todos os
+  scripts, perfis e documentação da versão `0.1.0-alpha`).

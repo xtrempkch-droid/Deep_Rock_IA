@@ -46,6 +46,7 @@
 | `profiles/ryzen/gitea-compose.yml`    | ✅      | ⚠️ (YAML)          | ❌                  |
 | `profiles/ryzen/build-runner.sh`      | ✅      | ✅                 | ❌                  |
 | `tests/smoke-test.sh`                 | ✅      | ✅                 | ❌                  |
+| `docs/TUTORIAL.md`                    | ✅      | ⚠️ (revisão manual)| ❌                  |
 
 Legenda: ✅ sim · ❌ não · ⚠️ parcial
 
@@ -115,6 +116,10 @@ sudo ./build.sh --profile auto --dry-run
 
 **Passo 2 (após VM):** rodar `tests/smoke-test.sh` num Xeon físico com
 `llama-server` de pé e preencher a seção 5 acima.
+
+**Passo 3 (ao fechar o marco de validação):** atualizar `docs/TUTORIAL.md`
+com o que passou a ser testado e com os números reais de `llama-bench`
+(diretriz obrigatória — Regra 9 do `AGENTS.md`).
 
 ---
 
