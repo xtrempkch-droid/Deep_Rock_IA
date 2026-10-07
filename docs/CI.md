@@ -227,6 +227,40 @@ O que acontece em seguida:
 | `container` falha "invalid reference format" | Nome de imagem com maiúsculas | GHCR exige **minúsculas** (já tratado com `${VAR,,}`). |
 | `yamllint` reclama de `on:` | Chave tratada como truthy | Já configurado em `.yamllint.yml` (`check-keys: false`). |
 | Job `build-llama` não roda no push | Comportamento **intencional** | Use `workflow_dispatch` (Actions → Run workflow) ou crie uma tag. |
+| `cmake` falha: `Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)` | O backend BLAS do ggml usa `find_package(PkgConfig)` e faltava `pkg-config` | Adicione `pkg-config` aos pacotes do builder (já corrigido — ver § 8.1). |
+| `cmake` avisa `Could NOT find OpenSSL` | `libssl-dev` ausente | Apenas aviso: com `LLAMA_CURL=OFF` o HTTPS não é necessário (o servidor serve HTTP local). |
+
+### 8.1 Caso real: o CI encontrou um bug de verdade
+
+O primeiro run do workflow `container` falhou — e isso foi **útil**.
+
+O erro real foi obtido pelas *check-run annotations* da API do GitHub (os logs
+completos exigem autenticação):
+
+```text
+CMake Error at FindPackageHandleStandardArgs.cmake:230 (message):
+  Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)
+Call Stack:
+  ggml/src/ggml-blas/CMakeLists.txt:25 (find_package)
+```
+
+**Diagnóstico:** o backend BLAS do ggml localiza o OpenBLAS via
+`find_package(PkgConfig)`. O pacote `libopenblas-dev` instala a biblioteca,
+mas **não** traz o `pkg-config`. Sem ele, o CMake aborta.
+
+**Impacto descoberto:** o bug **não era exclusivo da imagem Docker** — o
+`profiles/xeon/llama-build.sh` (`check_deps`) e o
+`profiles/xeon/install.sh` tinham a mesma falha. Ou seja: **o primeiro build
+real no host também teria falhado**.
+
+**Correção aplicada em três lugares:** `docker/Dockerfile`,
+`profiles/xeon/llama-build.sh` (checagem + instalação) e
+`profiles/xeon/install.sh`. Também ajustamos o job `build-llama`
+(dependências) para cobrir o caso.
+
+**Lição registrada:** "lint verde" não significa "build comprovado". Foi
+preciso o CI **executar** o build para revelar o problema — exatamente por
+isso o `build-llama` roda uma inferência real, e não apenas compila.
 
 ---
 
@@ -246,3 +280,4 @@ use o `ai-server.service` nativo (perfil `xeon`) conforme o
 | Data       | Mudança |
 |------------|---------|
 | 2026-10-07 | Criação do documento junto com os workflows `validate`, `build-llama` e `container`. |
+| 2026-10-07 | 1º run real: `validate` ✅ verde. O `container` falhou por falta de `pkg-config` no builder — bug corrigido na imagem e nos scripts do perfil xeon (§ 8.1). |

@@ -84,15 +84,18 @@ detect_isa() {
 check_deps() {
   local missing=()
   local c
-  for c in git cmake make cc; do
+  # pkg-config é necessário porque o backend BLAS do ggml usa
+  # find_package(PkgConfig) para localizar o OpenBLAS. Sem ele, o CMake
+  # aborta com "Could NOT find PkgConfig" (descoberto pelo CI — ver docs/CI.md).
+  for c in git cmake make cc pkg-config; do
     command -v "$c" >/dev/null 2>&1 || missing+=("$c")
   done
   if [[ ${#missing[@]} -gt 0 ]]; then
     log_warn "Dependências ausentes: ${missing[*]}"
-    if confirm "Instalar libopenblas-dev build-essential cmake git clang?"; then
+    if confirm "Instalar build-essential cmake git pkg-config libopenblas-dev?"; then
       run "apt update" apt-get update
       run "Instalando dependências de build" apt-get install -y --no-install-recommends \
-        build-essential cmake git libopenblas-dev
+        build-essential cmake git pkg-config libopenblas-dev
     else
       log_error "Dependências ausentes e instalação recusada. Abortando."
       exit 1

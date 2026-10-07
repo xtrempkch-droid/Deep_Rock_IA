@@ -58,7 +58,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake git libopenblas-dev
+            build-essential cmake git pkg-config libopenblas-dev
 
       # Usa o PRÓPRIO script do projeto: valida ISA, decide flags e faz fallback.
       # Sem cache, para manter o build determinístico e reprodutível (filosofia

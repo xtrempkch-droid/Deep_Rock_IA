@@ -66,7 +66,7 @@ install_deps() {
   log_info "Instalando dependências do perfil xeon..."
   run "apt update" apt-get update
   run "Instalando pacotes base" apt-get install -y --no-install-recommends \
-    build-essential cmake git ccache \
+    build-essential cmake git ccache pkg-config \
     libopenblas-dev libgomp1 \
     python3 python3-venv \
     curl ca-certificates pciutils util-linux

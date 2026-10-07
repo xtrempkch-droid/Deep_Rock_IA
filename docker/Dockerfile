@@ -40,12 +40,17 @@ ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# pkg-config é OBRIGATÓRIO: o backend BLAS do ggml faz
+# find_package(PkgConfig) para localizar o OpenBLAS. Sem ele, o CMake falha com
+# "Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)" — este bug foi
+# descoberto pelo workflow `container` (ver docs/CI.md § 8).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates \
       git \
       cmake \
       build-essential \
+      pkg-config \
       libopenblas-dev \
  && rm -rf /var/lib/apt/lists/*
 

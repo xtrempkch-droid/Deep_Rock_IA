@@ -62,9 +62,35 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 
 | Workflow             | Estado | Observação |
 |----------------------|--------|------------|
-| `validate`           | ✅ escrito e validado localmente (`make ci`) | 1º run no GitHub pendente |
-| `build-llama`        | ✅ escrito, validado por dry-run local | Build real nunca executado (`build` custa minutos) |
-| `container`          | ✅ escrito, validado por yamllint | Imagem nunca construída/publicada |
+| `validate`           | ✅ **verde no GitHub** (run 37655861546) | Os 4 jobs passaram: Lint, Regras do projeto, Dry-run (xeon), Dry-run (ryzen) |
+| `build-llama`        | ✅ escrito, validado por dry-run local | **Nunca executado** — requer `workflow_dispatch` ou tag |
+| `container`          | ⚠️ falhou no 1º run; **corrigido**, aguardando re-run | Falta de `pkg-config` no builder (ver § 3.2) |
+
+### 3.2 Primeira execução do CI no GitHub (2026-10-07)
+
+O commit `6da0c35` disparou `validate` e `container`:
+
+- ✅ **`validate` — sucesso.** Prova que o lint (shellcheck sem avisos),
+  os dry-runs dos dois perfis e os guarda-corpos das regras funcionam no
+  ambiente real do GitHub.
+- ❌ **`container` — falhou**, revelando um **bug real do projeto**:
+
+  ```text
+  CMake Error: Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)
+  Call Stack: ggml/src/ggml-blas/CMakeLists.txt:25 (find_package)
+  ```
+
+  O backend BLAS do ggml usa `find_package(PkgConfig)` para achar o OpenBLAS;
+  `libopenblas-dev` não traz o `pkg-config`. **O mesmo bug existia no build
+  nativo** (`profiles/xeon/llama-build.sh` e `install.sh`) — ou seja, o
+  primeiro build real no host teria falhado também.
+
+  Correção aplicada em `docker/Dockerfile`, `profiles/xeon/llama-build.sh`,
+  `profiles/xeon/install.sh` e no job `build-llama`. Registrado em
+  `docs/CI.md` § 8.1 e `docs/TROUBLESHOOTING.md`.
+
+> **Lição:** lint verde ≠ build comprovado. O CI **executando** o build foi o
+> que revelou o problema.
 
 ---
 
@@ -85,13 +111,12 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
    modo degradado (erro claro).
 6. **Single channel no Ryzen** não é corrigível por software — é alertado,
    não resolvido.
-7. **O CI nunca foi executado no GitHub ainda.** Os workflows foram
-   validados localmente (`make ci`, `yamllint`), mas o 1º run real — e
-   principalmente o `build-llama` (que compila de verdade) — está pendente.
-   Não confunda "lint limpo" com "build comprovado".
-8. **A imagem do GHCR nunca foi construída.** O `docker/Dockerfile` passou
-   apenas por checagem estática; o build real de imagem é o maior risco
-   não validado da esteira de CI/CD.
+7. **O CI `build-llama` ainda não foi executado.** O `validate` já rodou
+   verde no GitHub, mas a compilação dos dois perfis (com inferência real)
+   depende de `workflow_dispatch` ou de uma tag.
+8. **A imagem do GHCR ainda não foi publicada.** O 1º run do `container`
+   falhou por falta de `pkg-config` no builder; a correção foi aplicada e o
+   re-run está pendente.
 
 ---
 
@@ -177,3 +202,4 @@ Ao terminar qualquer tarefa:
 | 2026-10-07 | Commit inicial `85a083e` realizado; 26 arquivos versionados. |
 | 2026-10-07 | Projeto publicado no GitHub (`main` + tag `v0.1.0-alpha`); adicionado `docs/TUTORIAL.md` e a diretriz de tutorial por marco. |
 | 2026-10-07 | Adicionada a esteira de CI/CD (`validate`, `build-llama`, `container`), `Makefile`, `docker/`, `docs/CI.md` e templates. Corrigidos todos os avisos do shellcheck. |
+| 2026-10-07 | 1º run do CI no GitHub: `validate` ✅ verde (4/4 jobs). `container` falhou e revelou a falta de `pkg-config` (bug também presente no build nativo) — corrigido em 3 lugares + docs. |

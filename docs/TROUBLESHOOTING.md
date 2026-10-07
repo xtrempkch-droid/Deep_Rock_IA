@@ -28,6 +28,21 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
   ≥ 3.16). Como fallback, remova `-DGGML_BLAS` (perde-se pouco em AVX2
   puro).
 
+### CMake falha: `Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)`
+
+- **Sintoma:** o `cmake -B build ...` aborta com o stack apontando para
+  `ggml/src/ggml-blas/CMakeLists.txt` → `find_package(PkgConfig)`.
+- **Causa:** o backend BLAS do ggml localiza o OpenBLAS via `pkg-config`.
+  O pacote `libopenblas-dev` instala a biblioteca, **mas não** o `pkg-config`.
+- **Solução:**
+  ```bash
+  sudo apt install -y pkg-config
+  ```
+  Os scripts do projeto já instalam isso automaticamente (corrigido após o CI
+  detectar o problema — ver `docs/CI.md` § 8.1).
+- **Não confunda** com o aviso `Could NOT find OpenSSL`: aquele é apenas
+  informativo (com `LLAMA_CURL=OFF` o HTTPS não é usado pelo servidor).
+
 ### Build muito lento / OOM no Xeon (16 GB)
 
 - **Causa:** `make -j24` consome muita RAM em arquivos pesados.
