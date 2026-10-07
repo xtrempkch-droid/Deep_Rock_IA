@@ -229,6 +229,7 @@ O que acontece em seguida:
 | Job `build-llama` não roda no push | Comportamento **intencional** | Use `workflow_dispatch` (Actions → Run workflow) ou crie uma tag. |
 | `cmake` falha: `Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)` | O backend BLAS do ggml usa `find_package(PkgConfig)` e faltava `pkg-config` | Adicione `pkg-config` aos pacotes do builder (já corrigido — ver § 8.1). |
 | `cmake` avisa `Could NOT find OpenSSL` | `libssl-dev` ausente | Apenas aviso: com `LLAMA_CURL=OFF` o HTTPS não é necessário (o servidor serve HTTP local). |
+| Smoke da imagem falha com `exit code 127` | Loader não acha `libllama.so`/`libggml*.so` (RPATH absoluto da árvore de build) | Não copie `build/bin`: use `cmake --install` com `CMAKE_INSTALL_RPATH` + `ldconfig` (ver § 8.2). |
 
 ### 8.1 Caso real: o CI encontrou um bug de verdade
 
@@ -262,6 +263,57 @@ real no host também teria falhado**.
 preciso o CI **executar** o build para revelar o problema — exatamente por
 isso o `build-llama` roda uma inferência real, e não apenas compila.
 
+### 8.2 Segundo caso real: `exit code 127` no smoke da imagem (RPATH)
+
+Depois de corrigir o `pkg-config`, os builds `push` ficaram verdes — mas o PR
+do Dependabot falhou de novo, desta vez no passo **"Smoke da imagem (PR)"**,
+com `Process completed with exit code 127` e duração de apenas ~32 s (o build
+veio inteiro do cache do GHA).
+
+**Diagnóstico:** `exit 127` = "executável não encontrado" — que também ocorre
+quando o *dynamic loader* não acha uma biblioteca compartilhada. A causa raiz
+estava no `llama.cpp`:
+
+```text
+/src/CMakeLists.txt:41  set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+/src/ggml/CMakeLists.txt:74  set(BUILD_SHARED_LIBS_DEFAULT ON)   # Linux
+/src/build/**/cmake_install.cmake:
+    file(RPATH_CHANGE OLD_RPATH "/src/build/bin:" NEW_RPATH "")
+```
+
+Ou seja: o llama.cpp compila **bibliotecas compartilhadas por padrão**
+(`libllama.so`, `libggml*.so`) e os binários da árvore de build carregam
+**RPATH absoluto `/src/build/bin`**. Nossa imagem fazia:
+
+```dockerfile
+COPY --from=builder /src/build/bin/ /usr/local/bin/   # ❌ quebrado
+```
+
+Os binários iam para `/usr/local/bin`, mas o RPATH continuava apontando para
+`/src/build/bin` — que **não existe** no estágio runtime. Resultado: o loader
+não encontrava `libllama.so` → `exit 127`.
+
+> **Por que não apareceu antes:** o passo de smoke só roda em `pull_request`
+> (`if: github.event_name == 'pull_request'`), e todos os runs verdes
+> anteriores eram `push`/tag. Este foi o **primeiro** run de PR com build
+> bem-sucedido — ou seja, o caminho nunca havia sido exercitado.
+
+**Correção aplicada em `docker/Dockerfile`:**
+
+1. Instalar via CMake com RPATH explícito:
+   `-DCMAKE_INSTALL_RPATH=/usr/local/lib` + `cmake --install build --prefix /usr/local`.
+2. Copiar os **artefatos instalados** (`/usr/local/bin` + `/usr/local/lib`) em
+   vez da árvore de build, e rodar `ldconfig`.
+3. **Sanidade no builder:** verificar que os binários *instalados* executam
+   fora da árvore de build (`! ldd ... | grep -q 'not found'`).
+4. **Auto-verificação no runtime:** `llama-bench --help` durante o build da
+   imagem — assim a imagem **falha ao ser construída**, em vez de falhar só no
+   smoke do CI.
+
+**Lição registrada:** código que só roda num branch do fluxo (aqui, apenas em
+PR) fica sem cobertura até ser exercitado. Passos condicionais precisam de um
+gatilho que os ative pelo menos uma vez.
+
 ---
 
 ## 9. Uma observação honesta sobre containers
@@ -281,3 +333,5 @@ use o `ai-server.service` nativo (perfil `xeon`) conforme o
 |------------|---------|
 | 2026-10-07 | Criação do documento junto com os workflows `validate`, `build-llama` e `container`. |
 | 2026-10-07 | 1º run real: `validate` ✅ verde. O `container` falhou por falta de `pkg-config` no builder — bug corrigido na imagem e nos scripts do perfil xeon (§ 8.1). |
+| 2026-10-07 | 2º run real (PR do Dependabot): o smoke da imagem falhou com `exit 127`. Causa: RPATH absoluto `/src/build/bin` nos binários do llama.cpp (libs compartilhadas). Corrigido com `cmake --install` + `CMAKE_INSTALL_RPATH` + `ldconfig` + auto-verificação na imagem (§ 8.2). |
+| 2026-10-07 | `build-llama` ✅ verde (6m04s) na tag `v0.2.0`, Release publicada com os binários; `container` ✅ verde em `main` e na tag. |

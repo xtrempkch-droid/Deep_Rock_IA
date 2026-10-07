@@ -103,10 +103,27 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
       # Prova que a imagem construída realmente executa nesta CPU.
+      # Em caso de falha, imprime diagnóstico (PATH, RPATH, libs faltando) em
+      # vez de apenas um "exit code 127" opaco — ver docs/CI.md § 8.2.
       - name: Smoke da imagem (PR)
         if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
-          docker run --rm --entrypoint llama-bench \
-            "${{ steps.tags.outputs.first }}" --help > /dev/null
-          echo "OK: imagem executa llama-bench."
+          img="${{ steps.tags.outputs.first }}"
+          echo "Imagem: ${img}"
+          docker image inspect "$img" > /dev/null
+
+          echo "--- conteúdo de /usr/local/bin ---"
+          docker run --rm --entrypoint sh "$img" -c 'ls -la /usr/local/bin'
+
+          echo "--- bibliotecas compartilhadas ---"
+          docker run --rm --entrypoint sh "$img" -c \
+            'ls -la /usr/local/lib/ 2>/dev/null || echo "(sem /usr/local/lib)"'
+
+          echo "--- ldd (procura por 'not found') ---"
+          docker run --rm --entrypoint sh "$img" -c \
+            'ldd /usr/local/bin/llama-bench || true'
+
+          echo "--- executando llama-bench --help ---"
+          docker run --rm --entrypoint llama-bench "$img" --help > /dev/null
+          echo "OK: a imagem executa llama-bench."

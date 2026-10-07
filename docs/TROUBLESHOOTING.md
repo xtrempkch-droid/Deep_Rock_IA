@@ -58,6 +58,36 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 
 ---
 
+## Container / Imagem Docker
+
+### A imagem executa mas falha com `exit code 127` ("executable file not found")
+
+- **Sintoma:** `docker run --rm --entrypoint llama-bench <imagem> --help`
+  retorna **127**. Também pode aparecer como
+  `error while loading shared libraries: libllama.so: cannot open shared object file`.
+- **Causa:** o llama.cpp compila bibliotecas **compartilhadas** por padrão e os
+  binários da árvore de build carregam **RPATH absoluto** (`/src/build/bin`).
+  Copiar `build/bin/` para `/usr/local/bin` faz o loader procurar as libs num
+  caminho que não existe na imagem final.
+- **Solução:** não copie `build/bin` diretamente. Instale via CMake com RPATH
+  explícito e rode `ldconfig`:
+  ```dockerfile
+  RUN cmake -B build ... -DCMAKE_INSTALL_RPATH=/usr/local/lib \
+   && cmake --build build -j "$(nproc)" \
+   && cmake --install build --prefix /usr/local
+  COPY --from=builder /usr/local/bin/ /usr/local/bin/
+  COPY --from=builder /usr/local/lib/ /usr/local/lib/
+  RUN ldconfig
+  ```
+  Para diagnosticar:
+  ```bash
+  docker run --rm --entrypoint sh <imagem> -c 'ldd /usr/local/bin/llama-bench'
+  docker run --rm --entrypoint sh <imagem> -c 'readelf -d /usr/local/bin/llama-bench | grep -i rpath'
+  ```
+- **Histórico:** este bug foi descoberto pelo CI (ver `docs/CI.md` § 8.2).
+
+---
+
 ## Kernel / Tuning
 
 ### Governor não muda para `performance`

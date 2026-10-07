@@ -63,6 +63,14 @@ WORKDIR /src
 # Flags alinhadas com profiles/*/llama-build.sh.
 # - TARGETARCH é declarado apenas para documentar que a imagem é independente
 #   de arquitetura (x86-64); não é usado em condicionais aqui.
+#
+# ⚠️ CMAKE_INSTALL_RPATH / `cmake --install` — NÃO REMOVER (ver docs/CI.md § 8.2):
+#   o llama.cpp compila bibliotecas COMPARTILHADAS (BUILD_SHARED_LIBS=ON) e os
+#   binários da árvore de build ficam com RPATH ABSOLUTO `/src/build/bin`.
+#   Copiar `build/bin` para outro diretório quebra o loader (`exit 127`:
+#   "error while loading shared libraries"). Por isso instalamos via CMake com
+#   RPATH apontando para /usr/local/lib.
+ENV CG_INSTALL_RPATH="/usr/local/lib"
 RUN cmake -B build \
       -DCMAKE_BUILD_TYPE=Release \
       -DGGML_NATIVE="${GGML_NATIVE}" \
@@ -74,14 +82,24 @@ RUN cmake -B build \
       -DLLAMA_CURL=OFF \
       -DCMAKE_C_FLAGS="${CMAKE_C_FLAGS}" \
       -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS}" \
- && cmake --build build --config Release -j "$(nproc)"
+      -DCMAKE_INSTALL_RPATH="${CG_INSTALL_RPATH}" \
+ && cmake --build build --config Release -j "$(nproc)" \
+ && cmake --install build --prefix /usr/local
 
-# Sanidade: o binário precisa EXECUTAR nesta CPU (pega SIGILL cedo).
+# Sanidade 1: os binários da árvore de build existem e EXECUTAM
+# (pega SIGILL cedo — flag de ISA indevida para o alvo).
 RUN set -eux; \
     for b in llama-server llama-cli llama-bench; do \
       test -x "/src/build/bin/${b}"; \
     done; \
     /src/build/bin/llama-bench --help > /dev/null
+
+# Sanidade 2: os binários INSTALADOS também executam fora da árvore de build.
+# (pega exatamente o bug de RPATH descrito acima, ainda no build da imagem.)
+RUN set -eux; \
+    /usr/local/bin/llama-bench --help > /dev/null; \
+    ! ldd /usr/local/bin/llama-bench | grep -q 'not found'; \
+    ls -la /usr/local/lib/ | head -20
 
 # =============================================================================
 # Estágio 2 — runtime (mínimo)
@@ -105,9 +123,19 @@ RUN apt-get update \
       --create-home --shell /usr/sbin/nologin llama \
  && install -d -o llama -g llama -m 0750 /models
 
-# Copiamos o diretório inteiro de binários: além dos executáveis, ele pode
-# conter bibliotecas compartilhadas (libllama.so/ggml) dependendo da versão.
-COPY --from=builder /src/build/bin/ /usr/local/bin/
+# Copiamos os artefatos INSTALADOS (bin + lib) e rodamos ldconfig.
+# NÃO usar `COPY build/bin` diretamente: os binários carregam RPATH absoluto da
+# árvore de build e não achariam libllama.so/libggml*.so (ver docs/CI.md § 8.2).
+COPY --from=builder /usr/local/bin/ /usr/local/bin/
+COPY --from=builder /usr/local/lib/ /usr/local/lib/
+RUN ldconfig
+
+# Auto-verificação do ENV: se os binários não executarem aqui, o build da
+# imagem FALHA — em vez de só falhar depois, no passo de smoke do CI.
+RUN set -eux; \
+    llama-bench --help > /dev/null; \
+    llama-server --help > /dev/null; \
+    ! ldd /usr/local/bin/llama-bench | grep -q 'not found'
 
 # Roda sem privilégios (sandbox básico, alinhado ao ai-server.service).
 USER llama
