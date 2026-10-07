@@ -65,13 +65,12 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 |---------------|--------|-----------|
 | `validate`    | ✅ **verde** | Run #1 (main, `6da0c35`) e #2: 4/4 jobs (Lint, Regras, Dry-run xeon, Dry-run ryzen). Também verde na tag `v0.2.0` e no PR do Dependabot. |
 | `build-llama` | ✅ **verde (build real!)** | Run #1 na tag `v0.2.0` (`4cde4bb`): **6m04s** · Run #2 (manual, `main`): ✅ — os dois perfis compilam, os binários executam e a **inferência real** roda. |
-| `container`   | ✅ **verde** | Runs #3 (main), #4 (tag `v0.2.0`) e #5 (docs): ✅ — imagens publicadas no GHCR. |
+| `container`   | ✅ **verde** | Runs #3/#4/#5/#7, **#8 (correção do RPATH)** e **#9 (PR do Dependabot)**: ✅ — imagens publicadas no GHCR. O job do PR passou em 8m28s **incluindo o passo "Smoke da imagem (PR)"**. |
 
-> **PR #1 do Dependabot** (`ci(deps): bump the actions group`): os runs
-> `container` #1 e #2 falharam por causa da base desatualizada (antes da
-> correção do `pkg-config`). A branch foi **rebaseada sobre `main`** e o PR
-> está re-rodando. As 5 versões de action foram verificadas com
-> `git ls-remote` — todas existem.
+> **PR #1 do Dependabot** (`ci(deps): bump the actions group`): a branch foi
+> **rebaseada sobre `main`** (com a correção do RPATH) e agora está
+> **✅ verde** — `validate` + `container` passaram, inclusive o smoke step.
+> As 5 versões de action foram verificadas com `git ls-remote` (todas existem).
 
 ### 3.2 Histórico das execuções do CI (2026-10-07)
 
@@ -80,6 +79,8 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 | Commit `6da0c35` | `validate` ✅ verde. `container` ❌ **revelou um bug real**: o builder não tinha `pkg-config`, exigido pelo backend BLAS do ggml (`find_package(PkgConfig)`). **O mesmo bug existia no build nativo** (`profiles/xeon/llama-build.sh` e `install.sh`) — o primeiro build real no host também teria falhado. Corrigido em 4 lugares (commit `4cde4bb`). |
 | Tag `v0.2.0` (`4cde4bb`) | `build-llama` ✅ **6m04s** (compilou `xeon` e `ryzen`, executou os binários e rodou inferência real com o modelo minúsculo) · `container` ✅ **8m48s** · **Release `ai-cpu-os v0.2.0` publicada com os `.tar.gz` dos dois perfis**. |
 | `main` (`4cde4bb`) | `validate` ✅ · `container` ✅ 9m14s (imagem `:latest` publicada no GHCR). |
+| PR #1 do Dependabot (`afe6ab4`) | 2º ciclo: o passo **"Smoke da imagem (PR)"** falhou com **`exit code 127`**. Causa: os binários do llama.cpp carregam **RPATH absoluto `/src/build/bin`** (libs compartilhadas) e o `COPY build/bin` os movia sem corrigir o RPATH → o loader não achava `libllama.so`. Corrigido com `cmake --install` + `CMAKE_INSTALL_RPATH` + `ldconfig` + auto-verificação na imagem (commit `b5d86bc`, `docs/CI.md` § 8.2). Função não exercida antes porque o smoke só roda em `pull_request`. |
+| PR #1 do Dependabot (`afe6ab4` + fix) | 3º ciclo: **✅ verde** — job `Imagem (portable)` em 8m28s, com o smoke step executando de verdade. Nenhum ❌ pendente no repositório. |
 
 > **Resultado importante:** o CI **compila o sistema de verdade** e publica
 > binários utilizáveis, sem intervenção humana. O `pkg-config` foi um bug que
@@ -108,13 +109,14 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 7. **Métricas de performance ainda não medidas.** O CI prova que o llama.cpp
    compila e roda; **não** prova quantos tokens/s o hardware entrega. As
    seções 5, 6 e 7.6 do `docs/TUTORIAL.md` seguem `pendente`.
-8. **PR #1 do Dependabot:** os runs históricos de `container` (##1 e #2)
-   falharam por base desatualizada, anterior à correção do `pkg-config`.
-   A branch foi rebaseada sobre `main` e o PR está re-rodando — sem problema
-   de código. (Bumps de action verificados com `git ls-remote`.)
+8. **PR #1 do Dependabot:** ✅ **verde** após rebase sobre `main` com a
+   correção do RPATH. Pode ser mesclado (bumps de action verificados).
 9. **A imagem do GHCR não foi validada no hardware alvo.** Ela foi construída
-   e publicada com sucesso no CI, mas ninguém ainda a executou no Xeon nem no
-   Ryzen.
+   e verificada pelo próprio build (auto-verificação do Dockerfile) e
+   publicada, mas ninguém ainda a executou no Xeon nem no Ryzen.
+10. **A Release `v0.2.0` contém binários compilados para o runner do CI**
+    (x86-64 genérico AVX2). Funcionam nos alvos, mas foram produzidos em
+    outra CPU; o `llama-bench` de prova rodou lá, não no Xeon/Ryzen.
 
 ---
 
@@ -196,3 +198,4 @@ Ao terminar qualquer tarefa:
 | 2026-10-07 | Adicionada a esteira de CI/CD (`validate`, `build-llama`, `container`), `Makefile`, `docker/`, `docs/CI.md` e templates. Corrigidos todos os avisos do shellcheck. |
 | 2026-10-07 | 1º run do CI no GitHub: `validate` ✅ verde (4/4 jobs). `container` falhou e revelou a falta de `pkg-config` (bug também presente no build nativo) — corrigido em 3 lugares + docs. |
 | 2026-10-07 | Publicada a versão **`0.2.0`** (tag `v0.2.0`, commit `4cde4bb`): marco de CI/CD. **Nenhuma validação de hardware foi feita nesta versão** — ver § 2 e § 3.2. O `build-llama` e o `container` foram disparados pela tag. |
+| 2026-10-07 | 2º bug achado pelo CI: imagem quebrava com `exit code 127` (RPATH absoluto dos binários do llama.cpp). Corrigido em `b5d86bc` (ver § 3.2 e `docs/CI.md` § 8.2). PR do Dependabot ficou ✅ verde. |

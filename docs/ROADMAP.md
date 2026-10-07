@@ -34,6 +34,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | `build-llama` executado no GitHub: 2 perfis compilados + inferência real (6m04s) | 2026-10-07 | 2026-10-07 |
 | Imagem publicada no GHCR (`container` ✅ em `main` e na tag)              | 2026-10-07 | 2026-10-07 |
 | Release `ai-cpu-os v0.2.0` com os binários `.tar.gz` dos dois perfis      | 2026-10-07 | 2026-10-07 |
+| Correção do bug de RPATH na imagem Docker (achado pelo CI: `exit 127`)    | 2026-10-07 | 2026-10-07 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em
@@ -68,8 +69,8 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
       *(início previsto: a definir)*
 
 ### Prioridade Média
-- [ ] **Mesclar o PR #1 do Dependabot** — a branch foi rebaseada sobre `main`
-      (bumps de action verificados com `git ls-remote`); aguarda CI verde.
+- [ ] **Mesclar o PR #1 do Dependabot** — rebaseado sobre `main` com a
+      correção do RPATH e **✅ verde**; só falta clicar em *Merge*.
 - [ ] **Suporte a `nvme` tuning** — `mq-deadline` vs `none` scheduler para
       SSD NVMe, e `nr_requests`.
 - [ ] **Benchmark automatizado** — script que roda `llama-bench`, salva CSV e

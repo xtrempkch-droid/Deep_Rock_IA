@@ -310,9 +310,19 @@ não encontrava `libllama.so` → `exit 127`.
    imagem — assim a imagem **falha ao ser construída**, em vez de falhar só no
    smoke do CI.
 
+**Resultado:** o PR do Dependabot voltou a rodar e ficou **✅ verde** — o job
+`Imagem (portable)` passou em **8m28s**, com o passo "Smoke da imagem (PR)"
+executando de verdade pela primeira vez. O `container` em `main` também ficou
+verde (run #8).
+
 **Lição registrada:** código que só roda num branch do fluxo (aqui, apenas em
 PR) fica sem cobertura até ser exercitado. Passos condicionais precisam de um
 gatilho que os ative pelo menos uma vez.
+
+> **Por que o smoke continua apenas em PR:** com `push: true` e sem
+> `load: true`, a imagem não fica no store local do runner e não há como
+> executá-la ali. Em `push`/tag, a garantia vem da **auto-verificação dentro
+> do próprio `Dockerfile`**, que roda em todo build de imagem.
 
 ---
 
@@ -335,3 +345,4 @@ use o `ai-server.service` nativo (perfil `xeon`) conforme o
 | 2026-10-07 | 1º run real: `validate` ✅ verde. O `container` falhou por falta de `pkg-config` no builder — bug corrigido na imagem e nos scripts do perfil xeon (§ 8.1). |
 | 2026-10-07 | 2º run real (PR do Dependabot): o smoke da imagem falhou com `exit 127`. Causa: RPATH absoluto `/src/build/bin` nos binários do llama.cpp (libs compartilhadas). Corrigido com `cmake --install` + `CMAKE_INSTALL_RPATH` + `ldconfig` + auto-verificação na imagem (§ 8.2). |
 | 2026-10-07 | `build-llama` ✅ verde (6m04s) na tag `v0.2.0`, Release publicada com os binários; `container` ✅ verde em `main` e na tag. |
+| 2026-10-07 | Correção do RPATH validada: `container` ✅ em `main` (run #8) e no PR do Dependabot (run #9, com o smoke step executando). Nenhum workflow vermelho pendente. |
