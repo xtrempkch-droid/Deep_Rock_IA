@@ -17,6 +17,10 @@
 >
 > **Pré-requisito de leitura:** [`README.md`](../README.md) (visão geral) e
 > [`docs/STATE.md`](STATE.md) (o que já foi testado e o que **não** foi).
+>
+> **Versão coberta por este tutorial:** `0.2.0` — o marco de **CI/CD**. Esta
+> versão **não** adicionou validação de hardware: as métricas das seções
+> 7.6 e 8 continuam `pendente`, e nada foi executado nos dois CPUs alvo.
 
 ---
 
@@ -880,3 +884,4 @@ continua sendo a seção 7.6 deste tutorial, no hardware de verdade.
 |------|---------|
 | 2026-10-07 | Criação inicial (v0.1.0-alpha) — tutorial completo; nada testado em hardware ainda. |
 | 2026-10-07 | Adicionado o Apêndice A (CI/CD: workflows, artefatos, release, limitações do CI). |
+| 2026-10-07 | Versão **`0.2.0`** (marco de CI/CD). O 1º run do CI corrigiu um bug real (`pkg-config`). **As seções 7.6/8 permanecem com métricas `pendente`: nada foi validado em hardware nesta versão.** O Apêndice A já reflete a esteira real. |

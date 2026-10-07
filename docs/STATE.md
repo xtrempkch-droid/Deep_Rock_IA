@@ -7,8 +7,9 @@
 
 ## 1. Versão
 
-- **Versão do projeto:** `0.1.0-alpha`
-- **Commit de referência:** tag `v0.1.0-alpha` (commit inicial — todos os arquivos gerados)
+- **Versão do projeto:** `0.2.0` (marco de **CI/CD** — nenhuma validação nova de
+  hardware nesta versão; ver seção 2)
+- **Commit de referência:** tag `v0.2.0` (commit `4cde4bb`)
 - **Sistema operacional alvo testado:** Debian 12 Bookworm (a confirmar)
 
 ---
@@ -60,37 +61,29 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 
 ### 3.1 Status do CI/CD
 
-| Workflow             | Estado | Observação |
-|----------------------|--------|------------|
-| `validate`           | ✅ **verde no GitHub** (run 37655861546) | Os 4 jobs passaram: Lint, Regras do projeto, Dry-run (xeon), Dry-run (ryzen) |
-| `build-llama`        | ✅ escrito, validado por dry-run local | **Nunca executado** — requer `workflow_dispatch` ou tag |
-| `container`          | ⚠️ falhou no 1º run; **corrigido**, aguardando re-run | Falta de `pkg-config` no builder (ver § 3.2) |
+| Workflow      | Estado | Evidência |
+|---------------|--------|-----------|
+| `validate`    | ✅ **verde** | Run #1 (main, `6da0c35`) e #2: 4/4 jobs (Lint, Regras, Dry-run xeon, Dry-run ryzen). Também verde na tag `v0.2.0` e no PR do Dependabot. |
+| `build-llama` | ✅ **verde (build real!)** | Run #1 na tag `v0.2.0` (`4cde4bb`): **6m04s**, os dois perfis compilaram, os binários executaram e a **inferência real** rodou. |
+| `container`   | ✅ **verde** | Run #3 (main, `4cde4bb`): 9m14s · Run #4 (tag `v0.2.0`): 8m48s — imagens publicadas no GHCR. |
 
-### 3.2 Primeira execução do CI no GitHub (2026-10-07)
+> ⚠️ **Dependabot PR #1** (`ci(deps): bump the actions group`): o run de
+> `container` nesse PR ficou ❌ porque a branch foi criada **antes** da correção
+> do `pkg-config` (base desatualizada). O `validate` no PR passou. É preciso
+> rebasear a branch — **não** é um problema de código.
 
-O commit `6da0c35` disparou `validate` e `container`:
+### 3.2 Histórico das execuções do CI (2026-10-07)
 
-- ✅ **`validate` — sucesso.** Prova que o lint (shellcheck sem avisos),
-  os dry-runs dos dois perfis e os guarda-corpos das regras funcionam no
-  ambiente real do GitHub.
-- ❌ **`container` — falhou**, revelando um **bug real do projeto**:
+| Momento | O que aconteceu |
+|---------|-----------------|
+| Commit `6da0c35` | `validate` ✅ verde. `container` ❌ **revelou um bug real**: o builder não tinha `pkg-config`, exigido pelo backend BLAS do ggml (`find_package(PkgConfig)`). **O mesmo bug existia no build nativo** (`profiles/xeon/llama-build.sh` e `install.sh`) — o primeiro build real no host também teria falhado. Corrigido em 4 lugares (commit `4cde4bb`). |
+| Tag `v0.2.0` (`4cde4bb`) | `build-llama` ✅ **6m04s** (compilou `xeon` e `ryzen`, executou os binários e rodou inferência real com o modelo minúsculo) · `container` ✅ **8m48s** · **Release `ai-cpu-os v0.2.0` publicada com os `.tar.gz` dos dois perfis**. |
+| `main` (`4cde4bb`) | `validate` ✅ · `container` ✅ 9m14s (imagem `:latest` publicada no GHCR). |
 
-  ```text
-  CMake Error: Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)
-  Call Stack: ggml/src/ggml-blas/CMakeLists.txt:25 (find_package)
-  ```
-
-  O backend BLAS do ggml usa `find_package(PkgConfig)` para achar o OpenBLAS;
-  `libopenblas-dev` não traz o `pkg-config`. **O mesmo bug existia no build
-  nativo** (`profiles/xeon/llama-build.sh` e `install.sh`) — ou seja, o
-  primeiro build real no host teria falhado também.
-
-  Correção aplicada em `docker/Dockerfile`, `profiles/xeon/llama-build.sh`,
-  `profiles/xeon/install.sh` e no job `build-llama`. Registrado em
-  `docs/CI.md` § 8.1 e `docs/TROUBLESHOOTING.md`.
-
-> **Lição:** lint verde ≠ build comprovado. O CI **executando** o build foi o
-> que revelou o problema.
+> **Resultado importante:** o CI **compila o sistema de verdade** e publica
+> binários utilizáveis, sem intervenção humana. O `pkg-config` foi um bug que
+> só a **execução** poderia revelar — reforçando a regra: lint verde ≠ build
+> comprovado.
 
 ---
 
@@ -111,12 +104,15 @@ O commit `6da0c35` disparou `validate` e `container`:
    modo degradado (erro claro).
 6. **Single channel no Ryzen** não é corrigível por software — é alertado,
    não resolvido.
-7. **O CI `build-llama` ainda não foi executado.** O `validate` já rodou
-   verde no GitHub, mas a compilação dos dois perfis (com inferência real)
-   depende de `workflow_dispatch` ou de uma tag.
-8. **A imagem do GHCR ainda não foi publicada.** O 1º run do `container`
-   falhou por falta de `pkg-config` no builder; a correção foi aplicada e o
-   re-run está pendente.
+7. **Métricas de performance ainda não medidas.** O CI prova que o llama.cpp
+   compila e roda; **não** prova quantos tokens/s o hardware entrega. As
+   seções 5, 6 e 7.6 do `docs/TUTORIAL.md` seguem `pendente`.
+8. **PR #1 do Dependabot está com o `container` ❌** porque a branch é
+   anterior à correção do `pkg-config` (base desatualizada). Rebasear a
+   branch resolve — não há problema de código.
+9. **A imagem do GHCR não foi validada no hardware alvo.** Ela foi construída
+   e publicada com sucesso no CI, mas ninguém ainda a executou no Xeon nem no
+   Ryzen.
 
 ---
 
@@ -138,19 +134,13 @@ Tempo de build do llama.cpp: *(pendente)*
 
 > **👉 ESTA É A SEÇÃO REFERENCIADA PELO `AGENTS.md`.**
 
-**Passo 0 — Deixar o CI verde no GitHub (rápido, sem risco).**
+**Passo 0 — ✅ CONCLUÍDO.** O CI está verde no GitHub: `validate` (4/4 jobs),
+`build-llama` (compilou os dois perfis + inferência real em 6m04s) e
+`container` (imagem publicada no GHCR). A Release `ai-cpu-os v0.2.0` foi
+publicada com os binários `.tar.gz` dos dois perfis. Ver § 3.1.
 
-```bash
-make ci                    # reproduz o workflow 'validate' localmente
-git push origin main       # dispara o workflow 'validate' no GitHub
-```
-
-Depois, em *Actions*, confirme: (a) `validate` verde; (b) dispare
-`build-llama` manualmente (*Run workflow*) para comprovar de verdade que o
-llama.cpp compila e roda com as flags dos dois perfis.
-
-**Passo 1 — Subir uma VM Debian 12 e validar `detect-hardware.sh` + `build.sh
---dry-run`.**
+**Passo 1 (AGORA) — Subir uma VM Debian 12 e validar `detect-hardware.sh` +
+`build.sh --dry-run`.**
 
 Motivo: é o caminho de menor risco para capturar erros de runtime (nomes de
 pacotes, caminhos, permissões) sem tocar em hardware físico. Numa VM,
@@ -203,3 +193,4 @@ Ao terminar qualquer tarefa:
 | 2026-10-07 | Projeto publicado no GitHub (`main` + tag `v0.1.0-alpha`); adicionado `docs/TUTORIAL.md` e a diretriz de tutorial por marco. |
 | 2026-10-07 | Adicionada a esteira de CI/CD (`validate`, `build-llama`, `container`), `Makefile`, `docker/`, `docs/CI.md` e templates. Corrigidos todos os avisos do shellcheck. |
 | 2026-10-07 | 1º run do CI no GitHub: `validate` ✅ verde (4/4 jobs). `container` falhou e revelou a falta de `pkg-config` (bug também presente no build nativo) — corrigido em 3 lugares + docs. |
+| 2026-10-07 | Publicada a versão **`0.2.0`** (tag `v0.2.0`, commit `4cde4bb`): marco de CI/CD. **Nenhuma validação de hardware foi feita nesta versão** — ver § 2 e § 3.2. O `build-llama` e o `container` foram disparados pela tag. |

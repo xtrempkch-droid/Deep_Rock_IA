@@ -270,3 +270,7 @@ Por isso a imagem habilita `AVX2`/`FMA`/`F16C` **explicitamente** e mantém
    avisos do `shellcheck` exigidos pelo novo workflow `validate` — o código
    indicado nunca era lido, então nenhum comportamento mudou. Adicionado
    `--march` ao build compartilhado (habilita `znver2` no perfil ryzen). |
+| 2026-10-07 | Publicada a versão `0.2.0` (marco de CI/CD). O 1º run real do
+   CI revelou que o build exigia `pkg-config` (backend BLAS do ggml usa
+   `find_package(PkgConfig)`) — corrigido na imagem e nos scripts do perfil
+   xeon. Nenhuma alteração de comportamento além da dependência adicionada. |

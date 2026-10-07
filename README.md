@@ -4,6 +4,7 @@
 > inferência de LLMs **100% em CPU** — sem GPU, sem desperdício.
 
 ![status](https://img.shields.io/badge/status-alpha-orange)
+![version](https://img.shields.io/badge/version-0.2.0-blue)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![shell](https://img.shields.io/badge/shell-bash%205.x-green)
 

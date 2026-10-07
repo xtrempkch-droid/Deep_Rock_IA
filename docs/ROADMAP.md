@@ -30,6 +30,10 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | CI/CD: `container.yml` + `docker/Dockerfile` (imagem no GHCR)            | 2026-10-07 | 2026-10-07 |
 | `Makefile`, `docs/CI.md`, templates de issue/PR, Dependabot              | 2026-10-07 | 2026-10-07 |
 | Lint limpo: `shellcheck -S warning` sem avisos em todos os scripts       | 2026-10-07 | 2026-10-07 |
+| 1º run do CI no GitHub: `validate` ✅ (4/4 jobs)                          | 2026-10-07 | 2026-10-07 |
+| `build-llama` executado no GitHub: 2 perfis compilados + inferência real (6m04s) | 2026-10-07 | 2026-10-07 |
+| Imagem publicada no GHCR (`container` ✅ em `main` e na tag)              | 2026-10-07 | 2026-10-07 |
+| Release `ai-cpu-os v0.2.0` com os binários `.tar.gz` dos dois perfis      | 2026-10-07 | 2026-10-07 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em
@@ -44,7 +48,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | Validação em hardware real (Xeon E5-2678 v3)                | 2026-10-07 | Aguardando acesso ao servidor físico para rodar o smoke-test |
 | Validação em hardware real (Ryzen 5 3500X)                  | 2026-10-07 | Aguardando build da imagem + teste do registry/Gitea        |
 | Medição de baseline vs. pós-tuning com `llama-bench`        | 2026-10-07 | Depende dos dois itens acima para preencher `docs/STATE.md` |
-| Primeira execução verde do CI no GitHub                     | 2026-10-07 | Workflows escritos e validados localmente; falta o 1º run real |
+| Validar a Release `v0.2.0` (binários) e a imagem do GHCR no hardware alvo | 2026-10-07 | Primeiro uso real dos artefatos do CI |
 
 ---
 
@@ -64,8 +68,8 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
       *(início previsto: a definir)*
 
 ### Prioridade Média
-- [ ] **Conferir o 1º run do `build-llama` e anexar os artefatos a uma Release de teste.**
-- [ ] **Validar a imagem do GHCR no Xeon e no Ryzen** (prova de portabilidade da variante `portable`).
+- [ ] **Rebasear o PR #1 do Dependabot** (o `container` falhou por base
+      desatualizada, anterior à correção do `pkg-config`).
 - [ ] **Suporte a `nvme` tuning** — `mq-deadline` vs `none` scheduler para
       SSD NVMe, e `nr_requests`.
 - [ ] **Benchmark automatizado** — script que roda `llama-bench`, salva CSV e
@@ -102,3 +106,4 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | 2026-10-07 | Criação inicial do roadmap junto com o repositório `0.1.0-alpha`. |
 | 2026-10-07 | Adicionado `docs/TUTORIAL.md` + diretriz de tutorial por marco/versão. |
 | 2026-10-07 | Adicionada a esteira de CI/CD (validate, build-llama, container), `Makefile` e `docker/`. |
+| 2026-10-07 | Publicada a versão **`0.2.0`** (tag `v0.2.0`): marco de CI/CD. Correção do `pkg-config` descoberta pelo 1º run do CI. Ainda **sem validação em hardware**. |
