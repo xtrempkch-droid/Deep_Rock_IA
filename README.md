@@ -1,0 +1,198 @@
+# ai-cpu-os
+
+> Um sistema operacional Linux minimalista, otimizado cirurgicamente para
+> inferência de LLMs **100% em CPU** — sem GPU, sem desperdício.
+
+![status](https://img.shields.io/badge/status-alpha-orange)
+![license](https://img.shields.io/badge/license-MIT-blue)
+![shell](https://img.shields.io/badge/shell-bash%205.x-green)
+
+---
+
+## 🧠 Filosofia — "1% importa"
+
+Este projeto parte de uma premissa simples e implacável:
+
+> **Cada 1% de performance importa. Acumulados, 100 otimizações de 1% viram
+> 2,7x.**
+
+Quando você roda LLMs em CPU, não existe margem para desperdício. Não há
+"sobra de GPU" para compensar. Cada ciclo de CPU gasto em um page fault, cada
+troca de contexto desnecessária, cada núcleo rodando a 1,2 GHz quando poderia
+rodar a 3,3 GHz — **tudo se acumula diretamente no tempo até o primeiro
+token**.
+
+O `ai-cpu-os` não é um "truque de benchmark". É uma metodologia: transformar um
+Debian/Ubuntu minimal em um sistema afinado, reprodutível e auditável para
+inferência em CPU, com foco obsessivo em:
+
+1. **Banda de memória** (o gargalo real de LLM em CPU — não FLOPs).
+2. **Latência de memória** (cache, huge pages, NUMA).
+3. **Escalonamento** (governor `performance`, C-states rasos).
+4. **Determinismo** (idempotência, sem surpresas entre execuções).
+
+---
+
+## 🖥️ Hardware suportado
+
+O projeto foi desenhado em torno de **dois sistemas reais** e possui um perfil
+dedicado para cada um.
+
+| Perfil  | CPU                      | Núcleos/Threads | ISA              | Memória            | Armazenamento | Função principal                        |
+|---------|--------------------------|-----------------|------------------|--------------------|---------------|-----------------------------------------|
+| `xeon`  | Intel Xeon E5-2678 v3    | 12c / 24t       | Haswell-EP, AVX2 | 16 GB DDR3-1333 DC | NVMe 256 GB   | Servidor de inferência (llama.cpp)      |
+| `ryzen` | AMD Ryzen 5 3500X        | 6c / 6t         | Zen 2, AVX2      | 64 GB DDR4 SC ⚠️   | NVMe + HDD 1T | Build (Docker), registry privado, Gitea |
+
+> ⚠️ **Nenhuma das duas CPUs possui AVX-512 ou AMX.** Qualquer guia que
+> sugira habilitar `-mavx512` para este hardware está errado. O script
+> **verifica as flags em `/proc/cpuinfo`** antes de aplicar qualquer `-march`.
+
+### Placas-mãe de referência
+
+- **Xeon:** JGINYUE X99M-D3 (LGA2011-3, DDR3, dual-channel).
+- **Ryzen:** MSI B550 (AM4, DDR4) — operando em **single channel** por
+  limitação de slot/controlador.
+
+---
+
+## 📋 Pré-requisitos
+
+- **Debian 12+ (Bookworm)** ou **Ubuntu 22.04+ (Jammy)** — instalação mínima.
+- Acesso `root` (ou `sudo`).
+- Conexão com a internet para baixar pacotes e o llama.cpp.
+- ~10 GB livres em disco (build do llama.cpp + modelos pequenos).
+- **Kernel ≥ 5.1** para `io_uring` (Debian 12 traz 6.1 — ok).
+
+Confira sua versão:
+
+```bash
+grep PRETTY_NAME /etc/os-release
+uname -r
+```
+
+---
+
+## 🚀 Como usar
+
+### 1. Clonar
+
+```bash
+git clone https://github.com/<seu-usuario>/ai-cpu-os.git
+cd ai-cpu-os
+```
+
+### 2. Detectar o hardware (opcional, mas recomendado)
+
+```bash
+chmod +x detect-hardware.sh
+./detect-hardware.sh
+```
+
+Isso imprime um relatório completo: CPU, flags (AVX2/AVX-512/AMX), RAM,
+canais de memória, tipo de disco e qual perfil foi escolhido.
+
+### 3. Aplicar o build
+
+```bash
+sudo ./build.sh --profile auto
+```
+
+- `--profile auto` → usa o perfil detectado automaticamente.
+- `--profile xeon` / `--profile ryzen` → força um perfil.
+- `--dry-run` → mostra o que seria feito, **sem** aplicar nada.
+- `--yes` → não pede confirmação (para automação/CI).
+
+### 4. Simular antes de aplicar (recomendado na 1ª vez)
+
+```bash
+sudo ./build.sh --profile auto --dry-run
+```
+
+---
+
+## 🔧 O que o script faz (e por que cada coisa importa)
+
+| Otimização                        | O que muda                                                        | Por que importa                                                                          |
+|-----------------------------------|------------------------------------------------------------------|------------------------------------------------------------------------------------------|
+| Governor `performance`            | Trava todos os núcleos na frequência máxima                       | Elimina latência de "acordar" o núcleo no meio de um matmul.                              |
+| Desativação de C-states profundos | `intel_idle.max_cstate=1` no kernel cmdline                       | Reduz a latência de wake-up de ~100 µs para ~1 µs.                                        |
+| Transparent Huge Pages            | `always` (ou `madvise` explícito)                                 | Menos TLB misses → menos stalls no gargalo real (memória).                               |
+| `vm.swappiness=10`                | Reduz paginação agressiva do modelo                                | Modelos grandes (GB) não devem encostar em swap durante inferência.                       |
+| `vm.vfs_cache_pressure=50`        | Mantém dentries/inodes em cache                                    | Menos I/O ao carregar o `.gguf` repetidas vezes.                                          |
+| `net.core.rmem_max/wmem_max`      | Buffers de socket maiores                                          | Importante para o `llama-server` (HTTP) e registry Docker.                                |
+| `kernel.numa_balancing=0`         | Desliga o balanceamento automático NUMA (só single-socket)         | Reduz "roubo" de ciclos por migração de páginas irrelevante em 1 socket.                  |
+| Huge pages estáticas              | Reserva de 2 MiB pages                                             | Ganho direto em latência de acesso a pesos.                                              |
+| `io_uring`                        | Verificação de disponibilidade                                     | Alinha o carregamento de modelos com I/O assíncrono moderno.                              |
+| `-DGGML_NATIVE=ON`                | O compilador usa a ISA **real** da CPU                            | Evita instruções não suportadas e extrai todo o AVX2/FMA/F16C disponível.                 |
+
+Detalhes completos e a fundamentação técnica de cada item estão em
+[`docs/TUNING.md`](docs/TUNING.md).
+
+---
+
+## 📊 Como testar performance
+
+Depois do build, use o `llama-bench` para medir tokens/s:
+
+```bash
+cd /opt/llama.cpp
+./build/bin/llama-bench -m /opt/models/<modelo>.gguf -p 512 -n 128 -t 24
+```
+
+Compare **antes** e **depois** do tuning (rode o benchmark, aplique o
+`build.sh`, rode de novo). Para o Xeon, use `-t 24`; para o Ryzen, `-t 6`.
+
+Salve os resultados em `docs/STATE.md` na seção "Métricas de performance".
+
+---
+
+## ⚠️ Avisos e limitações (leia antes de tudo)
+
+1. **Xeon E5-2678 v3 NÃO tem AVX-512.** Apenas AVX2. Não compile com
+   `-mavx512*`.
+2. **Ryzen 5 3500X NÃO tem AVX-512.** Apenas AVX2. O `-march` correto é
+   `znver2`.
+3. **Single channel no Ryzen** reduz a banda de memória em **~50%**. Para
+   inferência em CPU, isto é gravíssimo — o script **alerta explicitamente**
+   durante a detecção. Se possível, popule um segundo canal.
+4. **A RX 580 não deve ser usada para computação** — apresenta artefatos de
+   tela sob carga. Use-a apenas para saída de vídeo.
+5. **Modelos acima de 7B Q4 não caberão em 16 GB de RAM** no Xeon (sem contar
+   o sistema operacional e o KV cache). Acima disso, espere swap/thrashing.
+6. **O tuning de kernel aumenta o consumo de energia.** Governor
+   `performance` + C-states rasos = mais watts e mais calor. Em servidor,
+   aceitável; em laptop, pense duas vezes.
+
+---
+
+## 🤝 Como contribuir
+
+1. Faça um fork.
+2. Crie um branch: `git checkout -b feat/minha-melhoria`.
+3. **Leia [`AGENTS.md`](AGENTS.md)** e **[`docs/STATE.md`](docs/STATE.md)**
+   antes de codar.
+4. Todo script Bash deve ter `set -euo pipefail`, suporte `--dry-run` e ser
+   idempotente.
+5. Teste em VM antes de sugerir mudanças de kernel.
+6. Atualize `docs/STATE.md` e `docs/ROADMAP.md`.
+7. Abra um Pull Request descrevendo **o que** mudou e **por que**.
+
+---
+
+## 📚 Documentação
+
+| Documento                                       | Conteúdo                                        |
+|-------------------------------------------------|-------------------------------------------------|
+| [`AGENTS.md`](AGENTS.md)                        | Ponto de entrada para IAs e humanos.            |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md)            | Concluído / Em progresso / Planejado.           |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)  | Arquitetura, fluxos e decisões de design.       |
+| [`docs/STATE.md`](docs/STATE.md)                | Estado atual, métricas e próxima ação.          |
+| [`docs/HARDWARE.md`](docs/HARDWARE.md)          | Detalhes do hardware alvo.                      |
+| [`docs/TUNING.md`](docs/TUNING.md)              | Cada otimização explicada.                      |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Problemas conhecidos e soluções.           |
+
+---
+
+## 📄 Licença
+
+MIT — veja [`LICENSE`](LICENSE).

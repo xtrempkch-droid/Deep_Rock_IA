@@ -1,0 +1,15 @@
+# ai-cpu-os — artefatos a ignorar
+# Runtime/data
+profiles/ryzen/data/
+*.part
+*.gguf
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Backups gerados pelos scripts
+*.bak.*

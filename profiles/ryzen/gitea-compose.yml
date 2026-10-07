@@ -1,0 +1,52 @@
+# gitea-compose.yml — Gitea (SQLite) para o perfil ryzen do ai-cpu-os
+#
+# Sobe um servidor Gitea para hospedar projetos e servir como origem de
+# repositórios a serem construídos pelo build-runner.sh.
+#
+# Uso:
+#   cd profiles/ryzen
+#   docker compose -f gitea-compose.yml up -d
+#
+# Acesse:  http://localhost:3000
+# SSH git: ssh://git@localhost:2222/<user>/<repo>.git
+#
+# Notas de design (ver docs/ARCHITECTURE.md):
+#   - SQLite em vez de Postgres: menos partes móveis, suficiente para uso pessoal.
+#   - Volume em ./data (ajuste para o HDD de 1 TB se quiser mais espaço).
+#   - NÃO usamos a RX 580 para nada aqui (apenas saída de vídeo).
+
+services:
+  gitea:
+    image: gitea/gitea:1.22
+    container_name: gitea
+    restart: unless-stopped
+    environment:
+      # --- Configuração básica ---
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__database__DB_TYPE: "sqlite3"
+      GITEA__database__PATH: "/data/gitea/gitea.db"
+      GITEA__server__DOMAIN: "localhost"
+      GITEA__server__SSH_DOMAIN: "localhost"
+      GITEA__server__ROOT_URL: "http://localhost:3000/"
+      GITEA__server__HTTP_PORT: "3000"
+      GITEA__server__SSH_PORT: "2222"
+      GITEA__server__START_SSH_SERVER: "false"   # SSH é provido pelo mapeamento da porta 22 do container
+      GITEA__service__DISABLE_REGISTRATION: "false"
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__repository__DEFAULT_BRANCH: "main"
+      # Desativa telemetria/update-check (ambiente privado).
+      GITEA__cron__ENABLED: "true"
+    volumes:
+      - ./data/gitea:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "3000:3000"   # Web (HTTP)
+      - "2222:22"     # SSH do Git (mapeado para 2222 no host)
+    networks:
+      - ai-net
+
+networks:
+  ai-net:
+    driver: bridge

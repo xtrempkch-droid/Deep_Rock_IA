@@ -1,0 +1,60 @@
+[Unit]
+Description=ai-cpu-os · llama-server (inferência LLM em CPU)
+Documentation=file:///opt/ai-cpu-os/docs/ARCHITECTURE.md
+After=network-online.target
+Wants=network-online.target
+# Sobe depois do governor/huge pages, se aplicáveis.
+After=ai-cpu-governor.service ai-hugepages.service
+
+[Service]
+Type=simple
+# Roda como usuário dedicado e sem privilégios (sandbox básico).
+User=llama
+Group=llama
+WorkingDirectory=/opt/models
+
+# Modelo e parâmetros. Ajuste MODEL_PATH em /etc/default/ai-server.
+EnvironmentFile=-/etc/default/ai-server
+Environment=LLAMA_HOST=127.0.0.1
+Environment=LLAMA_PORT=8080
+
+# -t 24 = 1 thread por thread lógica do Xeon E5-2678 v3 (12c/24t).
+# Se medir e -t 12 for mais rápido, ajuste em /etc/default/ai-server.
+ExecStart=/opt/llama.cpp/build/bin/llama-server \
+    --model ${MODEL_PATH} \
+    --host ${LLAMA_HOST} \
+    --port ${LLAMA_PORT} \
+    --threads ${LLAMA_THREADS} \
+    --ctx-size ${LLAMA_CTX} \
+    --n-gpu-layers 0 \
+    --no-mmap
+
+# Restart robusto.
+Restart=on-failure
+RestartSec=5
+
+# Logs no journald.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-server
+
+# --- Hardening (sandbox) ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/models /var/lib/llama
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+
+# --- Limites ---
+# O llama-server mmap-a o modelo; o limite de memória é gerenciado pelo kernel.
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
