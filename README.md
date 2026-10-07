@@ -49,7 +49,7 @@ dedicado para cada um.
 
 ### Placas-mãe de referência
 
-- **Xeon:** JGINYUE X99M-D3 (LGA2011-3, DDR3, dual-channel).
+- **Xeon:** JGINYUE X99M-D3 (LGA2011-3, DDR3, quad-channel).
 - **Ryzen:** MSI B550 (AM4, DDR4) — operando em **single channel** por
   limitação de slot/controlador.
 
