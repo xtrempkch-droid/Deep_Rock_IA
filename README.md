@@ -233,6 +233,7 @@ Salve os resultados em `docs/STATE.md` na seção "Métricas de performance".
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Problemas conhecidos e soluções.           |
 | [`docs/TUTORIAL.md`](docs/TUTORIAL.md)          | **Tutorial explicado do zero** (obrigatório por marco/versão). |
 | [`docs/CI.md`](docs/CI.md)                      | Como o GitHub compila e valida o sistema (CI/CD). |
+| [`docs/VALIDATION.md`](docs/VALIDATION.md)      | **Protocolo de testes em hardware** (preenchível — traga os resultados depois). |
 
 ---
 

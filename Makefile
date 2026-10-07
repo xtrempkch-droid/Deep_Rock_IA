@@ -50,7 +50,8 @@ docs: ## Verifica se os documentos obrigatórios existem
 	@set -euo pipefail; \
 	for f in README.md AGENTS.md LICENSE docs/ROADMAP.md docs/ARCHITECTURE.md \
 	         docs/STATE.md docs/HARDWARE.md docs/TUNING.md \
-	         docs/TROUBLESHOOTING.md docs/TUTORIAL.md docs/CI.md; do \
+	         docs/TROUBLESHOOTING.md docs/TUTORIAL.md docs/CI.md \
+	         docs/VALIDATION.md; do \
 	  [[ -f "$$f" ]] || { echo "FALTANDO: $$f"; exit 1; }; \
 	done; \
 	echo "docs: OK"

@@ -126,7 +126,7 @@ jobs:
             build.sh detect-hardware.sh
             docs/ROADMAP.md docs/ARCHITECTURE.md docs/STATE.md
             docs/HARDWARE.md docs/TUNING.md docs/TROUBLESHOOTING.md
-            docs/TUTORIAL.md docs/CI.md
+            docs/TUTORIAL.md docs/CI.md docs/VALIDATION.md
             profiles/xeon/install.sh profiles/xeon/llama-build.sh
             profiles/xeon/sysctl.conf profiles/xeon/shell-ia.py
             profiles/xeon/ai-server.service
@@ -176,4 +176,8 @@ jobs:
           grep -q 'Concluído' docs/ROADMAP.md
           grep -q 'Em Progresso' docs/ROADMAP.md
           grep -q 'Métricas de performance' docs/STATE.md
+          # O protocolo de testes deve continuar preenchível e cobrir o benchmark.
+          grep -q '_(preencher)_' docs/VALIDATION.md
+          grep -q 'Bloco F' docs/VALIDATION.md
+          grep -q 'Template de relatório' docs/VALIDATION.md
           echo "Docs vivas OK."

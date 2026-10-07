@@ -90,7 +90,8 @@ ai-cpu-os/
 │   ├── TUNING.md           # Explicação de cada otimização
 │   ├── TROUBLESHOOTING.md  # Problemas conhecidos e soluções
 │   ├── CI.md               # Como o GitHub compila e valida o sistema
-│   └── TUTORIAL.md         # TUTORIAL explicado (obrigatório por marco/versão)
+│   ├── TUTORIAL.md         # TUTORIAL explicado (obrigatório por marco/versão)
+│   └── VALIDATION.md       # Protocolo de testes em hardware (preenchível)
 ├── profiles/
 │   ├── xeon/               # Servidor de inferência
 │   │   ├── install.sh      # Instala deps + llama.cpp + serviço
@@ -127,6 +128,7 @@ ai-cpu-os/
 | Resolver um problema                   | `docs/TROUBLESHOOTING.md`                    |
 | **Aprender o projeto do zero (passo a passo explicado)** | **`docs/TUTORIAL.md`**        |
 | Como o CI compila/valida o sistema     | `.github/workflows/`, `docs/CI.md`, `Makefile` |
+| **Testar em hardware e registrar resultados** | **`docs/VALIDATION.md`**              |
 | Scripts principais                     | `build.sh`, `detect-hardware.sh`             |
 | Perfil Xeon (inferência)               | `profiles/xeon/`                             |
 | Perfil Ryzen (build/registry/Gitea)    | `profiles/ryzen/`                            |
@@ -182,12 +184,14 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-07
-- **O que mudou:** Adicionada a esteira de CI/CD (`.github/workflows/`:
-  `validate`, `build-llama`, `container`), `Makefile`, `docker/` e
-  `docs/CI.md`. Novas regras 11 (CI verde antes do PR) e 12 (nunca AVX-512;
-  `GGML_NATIVE=OFF` em containers). Criado `profiles/ryzen/llama-build.sh`
-  e adicionado `--march` ao build compartilhado. Os scripts e a documentação
-  continuam **não testados em hardware real** (ver `docs/STATE.md`).
+- **O que mudou:** Criado **`docs/VALIDATION.md`** — protocolo preenchível de
+  testes em hardware (blocos A–L), para executar no Xeon/Ryzen e trazer os
+  resultados depois (consolidados em `docs/STATE.md` e `docs/TUTORIAL.md`).
+  Ligado no AGENTS/README/TUTORIAL/ROADMAP/Makefile e verificado pelo job
+  `project-rules` do CI.
+- **Data anterior:** 2026-10-07 — Adicionada a esteira de CI/CD
+  (`.github/workflows/`: `validate`, `build-llama`, `container`), `Makefile`,
+  `docker/` e `docs/CI.md`. Novas regras 11 e 12.
 - **Data anterior:** 2026-10-07 — Criação do `docs/TUTORIAL.md` e da diretriz
   de tutorial obrigatório por marco/versão.
 - **Data anterior:** 2026-10-07 — Criação inicial do repositório (todos os

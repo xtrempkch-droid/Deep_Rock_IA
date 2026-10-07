@@ -48,6 +48,7 @@
 | `profiles/ryzen/build-runner.sh`      | ✅      | ✅                 | ❌                  |
 | `tests/smoke-test.sh`                 | ✅      | ✅                 | ❌                  |
 | `docs/TUTORIAL.md`                    | ✅      | ⚠️ (revisão manual)| ❌                  |
+| `docs/VALIDATION.md` (protocolo)      | ✅      | ⚠️ (revisão manual)| ☐ **a executar**    |
 | `profiles/ryzen/llama-build.sh`       | ✅      | ✅                 | ❌                  |
 | `docker/Dockerfile`                   | ✅      | ⚠️ (buildx --check)| ❌                  |
 | `.github/workflows/*.yml`             | ✅      | ⚠️ (yamllint)      | ❌ (1º run pendente)|
@@ -143,6 +144,12 @@ Tempo de build do llama.cpp: *(pendente)*
 `container` (imagem publicada no GHCR). A Release `ai-cpu-os v0.2.0` foi
 publicada com os binários `.tar.gz` dos dois perfis. Ver § 3.1.
 
+> 📋 **Protocolo de testes pronto:** siga **[`docs/VALIDATION.md`](VALIDATION.md)**
+> — roteiro preenchível (blocos A–L: VM, detecção, build, tuning, servidor,
+> benchmark, Ryzen/registry/Gitea, imagem do GHCR, idempotência, reversão).
+> **Basta executar os blocos e trazer os resultados preenchidos** — depois eles
+> são consolidados aqui (§ 2/§ 3/§ 5/§ 6) e no `docs/TUTORIAL.md`.
+
 **Passo 1 (AGORA) — Subir uma VM Debian 12 e validar `detect-hardware.sh` +
 `build.sh --dry-run`.**
 
@@ -199,3 +206,4 @@ Ao terminar qualquer tarefa:
 | 2026-10-07 | 1º run do CI no GitHub: `validate` ✅ verde (4/4 jobs). `container` falhou e revelou a falta de `pkg-config` (bug também presente no build nativo) — corrigido em 3 lugares + docs. |
 | 2026-10-07 | Publicada a versão **`0.2.0`** (tag `v0.2.0`, commit `4cde4bb`): marco de CI/CD. **Nenhuma validação de hardware foi feita nesta versão** — ver § 2 e § 3.2. O `build-llama` e o `container` foram disparados pela tag. |
 | 2026-10-07 | 2º bug achado pelo CI: imagem quebrava com `exit code 127` (RPATH absoluto dos binários do llama.cpp). Corrigido em `b5d86bc` (ver § 3.2 e `docs/CI.md` § 8.2). PR do Dependabot ficou ✅ verde. |
+| 2026-10-07 | Criado **`docs/VALIDATION.md`**: protocolo preenchível de testes em hardware (blocos A–L). É o caminho para trazer os resultados e fechar a validação real. Ver § 6. |

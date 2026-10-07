@@ -776,6 +776,7 @@ Você agora sabe:
 | Detalhes técnicos do hardware | [`docs/HARDWARE.md`](HARDWARE.md) |
 | Saber o que está feito/planejado | [`docs/ROADMAP.md`](ROADMAP.md) |
 | Saber o que **não** foi testado | [`docs/STATE.md`](STATE.md) |
+| **Testar em hardware e registrar os resultados** | **[`docs/VALIDATION.md`](VALIDATION.md)** |
 | Contribuir | [`README.md`](../README.md) § "Como contribuir" |
 
 ---
