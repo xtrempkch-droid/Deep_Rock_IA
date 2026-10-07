@@ -37,6 +37,8 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | Correção do bug de RPATH na imagem Docker (achado pelo CI: `exit 127`)    | 2026-10-07 | 2026-10-07 |
 | Protocolo de testes em hardware: `docs/VALIDATION.md` (blocos A–L)        | 2026-10-07 | 2026-10-07 |
 | **ISO de instalação:** `iso/build-iso.sh` + preseed + serviço de 1º boot + `docs/ISO.md` | 2026-10-07 | 2026-10-07 |
+| `docs/JOURNAL.md` — diário de sessões e continuidade (Regra 14) + "Retomada rápida" | 2026-10-07 | 2026-10-07 |
+| Unificação do hardware: Xeon = **quad channel** (era "dual" em alguns docs) | 2026-10-07 | 2026-10-07 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em

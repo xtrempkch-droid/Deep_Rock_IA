@@ -51,7 +51,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	for f in README.md AGENTS.md LICENSE docs/ROADMAP.md docs/ARCHITECTURE.md \
 	         docs/STATE.md docs/HARDWARE.md docs/TUNING.md \
 	         docs/TROUBLESHOOTING.md docs/TUTORIAL.md docs/CI.md \
-	         docs/VALIDATION.md docs/ISO.md; do \
+	         docs/VALIDATION.md docs/ISO.md docs/JOURNAL.md; do \
 	  [[ -f "$$f" ]] || { echo "FALTANDO: $$f"; exit 1; }; \
 	done; \
 	echo "docs: OK"

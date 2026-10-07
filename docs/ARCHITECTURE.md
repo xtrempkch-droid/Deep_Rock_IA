@@ -41,7 +41,7 @@ fluem** e **por que decidimos assim** — incluindo alternativas descartadas.
                                         ▼
         ┌─────────────────────────────────────────────────────────────────┐
         │                    SISTEMA A — PERFIL "xeon"                     │
-        │          Intel Xeon E5-2678 v3 · 12c/24t · 16 GB DDR3 DC         │
+        │          Intel Xeon E5-2678 v3 · 12c/24t · 16 GB DDR3 QC         │
         │                                                                  │
         │   ┌────────────────────────┐        ┌────────────────────────┐  │
         │   │   llama-server         │◀───────│   shell-ia.py          │  │
@@ -207,6 +207,9 @@ tests/smoke-test.sh  (validação rápida)
 7. **O que é verificável, é verificado:** toda regra do `AGENTS.md` que puder
    ser checada por máquina vira um job do CI (`project-rules`), em vez de
    confiar em disciplina humana.
+8. **Continuidade é um requisito, não um extra:** o conhecimento fica no
+   repositório (`AGENTS.md`, `STATE.md`, `JOURNAL.md`), não na cabeça de quem
+   trabalhou. Toda sessão termina com o diário atualizado (Regra 14).
 
 ---
 

@@ -45,7 +45,7 @@ dedicado para cada um.
 
 | Perfil  | CPU                      | Núcleos/Threads | ISA              | Memória            | Armazenamento | Função principal                        |
 |---------|--------------------------|-----------------|------------------|--------------------|---------------|-----------------------------------------|
-| `xeon`  | Intel Xeon E5-2678 v3    | 12c / 24t       | Haswell-EP, AVX2 | 16 GB DDR3-1333 DC | NVMe 256 GB   | Servidor de inferência (llama.cpp)      |
+| `xeon`  | Intel Xeon E5-2678 v3    | 12c / 24t       | Haswell-EP, AVX2 | 16 GB DDR3-1333 QC | NVMe 256 GB   | Servidor de inferência (llama.cpp)      |
 | `ryzen` | AMD Ryzen 5 3500X        | 6c / 6t         | Zen 2, AVX2      | 64 GB DDR4 SC ⚠️   | NVMe + HDD 1T | Build (Docker), registry privado, Gitea |
 
 > ⚠️ **Nenhuma das duas CPUs possui AVX-512 ou AMX.** Qualquer guia que
@@ -273,6 +273,7 @@ Salve os resultados em `docs/STATE.md` na seção "Métricas de performance".
 | [`docs/CI.md`](docs/CI.md)                      | Como o GitHub compila e valida o sistema (CI/CD). |
 | [`docs/VALIDATION.md`](docs/VALIDATION.md)      | **Protocolo de testes em hardware** (preenchível — traga os resultados depois). |
 | [`docs/ISO.md`](docs/ISO.md)                    | 🎯 **A ISO de instalação** (entregável final): decisões, como gerar, limitações. |
+| [`docs/JOURNAL.md`](docs/JOURNAL.md)            | 📓 **Diário de sessões + continuidade** — o que foi feito, threads abertas e armadilhas. |
 
 ---
 

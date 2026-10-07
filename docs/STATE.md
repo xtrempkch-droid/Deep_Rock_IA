@@ -56,6 +56,7 @@
 | `iso/build-iso.sh` (gerador da ISO)   | ✅      | ✅ shellcheck      | ❌ (**nunca executado**)|
 | `iso/preseed/*` (preseed, 1º boot)    | ✅      | ⚠️ (templating)    | ❌ (**nunca bootado**)|
 | `docs/ISO.md`                         | ✅      | ⚠️ (revisão manual)| ❌                  |
+| `docs/JOURNAL.md` (continuidade)      | ✅      | ⚠️ (revisão manual)| ☐ **em uso contínuo** |
 
 Legenda: ✅ sim · ❌ não · ⚠️ parcial
 
@@ -164,6 +165,10 @@ publicada com os binários `.tar.gz` dos dois perfis. Ver § 3.1.
 > Passos: `make iso-lint` → `make iso-dry-run` → `make iso DISK=/dev/nvme0n1`
 > → bootar em VM. Ver **`docs/ISO.md`**.
 
+> 📓 **Para retomar do zero (ou de outra sessão):** [`docs/JOURNAL.md`](JOURNAL.md)
+> — § 1 (retomada em 5 min), § 5 (threads abertas) e § 6 (armadilhas já
+> pisadas). Ao terminar qualquer sessão, **registre-a lá** (Regra 14 do `AGENTS.md`).
+
 > 📋 **Protocolo de testes pronto:** siga **[`docs/VALIDATION.md`](VALIDATION.md)**
 > — roteiro preenchível (blocos A–L: VM, detecção, build, tuning, servidor,
 > benchmark, Ryzen/registry/Gitea, imagem do GHCR, idempotência, reversão).
@@ -228,3 +233,4 @@ Ao terminar qualquer tarefa:
 | 2026-10-07 | 2º bug achado pelo CI: imagem quebrava com `exit code 127` (RPATH absoluto dos binários do llama.cpp). Corrigido em `b5d86bc` (ver § 3.2 e `docs/CI.md` § 8.2). PR do Dependabot ficou ✅ verde. |
 | 2026-10-07 | Criado **`docs/VALIDATION.md`**: protocolo preenchível de testes em hardware (blocos A–L). É o caminho para trazer os resultados e fechar a validação real. Ver § 6. |
 | 2026-10-07 | Registrado o **entregável final = ISO de instalação**; criado `iso/` (`build-iso.sh` + preseed + serviço de 1º boot) e `docs/ISO.md`. Nenhuma ISO gerada/bootada ainda. |
+| 2026-10-07 | Criado **`docs/JOURNAL.md`** (diário de continuidade) + "Retomada rápida" no `AGENTS.md` + **Regra 14**. Unificado o Xeon como **quad channel** e corrigido `detect-hardware.sh` (agora conta os canais reais via `Bank Locator`). |

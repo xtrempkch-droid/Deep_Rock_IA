@@ -61,7 +61,8 @@ Em uma GPU, gerar o próximo token é limitado pela **capacidade de
 processamento** (FLOPs). Em uma CPU sem GPU, o cenário muda: gerar um token
 exige ler **todos os pesos do modelo** da memória RAM. Gerar 10 tokens/s com
 um modelo de 7B Q4 (~4 GB) significa ler ~40 GB/s da RAM — e o Xeon E5-2678 v3
-com DDR3-1333 dual channel entrega apenas ~17 GB/s.
+com DDR3-1333 **quad channel** entrega cerca de ~30 GB/s efetivos: ele já
+nasce perto do limite, e cada canal que falta derruba o teto de tokens/s.
 
 **Conclusão prática:** o teto de tokens/s é ditado pela **banda de memória**.
 Por isso o projeto ataca: canais de memória, latência de acesso (huge pages),
@@ -206,7 +207,7 @@ root, cai num fallback por heurística).
 
 == Memória ==
 [i] Total:       16384 MiB (~16 GiB)
-[i] Canais:      dual (heurística por Bank Locator)   ← dual channel = banda cheia
+[i] Canais:      quad (4 canais)   ← Haswell-EP tem 4 canais; confirme no Bloco B
 
 == Armazenamento ==
 [i] NVMe: nvme0n1 (Samsung ...)   ← carrega o GGUF rápido
@@ -776,6 +777,7 @@ Você agora sabe:
 | Detalhes técnicos do hardware | [`docs/HARDWARE.md`](HARDWARE.md) |
 | Saber o que está feito/planejado | [`docs/ROADMAP.md`](ROADMAP.md) |
 | Saber o que **não** foi testado | [`docs/STATE.md`](STATE.md) |
+| **Retomar depois de um tempo parado** | **[`docs/JOURNAL.md`](JOURNAL.md)** (§ 1 e § 5) |
 | **Testar em hardware e registrar os resultados** | **[`docs/VALIDATION.md`](VALIDATION.md)** |
 | Contribuir | [`README.md`](../README.md) § "Como contribuir" |
 

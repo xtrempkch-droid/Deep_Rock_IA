@@ -7,6 +7,28 @@
 
 ---
 
+## ⚡ Retomada rápida (leia isto primeiro se chegou agora)
+
+```bash
+# 1. O essencial, nesta ordem:
+#    AGENTS.md (este) → docs/STATE.md § 6 (próxima ação) → docs/JOURNAL.md
+#    (§ 5 threads abertas · § 6 armadilhas já pisadas)
+
+# 2. Sincronizar e conferir a saúde do repositório
+cd /home/juju/Deep_Rock_IA
+git pull --ff-only
+make ci            # lint + docs + dry-run (igual ao job 'validate')
+
+# 3. Saber o que já foi PROVADO e o que NÃO foi:
+#    validate ✅ · build-llama ✅ · container ✅ · /**iso ⚠️ nunca executado**
+```
+
+> **Regra de ouro:** não confie na memória — confie no **`docs/STATE.md` § 6
+> ("Próxima ação imediata")** e no **`docs/JOURNAL.md` § 5 ("threads abertas")**.
+> Os dois são reescritos ao fim de **cada** sessão de trabalho exatamente para isto.
+
+---
+
 ## 1. Propósito do projeto
 
 O `ai-cpu-os` transforma um Debian/Ubuntu minimal em um sistema operacional
@@ -60,7 +82,8 @@ experiência de uso. Isso significa que:
 - **CPU:** Intel Xeon E5-2678 v3 — 12c/24t, Haswell-EP, **AVX2 apenas** (sem
   AVX-512, sem AMX).
 - **Placa-mãe:** JGINYUE X99M-D3 (LGA2011-3, DDR3).
-- **RAM:** 16 GB DDR3-1333, 4×4 GB, **dual channel**.
+- **RAM:** 16 GB DDR3-1333, 4×4 GB, **quad channel** (4 canais; Haswell-EP,
+  1 pente por canal).
 - **Disco:** SSD NVMe 256 GB.
 - **GPU:** nenhuma (inferência 100% CPU).
 - **Limitação conhecida:** modelos > 7B Q4 não cabem em 16 GB.
@@ -116,7 +139,8 @@ ai-cpu-os/
 │   ├── CI.md               # Como o GitHub compila e valida o sistema
 │   ├── TUTORIAL.md         # TUTORIAL explicado (obrigatório por marco/versão)
 │   ├── VALIDATION.md       # Protocolo de testes em hardware (preenchível)
-│   └── ISO.md              # 🎯 A ISO de instalação (decisões e como gerar)
+│   ├── ISO.md              # 🎯 A ISO de instalação (decisões e como gerar)
+│   └── JOURNAL.md          # 📓 Diário de sessões + continuidade (retomada)
 ├── profiles/
 │   ├── xeon/               # Servidor de inferência
 │   │   ├── install.sh      # Instala deps + llama.cpp + serviço
@@ -155,6 +179,7 @@ ai-cpu-os/
 | Como o CI compila/valida o sistema     | `.github/workflows/`, `docs/CI.md`, `Makefile` |
 | **Testar em hardware e registrar resultados** | **`docs/VALIDATION.md`**              |
 | **Gerar a ISO de instalação (entregável final)** | **`iso/build-iso.sh`**, **`docs/ISO.md`** |
+| **Retomar/continuar depois de um tempo parado** | **`docs/JOURNAL.md`** (§ 1 retomada, § 5 threads abertas) |
 | Scripts principais                     | `build.sh`, `detect-hardware.sh`             |
 | Perfil Xeon (inferência)               | `profiles/xeon/`                             |
 | Perfil Ryzen (build/registry/Gitea)    | `profiles/ryzen/`                            |
@@ -207,6 +232,11 @@ Estas regras são **obrigatórias**:
     copia o projeto inteiro; o `firstboot.sh` o executa). Ao mexer na ISO,
     atualize **`docs/ISO.md`** e o **Bloco M** de `docs/VALIDATION.md`.
     ⚠️ Nunca declare a ISO pronta sem tê-la **bootado e instalado** em VM.
+14. **SEMPRE** registrar o fim da sessão em **`docs/JOURNAL.md`**: acrescente
+    uma entrada (§ 4 — objetivo, feito, decisões, problemas, commits), atualize
+    as **threads abertas** (§ 5) e as **armadilhas** (§ 6). Junto com a
+    "Próxima ação imediata" do `STATE.md`, é o que garante que o trabalho possa
+    ser retomado **sem perder nada**. Ver o template em `docs/JOURNAL.md` § 8.
 
 ---
 
@@ -220,11 +250,12 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-07
-- **O que mudou:** Registrado o **entregável final = ISO de instalação**
-  (meta no § 1, regra 13) e criada a implementação em `iso/`
-  (`build-iso.sh` + preseed + serviço de primeiro boot) com a especificação
-  em **`docs/ISO.md`**. Nenhuma ISO foi gerada/bootada ainda — ver
-  `docs/STATE.md`.
+- **O que mudou:** Criado **`docs/JOURNAL.md`** (diário de sessões +
+  continuidade) e a seção "Retomada rápida" no topo deste arquivo; nova
+  **Regra 14** (registrar o fim da sessão no diário). Também unificado o
+  hardware: o Xeon é **quad channel** (era "dual" em alguns docs).
+- **Data anterior:** 2026-10-07 — Registrado o **entregável final = ISO de
+  instalação** (meta no § 1, regra 13) e criada a implementação em `iso/`.
 - **Data anterior:** 2026-10-07 — Criado `docs/VALIDATION.md` — protocolo
   preenchível de testes em hardware (blocos A–L).
 - **Data anterior:** 2026-10-07 — Adicionada a esteira de CI/CD

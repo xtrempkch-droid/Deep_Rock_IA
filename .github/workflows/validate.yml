@@ -127,6 +127,7 @@ jobs:
             docs/ROADMAP.md docs/ARCHITECTURE.md docs/STATE.md
             docs/HARDWARE.md docs/TUNING.md docs/TROUBLESHOOTING.md
             docs/TUTORIAL.md docs/CI.md docs/VALIDATION.md docs/ISO.md
+            docs/JOURNAL.md
             iso/build-iso.sh iso/preseed/ai-cpu-os.cfg
             iso/preseed/late-command.sh iso/preseed/firstboot.sh
             iso/preseed/ai-cpu-os-firstboot.service
@@ -197,4 +198,11 @@ jobs:
           grep -q '@@PROFILE@@' iso/preseed/firstboot.sh
           grep -q 'late_command' iso/preseed/ai-cpu-os.cfg
           grep -q 'firstboot-pending' iso/preseed/firstboot.sh
+          # O diário de continuidade é o que permite retomar sem perder nada
+          # (Regra 14): precisa continuar existindo e com as seções-chave.
+          grep -qi 'retomada em 5 minutos' docs/JOURNAL.md
+          grep -q 'Threads abertas' docs/JOURNAL.md
+          grep -q 'Armadilhas já pisadas' docs/JOURNAL.md
+          grep -q 'Como registrar uma nova sessão' docs/JOURNAL.md
+          grep -q 'docs/JOURNAL.md' AGENTS.md
           echo "Docs vivas OK."

@@ -35,17 +35,23 @@ características aqui descritas.
 
 ### Memória: 16 GB DDR3-1333
 
-| Propriedade     | Valor                                       |
-|-----------------|---------------------------------------------|
-| Capacidade      | 16 GB total (4 × 4 GB)                       |
-| Tipo            | DDR3-1333 (PC3-10600)                        |
-| Canais          | **Dual channel**                             |
-| Banda teórica   | ≈ 21,3 GB/s (2 canais × 1333 MT/s × 8 B)     |
-| Banda efetiva   | tipicamente ~15–18 GB/s                       |
+> ℹ️ **Confirme com `detect-hardware.sh`** (`dmidecode -t memory`). O
+> **Haswell-EP tem 4 canais** e esta placa tem 4 slots, todos populados —
+> portanto o esperado é **quad channel** (1 pente por canal).
+
+| Propriedade     | Valor                                                    |
+|-----------------|----------------------------------------------------------|
+| Capacidade      | 16 GB total (4 × 4 GB)                                   |
+| Tipo            | DDR3-1333 (PC3-10600)                                    |
+| Canais          | **Quad channel** (4 × 4 GB, 1 pente por canal)           |
+| Banda teórica   | ≈ 42,7 GB/s (4 canais × 1333 MT/s × 8 B)                 |
+| Banda efetiva   | tipicamente ~28–34 GB/s                                   |
 
 > **Impacto em LLM:** em inferência CPU-bound, a banda de memória é o
-> gargalo dominante. 16 GB limita modelos a ~7B Q4, e a banda de ~17 GB/s
-> define o teto de tokens/s.
+> gargalo dominante. O limite aqui é a **capacidade** (16 GB → ~7B Q4), e a
+> banda de ~30 GB/s define o teto de tokens/s. Confirme os canais no
+> Bloco B de [`VALIDATION.md`](VALIDATION.md): se aparecer **dual** em vez de
+> quad, a banda cai ~50% e o teto de tokens/s também.
 
 ### Armazenamento
 
@@ -123,7 +129,7 @@ características aqui descritas.
 | Núcleos/Threads    | 12c / 24t              | 6c / 6t                |
 | AVX-512            | ❌                     | ❌                     |
 | AVX2 / FMA / F16C  | ✅                     | ✅                     |
-| Canais de memória  | Dual ✅                | Single ⚠️              |
+| Canais de memória  | Quad ✅                | Single ⚠️              |
 | RAM                | 16 GB DDR3             | 64 GB DDR4             |
 | GPU para compute   | n/a                    | ❌ (RX 580 instável)   |
 

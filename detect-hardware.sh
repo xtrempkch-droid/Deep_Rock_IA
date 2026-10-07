@@ -156,34 +156,42 @@ detect_ram() {
   fi
 
   # Heurística de canais: assumindo 2 slots por canal (típico de placas AM4/X99),
-  # DIMMs >= 4 => dual channel; 2 DIMMs => provavelmente 1 por canal (dual);
-  # 1 DIMM => single channel.
+  # DIMMs >= 4 => pelo menos dual; 2 DIMMs => provavelmente 1 por canal;
+  # 1 DIMM => single channel. A contagem REAL de canais vem do 'Bank Locator'
+  # do dmidecode, logo abaixo (quando disponível).
   local per_channel="${AI_DIMMS_PER_CHANNEL:-2}"
   if [[ "$populated" -ge 1 ]]; then
     if [[ "$populated" -le 1 ]]; then
-      RAM_CANNELS="single"
+      RAM_CANNELS="single (1 DIMM)"
     elif [[ "$populated" -ge 2 && "$populated" -lt $(( per_channel * 2 )) ]]; then
-      # 2 DIMMs com 1 por canal ainda pode ser dual; com 2 no mesmo canal = single.
-      # Sem DMI completo não é possível saber com certeza — reportamos "provável".
-      RAM_CANNELS="provável dual (2 DIMMs)"
+      RAM_CANNELS="provável dual (${populated} DIMMs)"
     else
-      RAM_CANNELS="dual"
+      RAM_CANNELS="provável dual+ (${populated} DIMMs)"
     fi
   fi
 
-  # Override de canais: se dmidecode expôs 'Bank Locator', tentamos contar canais distintos.
+  # Contagem real de canais: se dmidecode expôs 'Bank Locator', contamos quantos
+  # canais distintos existem (1 = single, 2 = dual, 3 = triple, 4 = quad).
+  # Isto corrige o caso do Xeon E5-2678 v3 com 4 canais, que antes era sempre
+  # reportado como 'dual'.
   if [[ -n "$dmidecode_out" ]]; then
     local banks
     banks="$(grep -E '^[[:space:]]*Bank Locator:' <<<"$dmidecode_out" | sed 's/.*Bank Locator: *//' | sort -u | wc -l || echo 0)"
     if [[ "$banks" -ge 2 && "$populated" -ge 2 ]]; then
-      RAM_CANNELS="dual (heurística por Bank Locator)"
+      case "$banks" in
+        2) RAM_CANNELS="dual (2 canais)" ;;
+        3) RAM_CANNELS="triple (3 canais)" ;;
+        4) RAM_CANNELS="quad (4 canais)" ;;
+        *) RAM_CANNELS="${banks} canais" ;;
+      esac
+      log_info "Canais distintos (Bank Locator): ${banks}"
     fi
   fi
 
   log_info "Canais:      ${RAM_CANNELS}"
 
   # Heurística de alerta: single channel é crítico (Ryzen alvo).
-  if [[ "$RAM_CANNELS" == "single" ]]; then
+  if [[ "$RAM_CANNELS" == single* ]]; then
     log_warn "MEMÓRIA EM SINGLE CHANNEL — perda de ~50% de banda, crítico para inferência em CPU!"
     log_warn "Nas MSI B550 (AM4), use os slots A2 + B2 para dual channel."
   fi
