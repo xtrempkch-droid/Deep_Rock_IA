@@ -43,26 +43,24 @@ inferência em CPU, com foco obsessivo em:
 O projeto foi desenhado em torno de **dois sistemas reais** e possui um perfil
 dedicado para cada um.
 
-| Perfil  | CPU                      | Núcleos/Threads | ISA              | Memória            | Armazenamento | Função principal                        |
-|---------|--------------------------|-----------------|------------------|--------------------|---------------|-----------------------------------------|
-| `xeon`  | Intel Xeon E5-2678 v3    | 12c / 24t       | Haswell-EP, AVX2 | 16 GB DDR3-1333 QC | NVMe 256 GB   | Servidor de inferência (llama.cpp)      |
-| `ryzen` | AMD Ryzen 5 3500X        | 6c / 6t         | Zen 2, AVX2      | 64 GB DDR4 SC ⚠️   | NVMe + HDD 1T | Build (Docker), registry privado, Gitea |
+| Perfil  | CPU                      | Núcleos/Threads | ISA                | Memória            | Armazenamento | Função principal                        |
+|---------|--------------------------|-----------------|--------------------|--------------------|---------------|-----------------------------------------|
+| `xeon`  | Intel Xeon E5-2680 v4    | 14c / 28t       | Broadwell-EP, AVX2 | 16 GB DDR3-1333 QC | NVMe 256 GB   | Servidor de inferência (llama.cpp)      |  # tem que corrigir todo o projeco devido a atualizaçao depois da atualizaçao por favor apagar esse comentario
+| `ryzen` | AMD Ryzen 5 3500X        | 6c / 6t         | Zen 2, AVX2        | 64 GB DDR4 SC ⚠️   | NVMe + HDD 1T | Build (Docker), registry privado, Gitea |  #deixar todo o sistema de uma forma que todos os Ryzen se beneficie e depois da mudança apagar esse comentario
 
-> ⚠️ **Nenhuma das duas CPUs possui AVX-512 ou AMX.** Qualquer guia que
+> ⚠️ **Nenhuma das duas CPUs possui AVX-512 ou AMX.** Qualquer guia que    # deixar em aberto a opçao para que outras maquias possao usar ( ate mesmo as que tem avx-512) e depois apagar o comentario
 > sugira habilitar `-mavx512` para este hardware está errado. O script
 > **verifica as flags em `/proc/cpuinfo`** antes de aplicar qualquer `-march`.
 
 ### Placas-mãe de referência
 
 - **Xeon:** JGINYUE X99M-D3 (LGA2011-3, DDR3, quad-channel).
-- **Ryzen:** MSI B550 (AM4, DDR4) — operando em **single channel** por
-  limitação de slot/controlador.
-
+- **Ryzen:** MSI B550 (AM4, DDR4)
 ---
 
 ## 📋 Pré-requisitos
 
-- **Debian 12+ (Bookworm)** ou **Ubuntu 22.04+ (Jammy)** — instalação mínima.
+- **Debian 12+ (Bookworm)** ou **Ubuntu 22.04+ (Jammy)** — instalação mínima.  # a ideia e ter uma imagem do ubuntu server-MOD com essas otimizaçoes #
 - Acesso `root` (ou `sudo`).
 - Conexão com a internet para baixar pacotes e o llama.cpp.
 - ~10 GB livres em disco (build do llama.cpp + modelos pequenos).
