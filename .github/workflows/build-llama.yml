@@ -45,7 +45,7 @@ jobs:
           - profile: ryzen
             desc: "Zen 2: AVX2/FMA/F16C + -march=znver2"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Info do alvo
         run: |
@@ -124,7 +124,7 @@ jobs:
           tar -czf "dist/${name}.tar.gz" -C dist "${name}"
           ls -la dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ai-cpu-os-llama-${{ matrix.profile }}
           path: dist/*.tar.gz
