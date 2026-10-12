@@ -937,7 +937,7 @@ Orçamento liberado: o item mais pesado que restava no § 3.1 do `docs/ISO.md`
 - Resta **só o item 2** do § 3.1 (`firstboot.sh` passar `--source`) para o 1º boot
   ficar 100% offline.
 
-**Commits desta sessão:** (a preencher após o push).
+**Commits desta sessão:** `e1f09e9` — `feat(iso): repositório apt local na mídia (--iso-repo)`.
 
 ---
 
