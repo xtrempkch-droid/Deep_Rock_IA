@@ -815,7 +815,7 @@ Ou seja: o usuário estava respondendo ativamente as dúvidas abertas do § 5.3.
 - O **tamanho real** da ISO com modelo (~4,3 GB estimado) continua sendo
   **estimativa** — nenhuma ISO foi gerada.
 
-**Commits desta sessão:** (a preencher após o push).
+**Commits desta sessão:** `bfc8eca` — `feat(iso): o modelo .gguf vai na mídia (--iso-model)`.
 
 ---
 
