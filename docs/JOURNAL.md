@@ -428,6 +428,87 @@ verificação automática do autoinstall.yaml a partir da ISO gerada".
 
 ---
 
+### Sessão #12 — 2026-10-12 · 🧬 Zen 3/4 prontos (sem hardware) + 🎮 GPU como opção
+
+**Objetivo (pedido do usuário, verbatim):** *"mas não tenho hardware zen 3 e zen 4
+para testar mas já deixe pronto o suporte. sei que usar gpu era a ideia base, mas
+seria de bom tom deixar em aberto uma opção. vai que alguém queira usar uma gpu"*.
+
+**Feito:**
+
+1. **Corpus de CPUs reais** (`tests/families-matrix.txt`, ~60 modelos) +
+   **`tests/test-families.sh`**, que roda a MESMA `pick_family` do build. É a
+   resposta direta ao "deixe pronto sem eu ter o hardware": a parte do suporte
+   que dá para provar sem o CPU é a **regra de seleção** — e é onde estavam os
+   erros.
+2. **O corpus achou 10 modelos mal atribuídos** (ver "Problemas" abaixo).
+3. **`build-llama` do CI** passou a compilar também para `amd-zen3`,
+   `amd-zen4` e `intel-skylake-avx512` — ou seja, o CI produz binário para
+   famílias que ninguém aqui possui.
+4. **GPU como opção explícita**: `llama-build.sh --gpu <cuda|rocm|vulkan|sycl|metal>`,
+   `--gpu-check` (somente leitura) e `--cmake-extra` (escape hatch; o caso real
+   é `-DAMDGPU_TARGETS=gfx803` para a RX 580).
+5. **`detect-hardware.sh`** passou a detectar GPU e a dizer, com todas as
+   letras, que ela **não** é usada para computação por padrão — silêncio aqui
+   faria alguém supor aceleração que não existe. Nova linha `GPU=` na saída
+   consumível por script.
+6. **`docs/GPU.md`** + **Bloco P** de `VALIDATION.md`: o caminho completo, os
+   avisos, o caso da RX 580 (Vulkan, **não** ROCm — Polaris saiu do ROCm) e a
+   regra de não misturar medição de GPU com os números de CPU do `STATE.md`.
+7. Docs: `docs/FAMILIES.md` § 9 (testes + **status por família**: corpus,
+   compilação no CI e hardware, em colunas separadas), `AGENTS.md` (Regra 12-c
+   sobre GPU + árvore), `README.md` (nota de GPU), `Makefile`
+   (`families-test`, `gpu-check`, `GPU=`), `STATE`/`ROADMAP`/`validation.yml`.
+
+**Decisões (e por quê):**
+
+- **Provar o que dá para provar.** Sem Zen 3/4 em casa, o honesto é separar
+  três coisas que costumam vir juntas no "suportado": casamento **testado**,
+  compilação **testada**, hardware **não medido**. A tabela do § 9.3 tem uma
+  coluna para cada.
+- **GPU: flag explícita, não papel.** Criar `roles/gpu-inference` seria um papel
+  inteiro sustentado por zero medição. Uma flag documentada + registro entrega
+  valor hoje e pode virar papel quando houver número (registrado no ROADMAP).
+- **Não existe `--gpu auto`.** Escolher backend sozinho é o tipo de mágica que
+  "funciona" na máquina errada. Backend é obrigatório.
+- **Registro no `AI-CPU-OS-BUILD.txt`.** Sem isso, alguém compara `llama-bench`
+  de GPU com a tabela de CPU e conclui qualquer coisa.
+- **Escape hatch (`--cmake-extra`)** em vez de embutir suporte a cada GPU
+  antiga: `gfx803` é um detalhe da RX 580, não do projeto.
+
+**Problemas encontrados e resolvidos (todos pelo corpus, nenhum pelo build):**
+
+- 🐛 **Nenhum EPYC casava.** O regex era `EPYC .* [0-9]{3}1`, mas o espaço antes
+  dos dígitos é o MESMO que já está em `"EPYC "` — o padrão exigia dois espaços.
+  Naples (7601), Rome (7742), Milan (7763), Genoa (9554), Siena (8324P): todos
+  caíam no `generic`. Isso **não** aparece num teste de compilação: o build
+  funciona com `generic`, só que sem `-march` — o silêncio que custa desempenho.
+- 🐛 **Série Ryzen 8000 é Zen 4** (8500G, 8600G, 8700G, 8845HS) e não casava
+  com nada: caía em `generic`. Passou a casar via `8[0-9]{3}`.
+- 🐛 **EPYC Genoa/Siena** idem (`9554`, `8324P`) → adicionados.
+- 🐛 **Bug no próprio `--gpu`**, pego ainda no `--dry-run`: as flags eram
+  capturadas com `$(gpu_apply)`, que devolvia **também as linhas de log** (o
+  `log_info` escreve em stdout) — o argumento ia inteiro e corrompido para o
+  CMake. Separado em `gpu_announce` (só loga) + `gpu_cmake_flags` (só ecoa a
+  flag), e as flags passaram a ser adicionadas **antes** de imprimir a lista.
+- `shellcheck SC2254` no `case "$GPU_BACKENDS"` → trocado por comparação em loop.
+- `SC2034` (`GPU_MODELS` sem uso) → variável removida.
+- `! grep` disparando "event not found" **no meu terminal** (history expansion
+  do bash interativo), não no repositório: guarda negativo refeito com `test`.
+
+**NÃO feito / não testado (importante):**
+
+- **Nenhum backend de GPU foi compilado ou executado.** As flags são as do
+  llama.cpp e o caminho está documentado; não há medição nenhuma.
+- **Zen 3/4 continuam sem medição em hardware** — a coluna "hardware" do
+  `docs/FAMILIES.md` § 9.3 segue ❌, de propósito.
+- `--gpu-check` foi executado apenas nesta máquina (GPUs antigas, sem backend
+  utilizável): ele *relata*, não valida um caminho feliz.
+
+**Commits desta sessão:** (a preencher após o push).
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,

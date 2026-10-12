@@ -267,6 +267,21 @@ Compare **antes** e **depois** do tuning (rode o benchmark, aplique o
 
 Salve os resultados em `docs/STATE.md` na seção "Métricas de performance".
 
+### E se eu quiser usar uma GPU?
+
+O projeto é de inferência **100% em CPU** — mas a porta fica aberta, de forma
+**explícita** (nunca automática):
+
+```bash
+bash llama-build.sh --gpu-check        # relata GPUs e backends disponíveis
+bash llama-build.sh --gpu vulkan       # cuda | rocm | vulkan | sycl | metal
+```
+
+⚠️ Com GPU, todo o tuning de CPU daqui passa a ser **secundário** e os números
+de `docs/STATE.md` **não valem** para esse build — VRAM, não banda de RAM, vira
+o limite. Leia **[`docs/GPU.md`](docs/GPU.md)** antes: está tudo lá, inclusive o
+caso da RX 580 (Vulkan, não ROCm) e o que **não** foi testado.
+
 ---
 
 ## ⚠️ Avisos e limitações (leia antes de tudo)

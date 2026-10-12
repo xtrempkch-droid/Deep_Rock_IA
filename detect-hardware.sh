@@ -6,13 +6,14 @@
 # RAM total, canais de memória (single/dual/quad) e tipo de armazenamento
 # (NVMe vs SATA).
 #
-# Ao final, imprime duas linhas consumíveis por scripts:
+# Ao final, imprime três linhas consumíveis por scripts:
 #   FAMILY=<id>      família de microarquitetura (ex.: intel-broadwell)
 #   ROLE=<id>        papel sugerido da máquina (inference | builder)
+#   GPU=<resumo>      GPU detectada (informativo: NÃO é usada para computação)
 #
 # Uso:
 #   ./detect-hardware.sh            # relatório completo
-#   ./detect-hardware.sh --quiet    # apenas as linhas FAMILY= e ROLE=
+#   ./detect-hardware.sh --quiet    # apenas as linhas FAMILY=, ROLE= e GPU=
 #
 # Este script é SOMENTE LEITURA — não altera nada no sistema.
 # -----------------------------------------------------------------------------
@@ -40,7 +41,8 @@ detect-hardware.sh — relatório de hardware, família de CPU e papel
 Uso:
   ./detect-hardware.sh [--quiet]
 
-  --quiet    Imprime somente as linhas 'FAMILY=<id>' e 'ROLE=<inference|builder>'.
+  --quiet    Imprime somente as linhas 'FAMILY=<id>', 'ROLE=<inference|builder>'
+             e 'GPU=<resumo>'.
   -h|--help  Mostra esta ajuda.
 
 Variáveis:
@@ -256,6 +258,53 @@ resolve_family() {
 }
 
 # ---------------------------------------------------------------------------
+# GPU (informativo — o ai-cpu-os NÃO usa GPU por padrão)
+# ---------------------------------------------------------------------------
+# Por que detectar se não usamos: para poder dizer explicitamente "encontrei
+# esta GPU, ela NÃO está sendo usada para computação — se você quiser usá-la,
+# existe um caminho opt-in (docs/GPU.md)". Silêncio aqui faria alguém supor
+# que a GPU está acelerando a inferência quando ela não está.
+GPU_SUMMARY="none"
+
+detect_gpu() {
+  section "GPU"
+
+  if ! command -v lspci >/dev/null 2>&1; then
+    log_warn "lspci indisponível (instale 'pciutils') — GPU não inspecionada."
+    GPU_SUMMARY="unknown"
+    return 0
+  fi
+
+  local line models=""
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    models="${models}${line##*: }"$'\n'
+  done < <(lspci 2>/dev/null | grep -Ei 'vga|3d|display' || true)
+
+  if [[ -z "$models" ]]; then
+    log_info "Nenhuma GPU de vídeo/computação encontrada."
+    GPU_SUMMARY="none"
+    return 0
+  fi
+
+  local m first=""
+  while IFS= read -r m; do
+    [[ -n "$m" ]] || continue
+    log_info "GPU: ${m}"
+    [[ -z "$first" ]] && first="$m"
+  done <<<"$models"
+
+  # "vendor: modelo" do primeiro dispositivo, para a linha consumível por script.
+  GPU_SUMMARY="$(printf '%s' "$first" | tr ' ' '_')"
+
+  log_warn "A(s) GPU(s) acima NÃO são usadas para computação por padrão."
+  log_info "Este projeto é de inferência 100%% em CPU; a GPU é só saída de vídeo."
+  log_info "Quer usar a GPU? Existe caminho opt-in: docs/GPU.md"
+  log_info "  bash llama-build.sh --gpu-check      # relata o que existe aqui"
+  log_info "  bash llama-build.sh --gpu vulkan     # build EXPLÍCITO com backend"
+}
+
+# ---------------------------------------------------------------------------
 # Papel sugerido da máquina (inference | builder)
 # ---------------------------------------------------------------------------
 # O papel é uma decisão de USO, não de CPU: o mesmo hardware pode servir para
@@ -338,6 +387,7 @@ main() {
   detect_isa
   detect_ram
   detect_storage
+  detect_gpu
   resolve_family
 
   local role
@@ -359,13 +409,13 @@ main() {
     fi
     if [[ "$role" == "builder" ]]; then
       log_info "Build/registry: verifique se a RAM está em dual channel (single channel custa ~50% de banda)."
-      log_info "GPU: usar apenas para vídeo, nunca para computação."
     fi
   fi
 
   # Linhas consumíveis por scripts (build.sh, smoke-test.sh, CI).
   printf 'FAMILY=%s\n' "${FAMILY_ID:-unknown}"
   printf 'ROLE=%s\n' "$role"
+  printf 'GPU=%s\n' "${GPU_SUMMARY:-unknown}"
 }
 
 main "$@"

@@ -54,6 +54,10 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | **`iso/test-vm.sh`** — teste de *comportamento*: boota a ISO em qemu e espera instalação + 1º boot por marcadores no console serial | 2026-10-12 | 2026-10-12 |
 | `--serial-console` (console ttyS0 na ISO **e** no sistema instalado) torna a instalação e o 1º boot observáveis sem tela | 2026-10-12 | 2026-10-12 |
 | O build passa a **verificar a ISO automaticamente** ao final; `make iso-verify` e `make iso-vm` | 2026-10-12 | 2026-10-12 |
+| **Corpus de CPUs reais** (`tests/families-matrix.txt` + `tests/test-families.sh`) provando o casamento CPU → família no CI — é como Zen 3/Zen 4 são exercitados **sem o hardware** | 2026-10-12 | 2026-10-12 |
+| Correção de **10 modelos mal atribuídos** achados pelo corpus: nenhum EPYC casava e a série Ryzen 8000 (Zen 4) caía em `generic` | 2026-10-12 | 2026-10-12 |
+| `build-llama` do CI passou a compilar também para `amd-zen3`, `amd-zen4` e `intel-skylake-avx512` | 2026-10-12 | 2026-10-12 |
+| **GPU como opção explícita:** `llama-build.sh --gpu <backend>` + `--gpu-check` + `--cmake-extra`, registro no `AI-CPU-OS-BUILD.txt`, `docs/GPU.md` e Bloco P de validação | 2026-10-12 | 2026-10-12 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em
@@ -107,6 +111,15 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
       *(início previsto: a definir)*
 
 ### Prioridade Média
+- [ ] **Medir Zen 3/Zen 4 em hardware real** — ⚠️ **o autor do projeto não tem
+      essas máquinas.** O suporte está pronto (corpus no CI + compilação da
+      família no `build-llama`); falta a medição. Quem tiver, preencha o Bloco N
+      e a coluna "hardware" de `docs/FAMILIES.md` § 9.3.
+- [ ] **Validar um backend de GPU** — caminho documentado em
+      [`docs/GPU.md`](GPU.md) e Bloco P de `VALIDATION.md`;
+      **nenhum backend foi compilado ou testado** por este projeto.
+- [ ] **Promover a GPU a um papel (`roles/gpu-*`)** — só depois de existir
+      medição real; hoje seria um papel sustentado por zero número.
 - [ ] **Variante air-gapped da ISO** — embutir o fonte do llama.cpp e os `.deb`
       necessários para instalar **sem internet**.
 - [ ] **Variante com binário pré-compilado** — usar os `.tar.gz` da Release em

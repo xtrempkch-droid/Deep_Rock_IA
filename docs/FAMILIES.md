@@ -36,8 +36,12 @@ exatamente o mesmo build do llama.cpp.
 | `amd-zen1` | Zen / Zen+ (Ryzen **1000/2000**) | `znver1` | 6 | nunca | — |
 | `amd-zen2` | Zen 2 (Ryzen **3000/4000**) | `znver2` | 9 | nunca | `amd-zen1` |
 | `amd-zen3` | Zen 3 (Ryzen **5000/6000**) | `znver3` | 11 | nunca | `amd-zen2` |
-| `amd-zen4` | Zen 4 (Ryzen **7000/9000**, EPYC Genoa) | `znver4` | 13 | nunca | `amd-zen3` |
+| `amd-zen4` | Zen 4 (Ryzen **7000/8000/9000**, EPYC Genoa/Siena) | `znver4` | 13 | nunca | `amd-zen3` |
 | `generic` | qualquer x86-64 | *(nenhum)* | — | **auto** | — |
+
+> A série **8000** de desktop/APU (8500G, 8600G, 8700G, 8845HS) é **Zen 4** — um
+> caso que já escapou para o `generic` antes do corpus existir (§ 9.2).
+> E **EPYC 9005 (Turin)** é Zen 5: pousa aqui por decisão deliberada (§ 9.4).
 
 > Um `-march` novo demais faz o compilador **rejeitar** a flag. Por isso cada
 > família declara `FAMILY_MARCH_MIN_GCC` e um `FAMILY_MARCH_FALLBACK`: o
@@ -217,18 +221,76 @@ FAMILY_NOTES="..."
 
 ---
 
-## 9. Testes
+## 9. Testes e status de validação
+
+### 9.1 O corpus (`tests/test-families.sh`)
+
+O projeto mantém um **corpus de ~60 modelos de CPU reais** em
+`tests/families-matrix.txt`, no formato `<família-esperada>|<model name>`. O
+teste roda a **mesma função que o build usa** (`pick_family`) e compara.
 
 ```bash
-bash -n families/resolve.sh && shellcheck -x -S warning families/resolve.sh
-bash families/resolve.sh --quiet                      # FAMILY=<id>
-bash families/resolve.sh --family amd-zen2 --allow-avx512   # política/força
-for m in "E5-2680 v4" "E5-2620 v4" "E5-2678 v3" "Ryzen 5 3500X"; do
-  CPU="Intel(R) Xeon(R) CPU $m" bash -c 'source families/resolve.sh; pick_family "$CPU"; echo "$CPU → $FAMILY_ID"'
-done
+bash tests/test-families.sh              # roda o corpus (não precisa de hardware)
+bash tests/test-families.sh --verbose    # mostra também os acertos
+make families-test                       # atalho (roda no CI, job 'validate')
 ```
 
-**Status de validação:** a resolução de família foi exercitada com nomes reais de
-CPU (E5 v3/v4, Scalable, Ryzen 1000/3000/5000/7000, APU) — casamento correto.
-**Não validado em hardware real** (o notebook de desenvolvimento é um AMD
-A4-3300M, que cai no `generic`) — ver `docs/VALIDATION.md`, Bloco N.
+Ele também aceita teste manual avulso, quando quiser sondar um modelo:
+
+```bash
+bash families/resolve.sh --quiet                      # FAMILY=<id>
+bash families/resolve.sh --family amd-zen2 --allow-avx512   # política/força
+```
+
+**O que este teste prova:** a *regra de seleção* — que o regex de cada família
+casa com os modelos certos e não rouba os dos outros. **O que ele NÃO prova:**
+ISA nem `-march` em execução. Isso só um CPU de verdade prova.
+
+### 9.2 O que já foi pego por ele
+
+Vale registrar, porque justifica o teste existir:
+
+| Bug | Efeito |
+|---|---|
+| `EPYC .* [0-9]{3}1` (espaço a mais) | **Nenhum EPYC casava** — todos caíam em `generic`. Naples, Rome, Milan, Genoa, Siena: todos. |
+| Zen 4 sem a série 8000 | Ryzen 8500G/8600G/8700G/8845HS (que **são Zen 4**) caíam em `generic`. |
+| Zen 4 sem EPYC Genoa/Siena | `EPYC 9554`, `EPYC 8324P` caíam em `generic`. |
+
+Nenhum desses apareceria num teste de compilação: o build *funciona* com
+`generic`, só que sem `-march` — o silêncio que custa desempenho.
+
+### 9.3 Status por família
+
+Legenda: **corpus** = casamento exercitado por `make families-test`;
+**compile** = `build-llama` do CI compila para a família (`--assume-family-isa`
++ `--gcc` do runner); **hardware** = validado num CPU físico.
+
+| Família | corpus | compile (CI) | hardware | Observação |
+|---|---|---|---|---|
+| `intel-haswell` (E5 v3) | ✅ | ✅ | ❌ | alvo histórico do projeto |
+| `intel-broadwell` (E5 v4) | ✅ | ✅ | ❌ | **alvo atual** (E5-2680 v4) |
+| `intel-skylake-avx512` (v5+) | ✅ | ✅ | ❌ | AVX-512 por opt-in; cobre v5–v8 e futuros |
+| `amd-zen1` (1000/2000) | ✅ | ✅ | ❌ | inclui APUs |
+| `amd-zen2` (3000/4000) | ✅ | ✅ | ❌ | **alvo atual** (Ryzen 5 3500X) |
+| `amd-zen3` (5000/6000) | ✅ | ✅ | ❌ | exercitado no CI **sem** hardware |
+| `amd-zen4` (7000/8000/9000) | ✅ | ✅ | ❌ | ⚠️ exige GCC ≥ 13 para `znver4` |
+| `generic` | ✅ | ❌ | ❌ | fallback; sem `-march` |
+
+**O que "pronto" quer dizer aqui, sem engano:** as famílias Zen 3 e Zen 4 estão
+**prontas para uso** no sentido de que (a) o casamento CPU → família é
+verificado por teste, (b) o CI **compila** um binário para elas, e (c) o
+`-march` tem fallback automático para GCC antigo. O que **não** existe é
+medição em hardware Zen 3/4 — então trate-as como *suportadas e não medidas*,
+não como *recomendadas*.
+
+> Para validar Zen 3/4 de verdade: rode `bash families/resolve.sh` e
+> `sudo ./build.sh --dry-run` na máquina e preencha o **Bloco N** de
+> `docs/VALIDATION.md`. É o que falta para tirar o ❌ da coluna "hardware".
+
+### 9.4 Nota sobre Zen 5 e o `-march`
+
+Zen 5 (Ryzen 9000 desktop, EPYC 9005/Turin) **pousa em `amd-zen4`** hoje, por
+decisão deliberada: o GCC 14 já conhece `znver5`, mas o projeto prefere um
+`-march` mais antigo e previsível a um que pode não existir no compilador do
+usuário. Quando a validação acompanhar, o caminho é criar `families/amd-zen5/`
+com `FAMILY_INHERITS="amd-zen4"` — a herança faz o resto (ver § 7).

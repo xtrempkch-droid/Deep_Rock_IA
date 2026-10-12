@@ -20,6 +20,18 @@
 #   --native           Usa GGML_NATIVE=ON (compila para ESTA máquina).
 #                      ⚠️ O binário passa a NÃO ser portátil entre máquinas.
 #
+#   ---- BACKEND DE GPU (OPCIONAL, sempre EXPLÍCITO) -----------------------
+#   --gpu CHECK        Compila um backend de GPU. CHECK é um de:
+#                        cuda | rocm | vulkan | sycl | metal
+#                      Nada é escolhido automaticamente: GPU nunca entra por
+#                      acidente. Leia docs/GPU.md ANTES — com GPU, o tuning de
+#                      CPU deste projeto passa a ser secundário, e a memória
+#                      que limita vira a VRAM (não a RAM).
+#   --gpu-check        Somente LEITURA: relata as GPUs presentes e quais
+#                      backends parecem compiláveis aqui. Não compila nada.
+#   --cmake-extra "…"  Flags extras repassadas ao CMake (ex.:
+#                      "-DAMDGPU_TARGETS=gfx803" para a RX 580 no ROCm).
+#
 # ⚠️ DECISÃO IMPORTANTE — por que NÃO usamos GGML_NATIVE=ON por padrão:
 #   Se o build acontecer numa máquina diferente do alvo (ex.: o runner do CI,
 #   que pode ter AVX-512), o "native" geraria um binário que sofre SIGILL no
@@ -44,6 +56,9 @@ LLAMA_REF="master"
 # AI_FAMILY (exportada pelo build.sh) permite forçar a família de fora.
 FORCE_FAMILY="${AI_FAMILY:-auto}"
 USE_NATIVE=0
+GPU_BACKEND=""
+GPU_CHECK=0
+CMAKE_EXTRA=""
 
 if [[ -t 1 ]]; then
   C_RESET="\033[0m"; C_INFO="\033[36m"; C_WARN="\033[33m"; C_ERR="\033[31m"; C_OK="\033[32m"
@@ -129,6 +144,89 @@ check_deps() {
 }
 
 # ---------------------------------------------------------------------------
+# GPU (opcional) — sempre explícito, nunca automático
+# ---------------------------------------------------------------------------
+# Por que desta forma: o ai-cpu-os é um projeto de inferência em CPU, e todo o
+# seu tuning (banda de memória, C-states, governor, huge pages) pressupõe isso.
+# Deixar a GPU disponível é razoável; ligá-la em silêncio seria mentir sobre o
+# que o sistema é. Por isso: backend obrigatório, avisos antes de compilar e
+# registro no AI-CPU-OS-BUILD.txt.
+readonly GPU_BACKENDS="cuda rocm vulkan sycl metal"
+
+gpu_cmake_flags() {
+  case "$1" in
+    cuda)   printf '%s' "-DGGML_CUDA=ON" ;;
+    rocm)   printf '%s' "-DGGML_HIP=ON" ;;
+    vulkan) printf '%s' "-DGGML_VULKAN=ON" ;;
+    sycl)   printf '%s' "-DGGML_SYCL=ON" ;;
+    metal)  printf '%s' "-DGGML_METAL=ON" ;;
+    *)      return 1 ;;
+  esac
+}
+
+# Relata o que existe nesta máquina. Somente leitura.
+gpu_report() {
+  section_gpu() { printf '\n== %s ==\n' "$1"; }
+  section_gpu "GPUs presentes"
+  local found=0
+  if command -v lspci >/dev/null 2>&1; then
+    local line
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      printf '  %s\n' "$line"
+      found=1
+    done < <(lspci 2>/dev/null | grep -Ei 'vga|3d|display' || true)
+  else
+    log_warn "lspci ausente (instale pciutils) — não consigo listar as GPUs."
+  fi
+  [[ $found -eq 1 ]] || log_info "  nenhuma GPU de vídeo/computação detectada"
+
+  section_gpu "Backends: o que parece disponível"
+  if command -v nvcc >/dev/null 2>&1; then
+    log_info "  cuda    → SIM (nvcc encontrado)"
+  elif [[ -d /usr/local/cuda ]]; then
+    log_info "  cuda    → talvez (/usr/local/cuda existe, mas sem nvcc no PATH)"
+  else
+    log_info "  cuda    → não (sem nvcc) — exclusivo NVIDIA"
+  fi
+  if command -v hipcc >/dev/null 2>&1 || [[ -d /opt/rocm ]]; then
+    log_info "  rocm    → SIM (hipcc/ROCm encontrado) — AMD"
+  else
+    log_info "  rocm    → não (sem ROCm) — requer instalação separada da AMD"
+  fi
+  if command -v vulkaninfo >/dev/null 2>&1; then
+    log_info "  vulkan  → SIM (vulkaninfo encontrado) — mais portátil (NVIDIA/AMD/Intel)"
+  else
+    log_info "  vulkan  → incerto (sem vulkaninfo) — costuma precisar de libvulkan-dev + loader"
+  fi
+  log_info "  sycl    → Intel (oneAPI); metal → macOS (Apple Silicon)"
+
+  section_gpu "Antes de seguir, saiba"
+  log_warn "Com backend de GPU, o tuning de CPU do ai-cpu-os é SECUNDÁRIO: o que"
+  log_warn "passa a limitar é a VRAM, não a banda de RAM. C-states/governor/huge"
+  log_warn "pages ainda ajudam (tokenização, I/O, prompts), mas o ganho grande vem"
+  log_warn "de fora. Os números de docs/STATE.md NÃO valem para este build."
+  log_warn "Detalhes, o que muda e as armadilhas: docs/GPU.md"
+}
+
+gpu_announce() {
+  local backend="$1" _ok=0 _b
+  for _b in $GPU_BACKENDS; do
+    [[ "$backend" == "$_b" ]] && _ok=1
+  done
+  if [[ $_ok -eq 0 ]]; then
+    log_error "backend de GPU inválido: '${backend}' (use: ${GPU_BACKENDS})"
+    exit 2
+  fi
+
+  printf '\n== %s ==\n' "Backend de GPU: ${backend}"
+  log_warn "Ativado EXPLICITAMENTE por --gpu ${backend}: $(gpu_cmake_flags "$backend")"
+  log_warn "O ai-cpu-os nasceu como projeto de inferência 100% em CPU — com GPU,"
+  log_warn "parte do tuning daqui passa a ser irrelevante. Leia docs/GPU.md."
+  log_info "Ficará registrado no AI-CPU-OS-BUILD.txt (para ninguém comparar maçãs com laranjas)."
+}
+
+# ---------------------------------------------------------------------------
 # Fonte
 # ---------------------------------------------------------------------------
 prepare_source() {
@@ -176,6 +274,27 @@ build() {
     cmake_flags+=("-DCMAKE_CXX_FLAGS=${FAMILY_MARCH_EFFECTIVE} -O3")
   fi
 
+  # ---------------------------------------------------------------------------
+  # GPU (opcional) — entra ANTES de imprimir as flags, para que apareçam na
+  # lista. A captura é só do valor de gpu_cmake_flags; os avisos são emitidos
+  # por gpu_announce (que loga direto, sem passar por $( )  — senão o texto do
+  # log entraria dentro do argumento do cmake).
+  # ---------------------------------------------------------------------------
+  local gpu_line="nenhum (build 100% CPU)"
+  if [[ -n "$GPU_BACKEND" ]]; then
+    gpu_announce "$GPU_BACKEND"
+    cmake_flags+=("$(gpu_cmake_flags "$GPU_BACKEND")")
+    gpu_line="${GPU_BACKEND} ($(gpu_cmake_flags "$GPU_BACKEND"))"
+  fi
+
+  # Escape hatch para casos de GPU/ambiente que exigem flags próprias
+  # (ex.: -DAMDGPU_TARGETS=gfx803 para a RX 580 Polaris no ROCm).
+  local extra
+  for extra in ${CMAKE_EXTRA:-}; do
+    cmake_flags+=("$extra")
+  done
+  [[ -n "$CMAKE_EXTRA" ]] && log_info "Flags extras (--cmake-extra): ${CMAKE_EXTRA}"
+
   log_info "Flags de CMake (família ${FAMILY_ID}):"
   printf '    %s\n' "${cmake_flags[@]}"
 
@@ -198,6 +317,7 @@ ai-cpu-os — binário compilado para a família de CPU
 Família:   ${FAMILY_ID} (${FAMILY_NAME})
 March:     ${FAMILY_MARCH_EFFECTIVE:-<nenhum>}
 ISA:       ${FAMILY_ISA_FINAL}
+GPU:       ${gpu_line}
 AVX-512:   ${AVX512_ENABLED}
 Native:    $( [[ $USE_NATIVE -eq 1 ]] && echo "sim (só roda nesta máquina)" || echo "não (portátil para a família)" )
 llama.cpp: ${LLAMA_REF}
@@ -226,6 +346,9 @@ main() {
       --allow-avx512)  export AI_ALLOW_AVX512=1; shift ;;
       --assume-family-isa) export AI_ASSUME_FAMILY_ISA=1; shift ;;
       --native)        USE_NATIVE=1; shift ;;
+      --gpu)           [[ $# -ge 2 ]] || { log_error "--gpu exige o backend"; exit 2; }; GPU_BACKEND="$2"; shift 2 ;;
+      --gpu-check)     GPU_CHECK=1; shift ;;
+      --cmake-extra)   [[ $# -ge 2 ]] || { log_error "--cmake-extra exige valor"; exit 2; }; CMAKE_EXTRA="$2"; shift 2 ;;
       -h|--help)
         sed -n '3,26p' "$0" | sed 's/^# \{0,1\}//'
         exit 0 ;;
@@ -234,11 +357,30 @@ main() {
   done
 
   log_info "=== llama-build.sh ==="
+
+  # --gpu-check é somente leitura: relata e sai, sem compilar nada.
+  if [[ $GPU_CHECK -eq 1 ]]; then
+    gpu_report
+    exit 0
+  fi
+
+  if [[ -n "$GPU_BACKEND" ]]; then
+    gpu_announce "$GPU_BACKEND"
+    if [[ "$GPU_BACKEND" == "metal" ]]; then
+      log_warn "metal só existe em macOS: neste Linux o build provavelmente falhará."
+    fi
+  fi
+
   resolve_family
   check_deps
   prepare_source
   build
-  log_ok "llama-build.sh concluído (família ${FAMILY_ID})."
+  if [[ -n "$GPU_BACKEND" ]]; then
+    log_ok "llama-build.sh concluído (família ${FAMILY_ID}, GPU ${GPU_BACKEND})."
+    log_warn "Registre nos benchmarks que este build usa GPU — os números de CPU não valem."
+  else
+    log_ok "llama-build.sh concluído (família ${FAMILY_ID})."
+  fi
   log_info "Teste: ${SRC_DIR}/build/bin/llama-bench -m <modelo>.gguf -t ${JOBS}"
 }
 

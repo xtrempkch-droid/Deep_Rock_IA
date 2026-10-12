@@ -158,6 +158,7 @@ ai-cpu-os/
 │   ├── TUTORIAL.md         # TUTORIAL explicado (obrigatório por marco/versão)
 │   ├── VALIDATION.md       # Protocolo de testes em hardware (preenchível)
 │   ├── ISO.md              # 🎯 A ISO de instalação (decisões e como gerar)
+│   ├── GPU.md              # 🎮 Usar GPU (opcional, sempre explícito)
 │   └── JOURNAL.md          # 📓 Diário de sessões + continuidade (retomada)
 │   └── build-runner.sh # Build Docker + push p/ registry local
 ├── families/               # 🧬 Suporte por FAMÍLIA de microarquitetura
@@ -191,7 +192,9 @@ ai-cpu-os/
 │   ├── governor/            # scaling_governor=performance (conjunto system)
 │   └── openblas-threads/    # OPENBLAS_NUM_THREADS=1       (conjunto portable)
 └── tests/
-    └── smoke-test.sh       # Testes rápidos pós-build
+    ├── smoke-test.sh       # Testes rápidos pós-build
+    ├── test-families.sh    # Casamento CPU → família (corpus; sem hardware)
+    └── families-matrix.txt # ~60 modelos reais → família esperada
 ```
 
 ---
@@ -208,6 +211,8 @@ ai-cpu-os/
 | Resolver um problema                   | `docs/TROUBLESHOOTING.md`                    |
 | **Saber/testar uma otimização específica** | **`mods/`**, **`docs/MODS.md`**   |
 | **Entender as famílias de CPU / adicionar uma** | **`families/README.md`**, **`docs/FAMILIES.md`** |
+| **Testar o casamento CPU → família sem ter o hardware** | **`tests/test-families.sh`**, **`tests/families-matrix.txt`** |
+| **Usar uma GPU (opcional, explícito)** | **`docs/GPU.md`**, `bash llama-build.sh --gpu-check` |
 | **Aprender o projeto do zero (passo a passo explicado)** | **`docs/TUTORIAL.md`**        |
 | Como o CI compila/valida o sistema     | `.github/workflows/`, `docs/CI.md`, `Makefile` |
 | **Testar em hardware e registrar resultados** | **`docs/VALIDATION.md`**              |
@@ -270,6 +275,15 @@ Estas regras são **obrigatórias**:
     é `GGML_NATIVE=OFF` + flags explícitas da família. Em cross-build (CI, para
     OUTRA máquina) use `--assume-family-isa`: sem isso, um runner com AVX-512
     gera binário que sofre `SIGILL` no alvo.
+12-c. **GPU é opcional e SEMPRE explícita.** O projeto é de inferência 100% em
+    CPU; nenhum script liga backend de GPU por conta própria (não existe
+    `--gpu auto`). O caminho é `llama-build.sh --gpu <cuda|rocm|vulkan|sycl|metal>`
+    (`--gpu-check` só relata). Quem usar precisa dos avisos de
+    [`docs/GPU.md`](docs/GPU.md): com GPU, o tuning de CPU passa a ser
+    secundário e os números de `docs/STATE.md` **não valem**. O build registra o
+    backend em `AI-CPU-OS-BUILD.txt` para ninguém comparar medições
+    incomparáveis. **Nenhum backend de GPU foi compilado ou testado por este
+    projeto** — não declare suporte a GPU.
 13. **A ISO é o entregável final e define "terminado".** Qualquer trabalho deve
     manter funcional o caminho `iso/build-iso.sh` → instalação → primeiro boot.
     Se você mudar `build.sh`, `detect-hardware.sh`, as famílias, os papéis ou o

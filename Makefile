@@ -22,6 +22,8 @@ ISO      ?=
 ISO_ARGS ?=
 # Args extras para o teste de VM (ex.: VM_ARGS="--boot-mode uefi")
 VM_ARGS  ?=
+# Backend de GPU (opcional, EXPLÍCITO): make build GPU=vulkan  → ver docs/GPU.md
+GPU      ?=
 JOBS     ?= 4
 LLAMA_REF ?= master
 IMAGE    ?= ai-cpu-os-llama:local
@@ -29,8 +31,9 @@ IMAGE    ?= ai-cpu-os-llama:local
 SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
 
 .PHONY: help lint bashn shellcheck python yaml docs validate dry-run apply \
-        build mods mods-check mods-test iso iso-dry-run iso-lint iso-yaml \
-        iso-verify iso-vm docker docker-check ci clean families
+        build mods mods-check mods-test families families-test gpu-check \
+        iso iso-dry-run iso-lint iso-yaml iso-verify iso-vm \
+        docker docker-check ci clean
 
 help: ## Lista os alvos disponíveis
 	@printf '\n%balvos disponíveis:%b\n\n' '\033[36m' '\033[0m'
@@ -64,12 +67,12 @@ docs: ## Verifica se os documentos obrigatórios existem
 	         docs/STATE.md docs/HARDWARE.md docs/TUNING.md \
 	         docs/TROUBLESHOOTING.md docs/TUTORIAL.md docs/CI.md \
 	         docs/VALIDATION.md docs/ISO.md docs/JOURNAL.md \
-	         docs/FAMILIES.md docs/MODS.md; do \
+	         docs/FAMILIES.md docs/MODS.md docs/GPU.md; do \
 	  [[ -f "$$f" ]] || { echo "FALTANDO: $$f"; exit 1; }; \
 	done; \
 	echo "docs: OK"
 
-validate: lint docs ## Lint + presença dos documentos
+validate: lint docs families-test ## Lint + docs + casamento CPU→família
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -78,10 +81,17 @@ apply: ## Aplica o tuning de verdade (requer root; confirmação do build.sh)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY)
 
 build: ## Compila o llama.cpp para a família detectada (FAMILY= força)
-	@bash llama-build.sh --family $(FAMILY) --ref $(LLAMA_REF) --jobs $(JOBS)
+	@bash llama-build.sh --family $(FAMILY) --ref $(LLAMA_REF) --jobs $(JOBS) \
+	  $(if $(GPU),--gpu $(GPU))
 
 families: ## Lista as famílias de CPU suportadas
 	@bash build.sh --list-families
+
+families-test: ## Prova o casamento CPU→família (corpus; não precisa do hardware)
+	@bash tests/test-families.sh
+
+gpu-check: ## Relata as GPUs presentes e os backends disponíveis (só leitura)
+	@bash llama-build.sh --gpu-check
 
 mods: ## Lista as modificações portáveis (mods/)
 	@bash mods/apply.sh list
@@ -138,7 +148,7 @@ docker-check: ## Lint do Dockerfile (não constrói a imagem)
 	 echo "buildx --check indisponível nesta versão do Docker"
 
 ci: validate dry-run ## Reproduz localmente o que o workflow 'validate' faz
-	@echo "ci: OK — lint + dry-run passaram"
+	@echo "ci: OK — lint + docs + famílias + dry-run passaram"
 
 clean: ## Remove caches locais de build
 	@find . -name '__pycache__' -type d -not -path './.git/*' -exec rm -rf {} + 2>/dev/null || true

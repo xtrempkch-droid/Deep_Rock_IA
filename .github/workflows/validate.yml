@@ -68,12 +68,19 @@ jobs:
           set -euo pipefail
           python3 -m compileall -q roles/
           echo "Python OK."
-
       - name: YAML (yamllint)
         run: |
           set -euo pipefail
           yamllint -c .yamllint.yml .github/ docker/ roles/
           echo "YAML OK."
+
+      # O casamento CPU → família é o único jeito de exercitar Zen 3/Zen 4 sem
+      # ter o hardware: o corpus tem modelos reais e a MESMA função que o build
+      # usa. Já pegou 10 modelos mal atribuídos (todos os EPYC, entre eles).
+      - name: Famílias (casamento CPU → família)
+        run: |
+          set -euo pipefail
+          make families-test
 
       # O template do autoinstall NÃO é YAML válido enquanto tem @@TOKENS@@ (o
       # `@` é indicador reservado do YAML), então ele não entra no yamllint
@@ -247,6 +254,18 @@ jobs:
           grep -q 'serial' iso/test-vm.sh
           grep -q 'verify-iso.sh' Makefile
           grep -q 'test-vm.sh' Makefile
+          # GPU é opcional e nunca implícita: o caminho tem de existir e estar
+          # documentado, mas sem auto-seleção de backend.
+          grep -q -- '--gpu' llama-build.sh
+          grep -q -- '--gpu-check' llama-build.sh
+          grep -q 'docs/GPU.md' llama-build.sh
+          grep -q 'GPU.md' AGENTS.md
+          grep -q 'GPU' detect-hardware.sh
+          ! grep -q -- '--gpu auto' llama-build.sh
+          # O teste do casamento CPU → família precisa continuar existindo:
+          # é o único que exercita Zen 3/Zen 4 sem o hardware.
+          grep -q 'families-matrix.txt' tests/test-families.sh
+          grep -q 'families-test' Makefile
           # O diário de continuidade é o que permite retomar sem perder nada
           # (Regra 14): precisa continuar existindo e com as seções-chave.
           grep -qi 'retomada em 5 minutos' docs/JOURNAL.md

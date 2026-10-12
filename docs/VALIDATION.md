@@ -961,6 +961,25 @@ bash families/resolve.sh --family generic --quiet       # policy=auto
 - [ ] Nenhum caminho liga AVX-512 sem opt-in explícito.
 - [ ] `make families` e `./detect-hardware.sh` sem erro.
 
+### N.6 Casamento CPU → família sem o hardware (o que já dá para provar)
+
+Este é o **único** jeito de exercitar famílias que você não possui (Zen 3, Zen 4,
+Skylake-avx512). O corpus tem ~60 modelos reais e roda a mesma função do build:
+
+```bash
+make families-test                  # ou: bash tests/test-families.sh
+bash tests/test-families.sh --verbose
+```
+
+| Campo | Valor |
+|-------|-------|
+| PASS/FAIL do corpus | _(preencher — esperado: PASS=60 FAIL=0)_ |
+| Algum modelo caiu onde não devia? | _(preencher)_ |
+| Você adicionou o SEU modelo ao corpus? | _(preencher — recomendado)_ |
+
+> Este teste **não** substitui o N.1–N.4: ele prova a *regra de seleção*, não a
+> ISA nem o `-march` em execução. Ver `docs/FAMILIES.md` § 9.3.
+
 ---
 
 ## Bloco O — 🔧 Mods portáveis (2026-10-12)
@@ -1025,6 +1044,70 @@ grep -A3 'openblas-threads' /etc/environment
 - [ ] `revert` devolve o sistema ao estado original (conferido por `sha256sum`
       dos arquivos tocados, antes e depois).
 - [ ] `mods/apply.sh test` passa (container Ubuntu).
+
+---
+
+## Bloco P — 🎮 GPU (opcional, explícito) — 2026-10-12
+
+> Objetivo: se você quiser usar uma GPU, registrar o que foi feito e o que foi
+> medido — **sem** contaminar os números de CPU. Ver [`docs/GPU.md`](GPU.md).
+>
+> ⚠️ **Nada deste bloco foi executado por este projeto.** Ele existe para que a
+> primeira pessoa que usar GPU tenha onde registrar, em vez de começar do zero.
+
+### P.1 Diagnóstico (somente leitura, seguro)
+
+```bash
+make gpu-check                  # ou: bash llama-build.sh --gpu-check
+./detect-hardware.sh --quiet    # a linha GPU= aparece
+```
+
+| Campo | Valor |
+|-------|-------|
+| GPUs listadas | _(preencher)_ |
+| Backends que parecem disponíveis | _(preencher)_ |
+| `detect-hardware.sh` mostrou a linha `GPU=`? | _(preencher)_ |
+
+### P.2 Build com backend explícito
+
+```bash
+# Escolha UM backend. Vulkan é o mais portátil; ROCm não cobre Polaris (RX 580).
+bash llama-build.sh --gpu vulkan
+# casos que exigem flag extra:
+bash llama-build.sh --gpu rocm --cmake-extra "-DAMDGPU_TARGETS=gfx803"
+```
+
+| Campo | Valor |
+|-------|-------|
+| Backend usado | _(preencher: cuda/rocm/vulkan/sycl/metal)_ |
+| Build concluiu? | _(preencher)_ |
+| `AI-CPU-OS-BUILD.txt` registrou a GPU? | _(preencher — deve ter uma linha `GPU:`)_ |
+
+### P.3 Medição (rotulada como GPU!)
+
+```bash
+llama-bench -m modelo.gguf -ngl 999      # tudo o que couber na VRAM
+llama-bench -m modelo.gguf -ngl 0        # só CPU, para comparar o MESMO build
+```
+
+| Campo | Valor |
+|-------|-------|
+| VRAM da GPU | _(preencher)_ |
+| Modelo e quantização | _(preencher)_ |
+| `-ngl` máximo que coube | _(preencher)_ |
+| tokens/s com `-ngl 999` | _(preencher)_ |
+| tokens/s com `-ngl 0` (mesmo build) | _(preencher)_ |
+
+> ⚠️ **Não copie estes números para `docs/STATE.md` § "Métricas de performance".**
+> Aquela seção é de inferência **em CPU**. A comparação honesta é com o `-ngl 0`
+> do *mesmo* build.
+
+### P.4 Critério de "pronto" para o Bloco P
+
+- [ ] `--gpu-check` roda sem erro (somente leitura).
+- [ ] O build com backend concluiu e o registro `GPU:` está no `AI-CPU-OS-BUILD.txt`.
+- [ ] Há medição **rotulada** de GPU, separada das de CPU.
+- [ ] Nada em `docs/STATE.md` foi misturado com CPU.
 
 ---
 
@@ -1099,3 +1182,4 @@ Cole aqui (ou anexe o arquivo):
 | 2026-10-07 | Criação do protocolo (blocos A–L) para a versão `v0.2.0`; nenhum resultado preenchido ainda. |
 | 2026-10-07 | Adicionado o **Bloco M** — geração e boot da ISO de instalação (entregável final do projeto). |
 | 2026-10-12 | Adicionados os **Blocos N e O** — famílias de CPU/papéis (casamento, `-march`, política de AVX-512) e mods portáveis (apply/idempotência/revert em Ubuntu e Debian). Nenhum resultado preenchido ainda. |
+| 2026-10-12 | **N.6** — casamento CPU → família pelo corpus (`make families-test`), que é como Zen 3/Zen 4 são exercitados sem hardware. Novo **Bloco P** — GPU opcional: diagnóstico, build explícito, medição **rotulada** e a proibição de misturar com os números de CPU. |
