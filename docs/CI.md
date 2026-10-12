@@ -36,9 +36,15 @@ O que ele faz, em ordem:
 1. Instala `xorriso`, `isolinux` (fornece o `isohdpfx.bin` para o boot híbrido)
    e `mtools` (patch do `grub.cfg` dentro da `efi.img`).
 2. `make iso-lint` — `bash -n` + `shellcheck` nos scripts da ISO.
-3. `make iso-dry-run` — simulação completa.
-4. Gera a ISO e publica o **SHA256**; grava um resumo na página da execução.
-5. Em **tags**, anexa a ISO (+ `.sha256`) à Release; em qualquer execução, deixa
+3. `make iso-select-test` — confere a escolha da ISO oficial no `SHA256SUMS`
+   (sem rede: usa as fixtures).
+4. `make iso-dry-run` — simulação completa.
+5. Gera a ISO e publica o **SHA256**; grava um resumo na página da execução.
+6. Em caso de **falha**, um passo de **diagnóstico** (`if: failure()`) extrai as
+   linhas de erro do log e as publica como **anotações** — que são públicas.
+   Antes disso, diagnosticar de fora do repositório era impossível (os logs de
+   job exigem token), e foi assim que um `exit code 22` custou uma sessão.
+7. Em **tags**, anexa a ISO (+ `.sha256`) à Release; em qualquer execução, deixa
    como **artefato** (7 dias).
 
 **Sobre o disco do preseed:** o CI usa `/dev/vda` como placeholder (existe em
@@ -69,6 +75,16 @@ Dispara em **todo push para `main` e em todo Pull Request**.
 2. `shellcheck -x -S warning` — pega bug real (`SC2046`, `SC2155`, `SC2034`...).
 3. `python3 -m compileall roles/` — valida o `shell-ia.py`.
 4. `yamllint` — valida workflows, compose e templates.
+5. `make families-test` — casamento CPU → família contra ~60 CPUs reais.
+6. `make iso-lint` + `make iso-yaml` — scripts da ISO e templates substituídos.
+7. `make iso-select-test` — escolha da ISO oficial no `SHA256SUMS`, contra
+   arquivos **reais** guardados em `tests/fixtures/`. Existe porque a geração da
+   ISO Ubuntu morria com **`exit code 22`** (404 do curl) sem pista alguma: o
+   `SHA256SUMS` do Ubuntu marca o modo binário com `*` e lista **todas** as
+   point releases — nenhuma das duas coisas aparece numa fixture inventada de
+   duas linhas.
+8. `make iso-dry-run-both` — dry-run dos DOIS caminhos (ubuntu e debian) **sem
+   flags extras**, exatamente como o `make validate` local.
 
 ### Job `dry-run` (matriz: `xeon` e `ryzen`)
 Roda `detect-hardware.sh`, depois
@@ -103,7 +119,6 @@ Este é o job que protege as regras do `AGENTS.md` de erosão:
 
 > **Por que um job só para isso?** Porque documentação viva se degrada em
 > silêncio. Sem um teste, a diretriz do tutorial vira texto morto.
-
 ---
 
 ## 3. `build-llama.yml` — o build de verdade

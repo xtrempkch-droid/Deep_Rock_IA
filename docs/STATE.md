@@ -1,8 +1,9 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-12 (CI consertado + `upload-artifact` em `@v7`
-> + repo limpo; a ISO air-gapped segue pendente de BOOT em VM)
+> **Última atualização:** 2026-10-12 (a ISO **Ubuntu** não era gerada — bug do `*`
+> no SHA256SUMS, corrigido com teste de regressão; a ISO air-gapped segue
+> pendente de BOOT em VM)
 
 ---
 

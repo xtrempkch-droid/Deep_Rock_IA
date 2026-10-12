@@ -76,7 +76,14 @@ readonly DEBIAN_CD_BASE_DEFAULT="https://cdimage.debian.org/debian-cd/current/am
 # Ubuntu Server live (amd64). O padrão aponta para a série LTS mais recente;
 # para outra versão use --iso-url com a URL do diretório de sua escolha.
 readonly UBUNTU_CD_BASE_DEFAULT="https://releases.ubuntu.com/24.04"
-readonly UBUNTU_ISO_PATTERN='live-server-amd64\.iso$'
+# Padrões ANCORADOS de propósito. Sem a âncora, `netinst[.]iso$` também casa
+# `debian-edu-*` e `debian-mac-*`, e um `live-server-amd64` frouxo não
+# distingue a live-server das variantes desktop/wsl do MESMO SHA256SUMS.
+# `[.]` em vez de `\.`: o padrão é passado ao awk via `-v`, e dentro de uma
+# string do awk o `\.` vira escape desconhecido (o gawk avisa e o trata como
+# `.`, que casa qualquer caractere). A classe evita a ambiguidade.
+readonly UBUNTU_ISO_PATTERN='^ubuntu-[0-9][^ ]*-live-server-amd64[.]iso$'
+readonly DEBIAN_ISO_PATTERN='^debian-[0-9][^ ]*-amd64-netinst[.]iso$'
 
 # Modelo embutido na mídia (decisão da sessão #14: a ISO é air-gapped, então o
 # .gguf tem de estar NA MÍDIA — não pode ser baixado no 1º boot).
@@ -440,6 +447,48 @@ resolve_password() {
 }
 
 # ---------------------------------------------------------------------------
+# Escolher a entrada do SHA256SUMS oficial
+# ---------------------------------------------------------------------------
+# DOIS detalhes que só aparecem com o arquivo real na mão (e que quebraram a
+# geração da ISO Ubuntu — o build morria com `exit code 22` do curl, sem
+# nenhuma pista do motivo):
+#
+#   1. O SHA256SUMS do Ubuntu marca o modo BINÁRIO com `*` antes do nome (mesmo
+#      formato do `md5sum -b`). O do Debian não usa marcador. Sem remover o `*`,
+#      a URL montada era `.../24.04/*ubuntu-24.04.5-...iso` → HTTP 404.
+#   2. O SHA256SUMS do Ubuntu lista TODAS as point releases (24.04.3, .4, .5…) e
+#      também as variantes desktop/wsl. Pegar a PRIMEIRA entrada casada baixaria
+#      a versão mais VELHA; o correto é a MAIOR.
+#
+# As duas funções imprimem "sha256 nome" (nome já normalizado) ou nada.
+
+# Normaliza o nome do arquivo vindo de um SHA256SUMS.
+normalize_iso_name() {
+  local n="$1"
+  n="${n#\*}"   # marcador de modo binário (`md5sum -b`)
+  n="${n#./}"   # prefixo "./" usado por alguns SHA256SUMS
+  printf '%s' "$n"
+}
+
+# Escolhe, entre as linhas que casam com o padrão, a de MAIOR versão.
+pick_iso_entry() {
+  local sums_file="$1" pattern="$2"
+  awk -v p="$pattern" '
+    { n=$2; sub(/^\*/, "", n); sub(/^\.\//, "", n)
+      if (n ~ p) print $1 " " n }
+  ' "$sums_file" | sort -k2,2 -V | tail -1
+}
+
+# Mesma ideia, mas para um nome EXATO (usado com --iso-url).
+pick_iso_entry_by_name() {
+  local sums_file="$1" want="$2"
+  awk -v w="$want" '
+    { n=$2; sub(/^\*/, "", n); sub(/^\.\//, "", n)
+      if (n == w) { print $1 " " n; exit } }
+  ' "$sums_file"
+}
+
+# ---------------------------------------------------------------------------
 # Obter a ISO oficial
 # ---------------------------------------------------------------------------
 acquire_iso() {
@@ -459,15 +508,13 @@ acquire_iso() {
   fi
 
   # Descobrir a versão atual e o checksum oficial, para não confiar em URL fixa.
-  local default_base pattern sum_pattern
+  local default_base sum_pattern
   if [[ "$DISTRO" == "ubuntu" ]]; then
     default_base="$UBUNTU_CD_BASE_DEFAULT"
-    pattern="$UBUNTU_ISO_PATTERN"
-    sum_pattern='live-server-amd64\.iso$'
+    sum_pattern="$UBUNTU_ISO_PATTERN"
   else
     default_base="$DEBIAN_CD_BASE_DEFAULT"
-    pattern='netinst\.iso$'
-    sum_pattern='netinst\.iso$'
+    sum_pattern="$DEBIAN_ISO_PATTERN"
   fi
 
   local base_url="${ISO_URL:-$default_base}"
@@ -480,7 +527,7 @@ acquire_iso() {
   local sums_file="${WORK_DIR}/cache/SHA256SUMS"
 
   if [[ $DRY_RUN -eq 1 ]]; then
-    log_info "[dry-run] baixaria ${sums_url} e escolheria a entrada que casa com /${pattern}/"
+    log_info "[dry-run] baixaria ${sums_url} e escolheria a MAIOR versão que casa com /${sum_pattern}/"
     ISO_PATH="${WORK_DIR}/cache/${DISTRO}-${ROLE}.iso"
     EXPECTED_SHA="(do SHA256SUMS oficial)"
     return 0
@@ -495,10 +542,9 @@ acquire_iso() {
 
   local entry
   if [[ -n "$ISO_URL" ]]; then
-    local want; want="$(basename "$ISO_URL")"
-    entry="$(awk -v w="$want" '$2 ~ w"$" {print $1" "$2; exit}' "$sums_file")"
+    entry="$(pick_iso_entry_by_name "$sums_file" "$(basename "$ISO_URL")")"
   else
-    entry="$(awk -v p="$sum_pattern" '$2 ~ p {print $1" "$2; exit}' "$sums_file")"
+    entry="$(pick_iso_entry "$sums_file" "$sum_pattern")"
   fi
 
   if [[ -z "$entry" ]]; then
@@ -508,8 +554,16 @@ acquire_iso() {
 
   EXPECTED_SHA="${entry%% *}"
   local filename="${entry##* }"
-  # Alguns SHA256SUMS vêm com prefixo ./
-  filename="${filename#./}"
+  filename="$(normalize_iso_name "$filename")"
+  # Defesa em profundidade: as funções acima já normalizam, mas um nome com
+  # `*`, espaço ou `/` geraria uma URL inválida e um 404 disfarçado de
+  # `exit 22` do curl — erro que custou uma sessão inteira para ser achado.
+  # Melhor falhar aqui, dizendo exatamente o que está errado.
+  if [[ ! "$filename" =~ ^[A-Za-z0-9._-]+\.iso$ ]]; then
+    log_error "Nome de ISO suspeito no SHA256SUMS: '${filename}'"
+    log_error "Esperado um nome de arquivo simples terminando em .iso."
+    exit 1
+  fi
   log_info "Alvo: ${filename} (sha256 ${EXPECTED_SHA:0:16}…)"
 
   local dest="${WORK_DIR}/cache/${filename}"

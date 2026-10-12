@@ -165,7 +165,12 @@ jobs:
               echo "### Artefato"
               echo '```'
               ls -lh "iso/out/ai-cpu-os-${ISO_DISTRO}.iso"
-              cat "iso/out/ai-cpu-os-${ISO_DISTRO}.iso.sha256"
+              # O .sha256 e criado DEPOIS do build ter dado certo; se o build
+              # falhou, o .iso existe mas o .sha256 nao — e este `cat` derrubava
+              # o proprio passo de RELATORIO, escondendo a causa real (foi o que
+              # aconteceu no run #6: dois passos vermelhos, e o segundo era eco).
+              cat "iso/out/ai-cpu-os-${ISO_DISTRO}.iso.sha256" 2>/dev/null \
+                || echo "(sha256 nao gerado — o build falhou antes)"
               echo '```'
             fi
             echo "### Avisos do build (WARN)"
@@ -176,6 +181,47 @@ jobs:
             echo "⚠️ **Não valide a ISO em máquina real antes de bootá-la em VM.**"
             echo "Veja o Bloco M de \`docs/VALIDATION.md\`."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Diagnóstico em caso de falha. POR QUE existe: um build morreu com
+      # `exit code 22` (críptico) e a causa só aparecia no log do job, que
+      # exige token para ser lido — de fora do repositório era impossível
+      # descobrir o motivo. Aqui os erros viram ANOTAÇÕES, que são públicas
+      # e visíveis na aba Summary sem baixar nada.
+      - name: Diagnóstico (apenas em falha)
+        if: failure()
+        run: |
+          log=/tmp/iso-build.log
+          {
+            echo "## Diagnóstico do build da ISO"
+            echo
+            if [ ! -f "$log" ]; then
+              echo "O build nao chegou a criar \`${log}\` (falhou antes de executar)."
+            else
+              echo "### Linhas de ERRO"
+              echo '```'
+              if grep -E '\[ERROR\]|FALHOU|Traceback|No such file' "$log" >/tmp/iso-erros.txt 2>/dev/null; then
+                cat /tmp/iso-erros.txt
+              else
+                echo "(nenhuma linha de erro reconhecida)"
+              fi
+              echo '```'
+              echo
+              echo "### Últimas 40 linhas do log"
+              echo '```'
+              tail -40 "$log" || true
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Anotação (pública, sem token). As últimas linhas de erro são o que
+          # se precisa para diagnosticar sem acesso ao log do job.
+          if [ -f "$log" ]; then
+            while IFS= read -r linha; do
+              [ -n "$linha" ] || continue
+              echo "::error::${linha}"
+            done < <(grep -E '\[ERROR\]|FALHOU|Traceback|No such file' "$log" 2>/dev/null | tail -10 || true)
+          fi
+          exit 0
 
       - uses: actions/upload-artifact@v7
         # Artefato de varios GB consome a cota da conta, e o canal certo

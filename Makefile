@@ -33,7 +33,7 @@ SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
 .PHONY: help lint bashn shellcheck python yaml docs validate dry-run apply \
         build mods mods-check mods-test families families-test gpu-check \
         iso iso-dry-run iso-dry-run-both iso-lint iso-yaml iso-verify iso-vm \
-        docker docker-check ci clean
+        iso-select-test docker docker-check ci clean
 
 help: ## Lista os alvos disponíveis
 	@printf '\n%balvos disponíveis:%b\n\n' '\033[36m' '\033[0m'
@@ -72,7 +72,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test iso-dry-run-both ## Lint + docs + famílias + dry-run da ISO (2 caminhos)
+validate: lint docs families-test iso-select-test iso-dry-run-both ## Lint + docs + famílias + escolha da ISO + dry-run (2 caminhos)
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -89,7 +89,6 @@ families: ## Lista as famílias de CPU suportadas
 
 families-test: ## Prova o casamento CPU→família (corpus; não precisa do hardware)
 	@bash tests/test-families.sh
-
 gpu-check: ## Relata as GPUs presentes e os backends disponíveis (só leitura)
 	@bash llama-build.sh --gpu-check
 
@@ -147,6 +146,9 @@ iso-lint: ## Verifica os scripts da ISO e valida templates + ferramentas
 	@bash iso/build-iso.sh --check-templates --yes >/dev/null \
 	  && echo "iso-lint: templates e ferramentas OK"
 	@echo "iso-lint: OK"
+
+iso-select-test: ## Prova a escolha da ISO oficial (SHA256SUMS reais; sem rede)
+	@bash tests/test-iso-selection.sh
 
 docker: ## Constrói a imagem de runtime localmente
 	@docker build -f docker/Dockerfile -t $(IMAGE) .

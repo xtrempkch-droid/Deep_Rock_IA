@@ -1225,6 +1225,85 @@ reproduzível por um alvo do `make`.
 **Commits desta sessão:** `3bb16cf` — `fix(ci): o validate estava VERMELHO no main — default que abortava + comando duplicado`.
 
 ---
+### Sessão #19 — 2026-10-12 · 🐛 A ISO **Ubuntu** não era gerada (`exit code 22`)
+
+- **Objetivo:** o dono relatou "confirmado, há erro em gerar a imagem ubuntu".
+  Entender e corrigir — sem poder rodar `xorriso` nem ler os logs do CI.
+- **Feito:**
+  - **Causa achada:** `exit code 22` é código do **`curl`** para HTTP ≥ 400 sob
+    `-f`. O `SHA256SUMS` do **Ubuntu** marca o modo binário com **`*`** antes do
+    nome (`*ubuntu-24.04.5-live-server-amd64.iso`, igual ao `md5sum -b`); o do
+    **Debian** não usa marcador. O `*` ia inteiro para dentro da URL
+    (`.../24.04/*ubuntu-…iso`) → **404**. Só por isso o Debian funcionava.
+  - **Segundo bug no mesmo lugar:** o `SHA256SUMS` do Ubuntu lista **todas** as
+    point releases (24.04.3, .4, .5…) e as variantes desktop/wsl. O `awk` pegava
+    a **primeira** entrada casada → baixaria a versão mais **velha**. E o padrão
+    sem âncora (`netinst\.iso$`) casava `debian-edu-*` e `debian-mac-*`.
+  - **Correção:** `pick_iso_entry` / `pick_iso_entry_by_name` / `normalize_iso_name`
+    em `iso/build-iso.sh`; padrões **ancorados** (`^debian-[0-9][^ ]*-amd64-netinst[.]iso$`,
+    `^ubuntu-[0-9][^ ]*-live-server-amd64[.]iso$`); escolha da **maior versão**
+    (`sort -V | tail -1`); e uma checagem final que **falha com mensagem clara**
+    se o nome não for um nome de arquivo simples — em vez de deixar o `curl`
+    devolver um 404 mudo.
+  - **Teste de regressão:** `tests/test-iso-selection.sh` + `tests/fixtures/`
+    com `SHA256SUMS` **reais** (cópias fiéis de `releases.ubuntu.com/24.04/` e
+    `cdimage.debian.org/…/current/amd64/iso-cd/`). 13 asserções, sem rede, sem
+    root, sem xorriso. Novo alvo **`make iso-select-test`**, ligado ao
+    `make validate` e ao CI.
+  - **Diagnóstico em falha** no `iso.yml`: extrai as linhas de erro do log e as
+    publica como **anotações** — que são **públicas**, ao contrário dos logs de
+    job (que exigem token). Foi a falta disso que tornou o `exit code 22`
+    indecifrável. E o passo de relatório não derruba mais o job quando o
+    `.sha256` não existe (era o que fazia o *segundo* passo ficar vermelho por
+    consequência, escondendo a causa).
+  - Docs: `TROUBLESHOOTING.md` (seção nova **ISO / Remasterização** com os dois
+    sintomas), `ISO.md` (como a ISO base é escolhida), `CI.md` (passos novos),
+    `README.technical.md`, `AGENTS.md` (§ 4 e § 8), `STATE.md`, `ROADMAP.md`.
+- **Decisões:**
+  - **A URL é a evidência, não o código.** Um `exit` numérico do `curl` não diz
+    nada; a URL montada diz tudo. Por isso a correção inclui uma **validação do
+    nome** com mensagem explícita — o próximo erro desse tipo se explica sozinho.
+  - **Fixture inventada não pega esse bug.** Precisei do `SHA256SUMS` **real**
+    (o `*` e as múltiplas point releases não existem num arquivo de duas
+    linhas). Daí guardar cópias fiéis em `tests/fixtures/`.
+  - **Maior versão, não a primeira.** "A versão atual" é o que o comentário
+    original prometia; a primeira linha do arquivo é a mais **velha**.
+- **Problemas:**
+  - **Não consigo ler o log do job** (403 sem token). Rodei a investigação a
+    partir das **anotações públicas** (que deram `exit code 22` e os nomes dos
+    passos) + a inspeção dos arquivos `SHA256SUMS` **reais** via `curl`.
+  - **Esgotei a cota anônima da API (60 req/h)** fazendo polling do CI na sessão
+    anterior e fiquei cego no fim. Lição registrada no § 6.
+  - **Edição repetida me mordeu de novo:** o `multi_replace_string_in_file`
+    inseriu `filename="$(normalize_iso_name ...)"` dentro do `if ubuntu` em vez
+    do bloco certo. Foi pego pelo `unbound variable` do `make validate` — a
+    lição antiga (conferir a **contagem** de ocorrências) continua valendo e eu
+    não a apliquei na hora.
+  - **`source` do `build-iso.sh` colidiu com `readonly REPO_ROOT` do teste** —
+    a mesma armadilha que já tinha aparecido com `FAMILIES_DIR`. Renomeei para
+    `TEST_DIR`/`TEST_ROOT` e registrei no § 6.
+  - **O passo "Relatório" também ficou vermelho** no run #6 e eu quase tratei
+    como segundo bug: era **consequência** (`cat` de um `.sha256` que só existe
+    se o build passou).
+- **Verificado:** `make validate` verde com **29 scripts** (entrou o teste novo)
+  — `bash -n`, `shellcheck`, `python`, `yamllint`, `iso-lint`, `docs`,
+  `families-test` (60/60) e `iso-select-test` (13/13). O passo de diagnóstico do
+  `iso.yml` foi **extraído e executado**, e emite as anotações certas. URLs
+  conferidas à mão: `curl -sIL` → **200** sem o `*` e **404** com ele.
+- **NÃO feito / não testado:**
+  - **A ISO ainda não foi gerada nem bootada** — o conserto prova a escolha da
+    ISO e a montagem da URL, **não** a remasterização (não há `xorriso` aqui).
+    O próximo passo é rodar o workflow `iso` com `distro=ubuntu`.
+  - **O `iso.yml` alterado não foi executado.**
+  - 🔴 **Caminho Debian + `air_gapped=true` continua quebrado e SEM CAUSA
+    CONHECIDA:** o run #6 gerou a ISO (2046 MB) e falhou no fim (`exit 1`),
+    provavelmente na verificação automática — mas o log não é legível de fora e
+    o diagnóstico só passa a existir agora. O run #7 (mesmo commit, **sem**
+    payload: 943 MB) passou. **Reproduzir e ler as anotações novas.**
+- **Commits:** `(a preencher após o push)`.
+
+---
+
 
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
@@ -1246,12 +1325,14 @@ reproduzível por um alvo do `make`.
 |--------|------|
 | **Nada de código no caminho da ISO** | ✅ Os 5 requisitos do § 3.1 do `docs/ISO.md` estão implementados. **Não há pendência de implementação conhecida** — falta EXECUTAR (ver abaixo). |
 | 🔴 **CI estava vermelho no `main`** | ✅ **Corrigido na sessão #18** (default que abortava + comando duplicado CI×make). Os runs verdes anteriores eram de antes das mudanças. |
-| **PRs abertos para decidir** | **PR #2** (debian `13-slim` no `docker/`): ✅ 6/6 checks verdes — `mergeable: clean`, **mescla sem conflito**; só falta a sua decisão. **PR #3** (bump de actions): ✅ **resolvido no `main`** (caminho B) — o `@v7` do `upload-artifact` foi aplicado direto, com guarda no CI; **pode fechar o PR**. |
+| 🔴 **A ISO Ubuntu não era gerada** | ✅ **Corrigido na sessão #19.** `exit code 22` = 404 do `curl`: o `SHA256SUMS` do Ubuntu marca o modo binário com `*` e o `*` ia para a URL. Teste de regressão: `make iso-select-test`. **Reproduzir no workflow `iso` para confirmar.** |
+| 🔴 **Debian + `air_gapped=true`: causa DESCONHECIDA** | O run #6 gerou a ISO (**2046 MB**) e falhou no fim (`exit 1`), provavelmente na verificação automática; o run #7 (mesmo commit, **sem** payload: 943 MB) passou. O log não é legível de fora — **agora existe o passo de diagnóstico**, então reexecutar **diz o motivo**. Reproduzir com `air_gapped=true` e ler as **anotações**. |
+| **PRs abertos para decidir** | **PR #2** (debian `13-slim` no `docker/`): ✅ **mesclado** em `63eebff` (o `main` remoto já está à frente). **PR #3** (bump de actions): ✅ **resolvido no `main`** (caminho B) — o `@v7` do `upload-artifact` foi aplicado direto, com guarda no CI; **pode fechar o PR**. |
 | **Gerar a ISO (passo 3 do checklist)** | Não roda nesta máquina (sem `xorriso`). Caminho prático: workflow `iso` no GitHub com `air_gapped: true`. Ver `docs/ISO.md` § 9.1. |
 | **Bootar em VM (passo 4 — o critério de conclusão)** | Precisa de `qemu`+KVM. Gere a ISO com `--serial-console` ou o `test-vm.sh` não vê o 1º boot. Ver `docs/ISO.md` § 9.2. |
 | ⚠️ **Limite de 2 GiB por arquivo de Release** | A ISO air-gapped (~4,3–5 GB) **não pode** ser anexada a uma Release. O CI pula o upload e avisa. Distribuição: pendrive/`scp`, runner self-hosted, ou outro host + SHA256 na Release. |
 | **Aceite do instalador para o repo local** | A seção `sources` (Subiquity) e `apt-setup/local0/*` (debian-installer) são **suposições documentadas** — não foram vistos funcionando. Sintoma a procurar: erro de assinatura; ou instalar mas pedir rede (repo incompleto). |
-| **PR #1 do Dependabot** | ✅ verde, rebaseado sobre `main`, **não mesclado**. Basta clicar em *Merge*. Bumps verificados com `git ls-remote`. |
+| **PR #1 do Dependabot** | ✅ **mesclado** em 2026-10-09 (verificado pela API: `merged: true`). |
 | **Bloco M** (`VALIDATION.md`) | Roteiro da ISO pronto; nenhuma execução ainda. |
 | **Blocos A–L** (`VALIDATION.md`) | Idem — nenhum resultado preenchido. |
 | **`md5sum.txt` da ISO** | Gerado pelo script, mas **nunca validado** por um instalador real. |
@@ -1329,6 +1410,14 @@ reproduzível por um alvo do `make`.
 | `sed -i` na 1ª linha de um script com `#!` | Pode trocar o **shebang** (`#!/usr/bin/env bash` vs `#!/bin/sh`) e mudar o interpretador | Nunca use `sed -i '1s/…'`; confirme o shebang depois (o CI verifica o modo estrito por shebang) |
 | Renomear/remover uma **chave de matriz** do CI e esquecer quem a consome | Ficou `${{ matrix.profile }}` no `build-llama.yml` depois de a matriz virar `family` → o **nome do artefato ia vazio** e o `upload-artifact` falharia (só num run de tag, longe do PR) | Ao renomear uma chave de matriz, `grep -n 'matrix\.'` no workflow inteiro; prefira `matrix.family` a nomes genéricos |
 | Documentar citando **nomes/comandos de cabeça** | A doc descreve algo que não existe, e ninguém descobre até alguém tentar (ex.: `@@PROFILE@@`, removido na refatoração) | Sempre **copie a saída real** (rode o script) e confira nomes com `grep` no código antes de escrever |
+| Tratar um **código de saída numérico** de ferramenta como se fosse do projeto | `exit code 22` no build da ISO Ubuntu parecia erro do `build-iso.sh`; 22 é do **`curl`** (HTTP ≥ 400 sob `-f`). Perdi tempo antes de olhar a URL; era um **404** | Procure o código na documentação da ferramenta (`curl` → 22, 6, 7; `rsync` → 23, 24). Depois **imprima o insumo** (a URL) e teste com `curl -sIL -w '%{http_code}'` |
+| Ler um `SHA256SUMS` de terceiro supondo o formato do **nosso** | O do Ubuntu marca modo **binário** com `*` antes do nome (como `md5sum -b`) e o do Debian não — o `*` foi para dentro da URL → 404 mudo | Nunca assuma o formato de arquivo de terceiro: **baixe o arquivo real** e faça `head`/`cat`. Valide o resultado (`^[A-Za-z0-9._-]+\.iso$`) antes de montar a URL |
+| Pegar a **primeira** entrada de um índice que lista **todas** as versões | O `SHA256SUMS` do Ubuntu lista 24.04.3, .4, .5 e um `awk '{...; exit}'` pegava a **mais velha** — funcionaria, baixando a ISO errada (falha silenciosa) | Se o arquivo lista versões, escolha o **máximo** (`sort -V | tail -1`) e **ancore o padrão** (`^debian-[0-9]…`) para não casar `debian-edu-*`/`debian-mac-*`/`*-desktop-*` |
+| Fixture de teste **inventada** para um formato de terceiro | Um `SHA256SUMS` de 2 linhas feito à mão **não** tem o `*` nem múltiplas point releases — o teste passa e o bug real continua | Guarde uma **cópia fiel** do arquivo real em `tests/fixtures/` e diga a origem e a data no cabeçalho do teste |
+| `source` de um script que declara variáveis **`readonly`** | `REPO_ROOT: readonly variable` → o teste morre no `source` (2ª vez: a primeira foi `FAMILIES_DIR`) | Use nomes que não colidam (`TEST_DIR`, `TEST_ROOT`) no consumidor; ao criar `readonly` num script feito para ser carregado, prefira nomes **específicos** do domínio |
+| Confundir um passo de CI **consequente** com um segundo bug | No run #6 **dois** passos ficaram vermelhos: o build e o *relatório*. O relatório falhava por `cat` de um `.sha256` que só existe se o build passou — era **eco**, não causa | Ao ver N passos vermelhos, procure o **primeiro** na lista: quase sempre os seguintes são consequência. Faça relatórios **tolerantes a falha** (`2>/dev/null || echo ...`) |
+| Diagnóstico que só existe no **log do job** | O log exige token (403): de fora do repositório era **impossível** saber por que a ISO falhou | Faça os passos de falha emitirem **anotações** (`::error::`) e um resumo no `$GITHUB_STEP_SUMMARY` — anotações são **públicas** |
+| Polling em laço com `curl` contra a API do GitHub | Um laço de 25–30 iterações **esgota a cota anônima** (60 req/h) e você fica cego exatamente na hora de ler o resultado. Sintoma: JSON sem a chave esperada (`KeyError: 'workflow_runs'`) | Espere por **turnos** em vez de repetir `curl`; ou peça ao dono para olhar a página Actions. Trate chave ausente como **erro**, não como “sem runs” |
 
 ---
 

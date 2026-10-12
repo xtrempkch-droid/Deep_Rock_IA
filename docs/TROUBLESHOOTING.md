@@ -229,6 +229,43 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 
 ---
 
+## ISO / Remasterização
+
+### O build da ISO morre com `exit code 22` (e nenhuma mensagem)
+
+- **Sintoma:** `bash iso/build-iso.sh ...` termina com **`exit code 22`** logo
+  no começo, sem dizer o que falhou. No GitHub, o passo "Gerar a ISO" fica
+  vermelho com essa única informação.
+- **Causa:** `22` **não é um código do projeto** — é do **`curl`**, que o usa
+  quando o servidor responde HTTP ≥ 400 sob `-f`/`--fail`. Ou seja: algum
+  download tomou 404. O caso real foi a **ISO Ubuntu**: o
+  `releases.ubuntu.com/24.04/SHA256SUMS` marca o modo binário com `*` antes do
+  nome (`*ubuntu-24.04.5-live-server-amd64.iso`), como faz o `md5sum -b`. Sem
+  remover o `*`, a URL montada era
+  `.../24.04/*ubuntu-24.04.5-live-server-amd64.iso` → **404** → `exit 22`.
+  O `SHA256SUMS` do Debian **não** usa esse marcador — por isso o caminho
+  Debian funcionava e o Ubuntu não.
+- **Como identificar:** a URL exata aparece nas linhas de `INFO` do log
+  (`Baixando <url>`). Confirme à mão:
+  `curl -sIL -o /dev/null -w '%{http_code}\n' '<a-url>'` → 404 confirma.
+- **Solução:** já corrigida em `iso/build-iso.sh` (as funções
+  `pick_iso_entry`/`normalize_iso_name` removem o `*` e o prefixo `./`). Se
+  reaparecer, **não** procure no código do projeto: olhe a URL no log.
+- **Teste que guarda isso:** `make iso-select-test` — roda as mesmas funções
+  contra `SHA256SUMS` **reais** guardados em `tests/fixtures/`.
+
+### A ISO quebra "do nada" ao mudar de ponto de release (Ubuntu)
+
+- **Sintoma:** funcionava na 24.04.3 e parou quando saiu a 24.04.5.
+- **Causa:** o `SHA256SUMS` do Ubuntu lista **todas** as point releases
+  (24.04.3, .4, .5…) **e** as variantes desktop/wsl. Pegar a **primeira**
+  entrada casada baixa a versão mais **velha** — e um padrão sem âncora
+  (`netinst\.iso$`) casa `debian-edu-*` e `debian-mac-*`.
+- **Solução:** já corrigida: os padrões são **ancorados** e a escolha é a de
+  **maior versão** (`sort -V | tail -1`), não a primeira.
+
+---
+
 ## Geral
 
 ### `build.sh` falha dizendo que não está como root

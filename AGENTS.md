@@ -195,7 +195,9 @@ ai-cpu-os/
 └── tests/
     ├── smoke-test.sh       # Testes rápidos pós-build
     ├── test-families.sh    # Casamento CPU → família (corpus; sem hardware)
-    └── families-matrix.txt # ~60 modelos reais → família esperada
+    ├── families-matrix.txt # ~60 modelos reais → família esperada
+    ├── test-iso-selection.sh # Escolha da ISO oficial no SHA256SUMS (sem rede)
+    └── fixtures/           # SHA256SUMS REAIS (Ubuntu 24.04, Debian 13)
 ```
 
 ---
@@ -214,6 +216,7 @@ ai-cpu-os/
 | **Saber/testar uma otimização específica** | **`mods/`**, **`docs/MODS.md`**   |
 | **Entender as famílias de CPU / adicionar uma** | **`families/README.md`**, **`docs/FAMILIES.md`** |
 | **Testar o casamento CPU → família sem ter o hardware** | **`tests/test-families.sh`**, **`tests/families-matrix.txt`** |
+| **Testar a escolha da ISO oficial (sem rede)** | **`tests/test-iso-selection.sh`**, **`tests/fixtures/`** |
 | **Usar uma GPU (opcional, explícito)** | **`docs/GPU.md`**, `bash llama-build.sh --gpu-check` |
 | **Aprender o projeto do zero (passo a passo explicado)** | **`docs/TUTORIAL.md`**        |
 | Como o CI compila/valida o sistema     | `.github/workflows/`, `docs/CI.md`, `Makefile` |
@@ -360,11 +363,30 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-12
-- **O que mudou:** **Limpeza + CI consertado (sessão #18).** O CI estava
-  **vermelho no `main`** e ninguém tinha visto: o `--iso-repo auto` (default)
-  abortava no caminho Debian e derrubava o passo "ISO (dry-run dos dois
-  caminhos)". Corrigido com a **Regra 13-a** (default degrada, nunca aborta) e
-  com o corolário de que o CI e o `make` compartilham o comando
+- **O que mudou:** **A ISO Ubuntu não era gerada — corrigido (sessão #19).**
+  O build morria com **`exit code 22`** do `curl` e mais nada: o `SHA256SUMS`
+  do Ubuntu marca o modo binário com **`*`** (`*ubuntu-24.04.5-…iso`, como o
+  `md5sum -b`) e o do Debian não — o `*` ia para dentro da URL e dava **404**.
+  Segundo bug no mesmo lugar: o arquivo lista **todas** as point releases, e
+  pegar a **primeira** entrada baixaria a versão mais **velha**. Corrigido com
+  `pick_iso_entry`/`pick_iso_entry_by_name`/`normalize_iso_name` (padrões
+  ancorados + maior versão via `sort -V`) e uma checagem que **falha com
+  mensagem clara** em vez de deixar o `curl` devolver 404. Guarda nova:
+  **`make iso-select-test`** (`tests/test-iso-selection.sh` + `tests/fixtures/`
+  com `SHA256SUMS` **reais**), ligada ao `make validate` e ao CI. Também:
+  passo de **diagnóstico em falha** no `iso.yml` que converte os erros do log
+  em **anotações** (que são públicas, ao contrário dos logs de job) — foi a
+  falta disso que tornou o `exit code 22` indecifrável; e o passo de relatório
+  não derruba mais o job quando o `.sha256` não existe.
+  **Pendente:** o caminho **Debian + `air_gapped=true`** gerou a ISO (2046 MB)
+  mas falhou na verificação final — **causa ainda não identificada** (o log do
+  run #6 não é legível de fora). Reexecutar agora diz o motivo, por causa do
+  passo de diagnóstico.
+- **Data anterior:** 2026-10-12 — **Limpeza + CI consertado (sessão #18).** O CI
+  estava **vermelho no `main`** e ninguém tinha visto: o `--iso-repo auto`
+  (default) abortava no caminho Debian e derrubava o passo "ISO (dry-run dos
+  dois caminhos)". Corrigido com a **Regra 13-a** (default degrada, nunca
+  aborta) e com o corolário de que o CI e o `make` compartilham o comando
   (`make iso-dry-run-both`). Também: `iso.yml` estava preso em `actions/*@v4`
   enquanto o resto do repo já usava `@v6`/`@v7` (o bump do Dependabot não o
   alcançou); runner fixado em `ubuntu-24.04` nos jobs que dependem da release

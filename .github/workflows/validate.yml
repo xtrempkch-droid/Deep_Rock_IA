@@ -86,6 +86,15 @@ jobs:
           set -euo pipefail
           make families-test
 
+      # A escolha da ISO oficial no SHA256SUMS. Existe porque a geração da ISO
+      # Ubuntu morria com `exit code 22` do curl sem pista nenhuma: o
+      # SHA256SUMS do Ubuntu marca o modo binário com `*` e lista TODAS as
+      # point releases. As fixtures são cópias fiéis dos arquivos oficiais.
+      - name: ISO (escolha da ISO oficial no SHA256SUMS)
+        run: |
+          set -euo pipefail
+          make iso-select-test
+
       # O template do autoinstall NÃO é YAML válido enquanto tem @@TOKENS@@ (o
       # `@` é indicador reservado do YAML), então ele não entra no yamllint
       # acima. Este passo substitui os tokens e valida o YAML RESULTANTE —
@@ -181,6 +190,9 @@ jobs:
             roles/builder/registry-setup.sh roles/builder/gitea-compose.yml
             roles/builder/build-runner.sh
             tests/smoke-test.sh
+            tests/test-iso-selection.sh
+            tests/fixtures/SHA256SUMS.ubuntu-24.04
+            tests/fixtures/SHA256SUMS.debian-13
           )
           fail=0
           for f in "${required[@]}"; do
@@ -322,6 +334,25 @@ jobs:
           grep -q 'iso-dry-run-both' Makefile
           grep -q 'validate:.*iso-dry-run-both' Makefile
           grep -q 'make iso-dry-run-both' .github/workflows/validate.yml
+          # A escolha da ISO oficial no SHA256SUMS. Mesmo trio do dry-run, pelo
+          # MESMO motivo: a geracao da ISO Ubuntu morria com `exit code 22`
+          # (404 do curl) porque o SHA256SUMS do Ubuntu marca o modo binario
+          # com `*` e lista todas as point releases. As fixtures sao copias
+          # fieis dos arquivos oficiais e precisam continuar existindo — uma
+          # fixture inventada NAO pega esse bug.
+          grep -q 'iso-select-test' Makefile
+          grep -q 'validate:.*iso-select-test' Makefile
+          grep -q 'make iso-select-test' .github/workflows/validate.yml
+          # Ancorado na DEFINICAO da funcao (`^nome()`) e nao no nome solto:
+          # `grep 'normalize_iso_name'` tambem casa `normalize_iso_name_velho`,
+          # entao renomear a funcao passaria batido. Testado com caso positivo.
+          grep -q '^pick_iso_entry()' iso/build-iso.sh
+          grep -q '^normalize_iso_name()' iso/build-iso.sh
+          # A fixture PRECISA manter o marcador binario `*` — e ele que
+          # reproduz o 404. `-F` para deixar explicito que e texto literal
+          # (em BRE o `*` so e especial depois de um atomo, mas um leitor
+          # futuro pode "corrigir" o que ja esta certo).
+          grep -qF '*ubuntu-24.04.5-live-server-amd64.iso' tests/fixtures/SHA256SUMS.ubuntu-24.04
           # Versoes de actions alinhadas: o iso.yml ficou preso em @v4 enquanto
           # o resto do repo ja estava em @v6/@v7 (o bump do Dependabot nao o
           # alcancou). Nada de actions/* em major antigo.

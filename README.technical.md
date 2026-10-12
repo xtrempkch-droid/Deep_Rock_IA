@@ -135,7 +135,9 @@ ai-cpu-os/
 ├── tests/
 │   ├── smoke-test.sh       # verificação pós-build (no alvo)
 │   ├── test-families.sh    # casamento CPU → família (sem hardware)
-│   └── families-matrix.txt # ~60 CPUs reais → família esperada
+│   ├── families-matrix.txt # ~60 CPUs reais → família esperada
+│   ├── test-iso-selection.sh # escolha da ISO oficial no SHA256SUMS
+│   └── fixtures/           # SHA256SUMS reais (Ubuntu 24.04, Debian 13)
 │
 ├── docker/                 # Dockerfile + exemplo de compose
 ├── docs/                   # ver a tabela do § 0
@@ -256,6 +258,7 @@ mkdir -p families/amd-zen5
 $EDITOR families/amd-zen5/family.conf     # ver template abaixo
 bash build.sh --list-families             # apareceu?
 bash tests/test-families.sh               # não quebrou o corpus?
+bash tests/test-iso-selection.sh          # a escolha da ISO oficial ainda está certa?
 ```
 
 `family.conf` mínimo:
@@ -399,14 +402,21 @@ exige host privilegiado e, para C-states, **reboot**. Está em
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"   # shellcheck/yamllint instalados aqui
-make validate        # = job 'lint' + docs + families-test
+make validate        # = job 'lint' + docs + families-test + iso-select-test
 make ci              # validate + dry-run
 make iso-yaml        # autoteste das ferramentas da ISO (com teste negativo)
 bash tests/test-families.sh
+bash tests/test-iso-selection.sh     # escolha da ISO oficial (sem rede)
 ```
 
 > **Sem `gh`/token, a API do GitHub é limitada a 60 req/h.** Não faça polling
-> agressivo — aciona detecção de abuso. Prefira rodar localmente.
+> agressivo — esgota a cota e você fica sem diagnóstico. Prefira rodar
+> localmente.
+>
+> Detalhe útil: **os logs de job exigem token (403), mas as ANOTAÇÕES são
+> públicas** (`/check-runs/<job_id>/annotations`). É por isso que o `iso.yml`
+> tem um passo de diagnóstico em falha: ele converte os erros do log em
+> anotações, que dá para ler de fora do repositório.
 
 ---
 

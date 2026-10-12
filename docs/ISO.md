@@ -287,6 +287,35 @@ Opções mais usadas:
 | `--keep-work` | Mantém o diretório de trabalho para inspeção. |
 | `--check-templates` | **Autoteste:** substitui os templates e valida o YAML gerado. Não gera ISO, não precisa de disco nem root (é o `make iso-yaml`). |
 
+#### Como a ISO base é escolhida (e o bug que isso já causou)
+
+O build **não** confia numa URL fixa: baixa o `SHA256SUMS` oficial, escolhe a
+entrada e só então baixa a ISO, conferindo o `sha256`.
+
+São **dois** detalhes que só aparecem com o arquivo real na mão, e que já
+quebraram a geração da ISO Ubuntu (o build morria com **`exit code 22`** do
+`curl` e mais nada — 404 na URL, sem dizer qual):
+
+1. O `SHA256SUMS` do **Ubuntu** marca o modo binário com **`*`** antes do nome
+   (`*ubuntu-24.04.5-live-server-amd64.iso`), igual ao `md5sum -b`. O do
+   **Debian** não usa marcador. Sem remover o `*`, a URL fica
+   `.../24.04/*ubuntu-24.04.5-…iso` → **404**. Era por isso que o caminho
+   Debian funcionava e o Ubuntu não.
+2. O `SHA256SUMS` do Ubuntu lista **todas** as point releases (24.04.3, .4,
+   .5…) e as variantes **desktop/wsl**. Pegar a **primeira** entrada casada
+   baixaria a versão mais **velha**.
+
+Hoje: os padrões são **ancorados** (`^ubuntu-[0-9][^ ]*-live-server-amd64[.]iso$`
+e `^debian-[0-9][^ ]*-amd64-netinst[.]iso$`, o que exclui `debian-edu-*`,
+`debian-mac-*`, `*-desktop-*` e `*-wsl-*`) e a escolha é a de **maior versão**
+(`sort -V | tail -1`). Os nomes passam por `normalize_iso_name` (remove `*` e o
+prefixo `./`) e há uma checagem final que **falha com mensagem clara** se o nome
+não for um nome de arquivo simples — em vez de deixar o `curl` devolver 404.
+
+Quem guarda isso é `make iso-select-test`, que roda as **mesmas funções**
+contra `SHA256SUMS` reais em `tests/fixtures/` (sem rede). Ver
+[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) § "ISO / Remasterização".
+
 ### 4.4 Testar numa VM **antes** de qualquer máquina real
 
 ```bash
