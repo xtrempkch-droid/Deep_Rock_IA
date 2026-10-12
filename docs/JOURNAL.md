@@ -1057,7 +1057,7 @@ houver recomendações eu aceito"*.
   roda nesta máquina (sem `xorriso`), então o caminho prático é o workflow
   `iso` no GitHub. O passo 4 precisa de uma máquina com `qemu`+KVM.
 
-**Commits desta sessão:** (a preencher após o push).
+**Commits desta sessão:** `10aa352` — `feat(iso)!: a fonte do llama.cpp vai na mídia — o air-gapped está fechado`.
 
 ---
 
