@@ -1300,7 +1300,7 @@ reproduzível por um alvo do `make`.
     provavelmente na verificação automática — mas o log não é legível de fora e
     o diagnóstico só passa a existir agora. O run #7 (mesmo commit, **sem**
     payload: 943 MB) passou. **Reproduzir e ler as anotações novas.**
-- **Commits:** `(a preencher após o push)`.
+- **Commits:** `7a3d60d` — `fix(iso): a ISO Ubuntu nao era gerada — `exit code 22` era um 404 do curl`.
 
 ---
 
