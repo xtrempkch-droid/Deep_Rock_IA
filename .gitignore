@@ -1,6 +1,6 @@
 # ai-cpu-os — artefatos a ignorar
-# Runtime/data
-profiles/ryzen/data/
+# Runtime/data dos papéis (antes da refatoração isto era profiles/<cpu>/data)
+roles/*/data/
 *.part
 *.gguf
 *.log
@@ -18,3 +18,8 @@ venv/
 
 # Backups gerados pelos scripts
 *.bak.*
+
+# Gerador de ISO: payload baixado e índices de repositório
+iso/*.tar.gz
+iso/*.tar.xz
+/llama-src.tar.gz

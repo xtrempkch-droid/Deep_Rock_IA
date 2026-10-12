@@ -9,7 +9,7 @@
 > [`docs/STATE.md`](STATE.md).
 > **Quando escrever:** **ao fim de TODA sessão de trabalho** (ver § 8).
 >
-> **Última entrada:** sessão **#17** (2026-10-12) — ISO fechada no código: a **fonte do llama.cpp** também vai na mídia; checklist de fechamento no `ISO.md` § 9.
+> **Última entrada:** sessão **#18** (2026-10-12) — o CI **estava vermelho no `main`** (default que abortava); corrigido, repo limpo e guardas novos.
 
 ---
 
@@ -1061,6 +1061,131 @@ houver recomendações eu aceito"*.
 
 ---
 
+### Sessão #18 — 2026-10-12 · 🧹 Limpeza + 🔴 o CI estava VERMELHO no `main`
+
+**Objetivo (pedido do usuário, verbatim):** *"não estarei aqui para acompanhar.
+limpe e organize o repo e verifique os erros do action e corrija"*.
+
+**A descoberta que muda tudo:** o workflow `validate` estava **vermelho no
+`main`** havia duas sessões — e **eu não tinha visto**, porque `make validate`
+passa aqui. Fui olhar os runs pela API (`gh` não existe nesta máquina; a API
+pública do GitHub funciona sem token para repo público, e as *annotations* são
+legíveis mesmo com o log em 403).
+
+```
+2026-10-12T18:58  validate  main  push  failure   ← commit da sessão #17
+2026-10-12T17:39  validate  main  push  failure   ← commit da sessão #16
+2026-10-12T17:05  validate  main  push  success   ← antes das minhas mudanças
+```
+
+Passo exato que falhava: **"ISO (dry-run dos dois caminhos)"** (e só ele).
+
+**A causa (e por que o local não pegou):**
+
+- Aquele passo roda `--distro debian --dry-run` **sem** as flags novas,
+  então `--iso-repo` caía no valor **default** (`auto`) — e o meu código
+  fazia `exit 1` quando o alvo era Debian numa máquina Ubuntu (os `.deb` de
+  uma base não servem na outra).
+- **Eu tinha quebrado um default.** Qualquer invocação existente
+  (`--distro debian`) passaria a falhar, mesmo sendo um pedido razoável.
+- O `make validate` local **não rodava aquele passo**: ele era um bloco
+  `run:` **duplicado** dentro do `validate.yml`. Comando duplicado entre CI
+  e `make` é comando que diverge — e divergiu.
+
+**Feito:**
+
+1. **`--iso-repo auto` degrada, nunca aborta** (Regra 13-a, nova). Quando não
+   dá para montar um repositório *correto* — alvo Debian numa máquina Ubuntu,
+   ou release diferente da ISO — ele **avisa alto e segue sem o repo**: a ISO
+   continua válida (só passa a precisar de rede para instalar pacotes). Erro
+   **fatal** ficou reservado para **entrada do usuário** (`--iso-repo DIR`
+   inexistente ou sem `.deb`), que é corrigível. As mensagens do caso
+   não-fatal passaram de `log_error` para `log_warn` (error em vermelho que
+   não falha confunde quem procura o problema no log).
+2. **`make iso-dry-run-both`** — o comando dos dois caminhos agora é um alvo
+   do `Makefile`, está dentro do `validate` e o **CI chama esse alvo**. Um só
+   lugar para manter.
+3. **`iso.yml` alinhado:** estava em `actions/*@v4` enquanto todo o resto do
+   repo já estava em `@v6`/`@v7` — o bump do Dependabot (PR #1) não o
+   alcançou porque o arquivo nasceu depois. Agora `checkout@v7` +
+   `upload-artifact@v6`.
+4. **Runner fixado em `ubuntu-24.04`** nos jobs que dependem da release (o
+   `lint`, que roda o dry-run da ISO, e o `build-iso`). Motivo concreto: o
+   `--iso-repo auto` compara a release **desta máquina** com a da ISO, e o
+   label `ubuntu-latest` **migra para Ubuntu 26 em 2026-10-19** (o próprio
+   GitHub avisa isso como *notice* em cada run). Sem fixar, o resultado
+   passaria a depender do ambiente por um motivo invisível.
+5. **`build-llama` agora compila do TARBALL** (`--source`), não do clone.
+   Isso exercita o **caminho offline** (extração + diretório de topo do
+   tarball — onde eu já tinha encontrado o `find | head` com `pipefail`) com
+   **cmake de verdade, nas 7 famílias**. Se o download falhar, cai no clone e
+   o job continua: o objetivo é *provar*, não depender da rede para passar.
+   O `INFO.txt` do artefato passou a registrar a origem do fonte.
+6. **Limpeza do repo:** removido o diretório **fantasma `profiles/`** (só um
+   `__pycache__/shell-ia.cpython-313.pyc` da estrutura *anterior* à
+   refatoração) e corrigida a entrada obsoleta `profiles/ryzen/data/` no
+   `.gitignore` (virou `roles/*/data/`). Acrescentadas entradas para o payload
+   do gerador de ISO.
+7. **Guardas novos no CI** para os dois invariantes: (a) `iso-dry-run-both`
+   existe, está no `validate` e o CI o **chama**; (b) nenhum `actions/*` em
+   major antigo (`@v1..@v4`). O segundo guarda foi testado com um caso
+   positivo (detecta um `@v4` de propósito).
+
+**Auditoria dos workflows que NÃO posso executar** (é onde mora o risco, já
+que não tenho `xorriso` nem `cmake`):
+
+| Workflow | Achado |
+|----------|--------|
+| `validate` | 🔴 o passo da ISO falhava — **corrigido** |
+| `iso` | `actions/*@v4` desalinhado — **corrigido**; e o run que falhou na branch do Dependabot era **código velho** (a branch não tem o `--iso-source`), não um bug do `main` |
+| `build-llama` | sólido; `matrix.family` em todo lugar (o bug do `matrix.profile` foi corrigido na #13). **Melhorado**: passou a provar o caminho offline |
+| `container` | sólido; roda o smoke da imagem em PR e em `main` |
+
+**Estado dos PRs abertos (verificado pela API):**
+
+- **PR #2** (debian `12-slim` → `13-slim` no `docker/`): **✅ 6/6 checks
+  verdes**, incluindo os dois smokes de imagem. É seguro mesclar.
+- **PR #3** (bump de 2 actions): ficou **redundante** — o bump já foi aplicado
+  no `main` nesta sessão. Pode ser fechado. O único check vermelho dele é o
+  workflow `iso` disparado à mão numa branch com código antigo.
+
+**Decisões (e por quê):**
+
+- **Default degrada; entrada do usuário falha.** É a diferença entre "o
+  ambiente não permite" (degrada e avisa) e "você digitou um caminho errado"
+  (aborta e explica). Misturar os dois foi o que quebrou o CI.
+- **O CI chama o alvo, não repete o comando.** O custo de duplicar é uma
+  regressão que passa local e falha remoto — o pior tipo, porque parece que
+  está tudo bem.
+- **Fixar o runner onde a release importa.** `ubuntu-latest` é conveniente e
+  não-determinístico; num job cuja lógica compara a release do host, isso é
+  um bug esperando data marcada.
+- **Provar o caminho offline onde há ferramenta.** Não tenho `cmake` aqui; o
+  CI tem, e compila 7 famílias. Fazer o CI compilar do tarball converte o
+  caminho do air-gap de "testado com stubs" para "compilado de verdade".
+
+**Como o erro foi pego (e por que não antes):** foi preciso consultar a API do
+GitHub. Nada no ambiente local indicava o problema — `make validate` verde,
+`shellcheck` verde, `yamllint` verde, dry-runs manuais verdes. **O único sinal
+estava no servidor.** Daí a regra nova: o que o CI roda tem de ser
+reproduzível por um alvo do `make`.
+
+**NÃO feito / não testado (importante):**
+
+- **Nada foi validado em hardware nem em VM.** A ISO continua **nunca bootada**.
+- **O `iso.yml` corrigido não foi executado ainda:** o workflow só dispara em
+  `workflow_dispatch`/tag. A verificação é indireta (dry-run + guardas).
+- **Não consigo rodar `xorriso` nem `cmake`** aqui, então os passos "Gerar a
+  ISO" e "Compilar" do CI continuam sem execução local — quem prova são o
+  workflow e os guardas.
+- **Não mesclei os PRs:** o usuário não está presente, e mesclar PR alheio não
+  é uma decisão que eu deva tomar sozinho. Deixei a análise pronta (PR #2
+  verde, PR #3 redundante).
+
+**Commits desta sessão:** (a preencher após o push).
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,
@@ -1080,6 +1205,8 @@ houver recomendações eu aceito"*.
 | Thread | Nota |
 |--------|------|
 | **Nada de código no caminho da ISO** | ✅ Os 5 requisitos do § 3.1 do `docs/ISO.md` estão implementados. **Não há pendência de implementação conhecida** — falta EXECUTAR (ver abaixo). |
+| 🔴 **CI estava vermelho no `main`** | ✅ **Corrigido na sessão #18** (default que abortava + comando duplicado CI×make). Os runs verdes anteriores eram de antes das mudanças. |
+| **PRs abertos para decidir** | **PR #2** (debian `13-slim` no `docker/`): ✅ 6/6 checks verdes, incluindo os dois smokes de imagem — seguro mesclar. **PR #3** (bump de actions): ficou **redundante** (o bump foi aplicado no `main`) — pode fechar. |
 | **Gerar a ISO (passo 3 do checklist)** | Não roda nesta máquina (sem `xorriso`). Caminho prático: workflow `iso` no GitHub com `air_gapped: true`. Ver `docs/ISO.md` § 9.1. |
 | **Bootar em VM (passo 4 — o critério de conclusão)** | Precisa de `qemu`+KVM. Gere a ISO com `--serial-console` ou o `test-vm.sh` não vê o 1º boot. Ver `docs/ISO.md` § 9.2. |
 | ⚠️ **Limite de 2 GiB por arquivo de Release** | A ISO air-gapped (~4,3–5 GB) **não pode** ser anexada a uma Release. O CI pula o upload e avisa. Distribuição: pendrive/`scp`, runner self-hosted, ou outro host + SHA256 na Release. |
@@ -1151,6 +1278,11 @@ houver recomendações eu aceito"*.
 | Editar trecho grande / `main()` com `multi_replace` | Casou em **2 pontos**, inseriu o mesmo texto **duas vezes** e o arquivo ficou inválido (3ª vez que a armadilha aparece) | Extraia o original com `git show HEAD:arquivo`, reaplique por **âncoras exatas** e **asssine a contagem** (`assert`) ANTES de escrever |
 | Teste que só cobre o caso feliz do próprio código | Bug real passou batido: a função devolvia `file:///apt-repo` (sem `/cdrom`) e, sem repo, ainda devolvia linha com caminho vazio | Exercite as **funções reais** num harness (extraia com `sed`) e teste os caminhos **negativos**; o `--dry-run` também tem de validar |
 | Planejar um passo sem prever o **insumo** dele | O item 2 dizia "usar `--source`" e ninguém tinha previsto como o tarball chegaria ao alvo — implementar direto daria erro de arquivo inexistente | Leia o plano com olhos de **executor**: para cada passo, pergunte "de onde vem a entrada?" |
+| Assumir que **CI verde = `make` verde** | O `validate` passou **duas sessões vermelho** no `main` com o `make validate` local verde: o passo do CI era um comando **duplicado**, que divergiu do Makefile | Todo comando do CI tem de ser um **alvo do `make`**, e o CI deve **chamar o alvo** — há guarda no CI para isso |
+| Fazer um valor **default** abortar o build | `--iso-repo auto` (default) fazia `exit 1` no caminho Debian e quebrou qualquer `--distro debian`; o CI ficou vermelho por causa de um default razoável | Default **degrada com aviso**; `exit 1` só para **entrada do usuário** (caminho digitado errado). Ver Regra 13-a |
+| Ignorar o aviso de migração do runner | `ubuntu-latest` migra para Ubuntu 26 em **2026-10-19**; o guarda de release do `--iso-repo` compara o codename do host e passaria a pular o repo sem ninguém entender | Fixe a versão (`ubuntu-24.04`) nos jobs cuja lógica depende da release do host |
+| `make` com **espaços** em vez de TAB na receita | `Makefile:118: *** missing separator (did you mean TAB instead of 8 spaces?)` — erro claro, mas só aparece ao rodar o alvo | Ao gerar regra por script, use `\t` de verdade; rode o alvo antes de commitar |
+| Escrever merge de PR sem o usuário presente | Decisão que não é minha: dependência bump pode quebrar o build de um jeito que os checks não pegam | Analise e **reporte** (PR #2 verde, #3 redundante); quem mescla é o dono |
 | Guarda negativo com `grep` de texto que aparece em **comentário** | O guarda reprova o repositório correto (ex.: o Dockerfile **cita** `COPY build/bin` para explicar por que NÃO usá-lo) | Ancore na forma do comando (`^COPY[[:space:]]+.*build/bin`) e teste o guarda com um caso positivo |
 | `sed -i` na 1ª linha de um script com `#!` | Pode trocar o **shebang** (`#!/usr/bin/env bash` vs `#!/bin/sh`) e mudar o interpretador | Nunca use `sed -i '1s/…'`; confirme o shebang depois (o CI verifica o modo estrito por shebang) |
 | Renomear/remover uma **chave de matriz** do CI e esquecer quem a consome | Ficou `${{ matrix.profile }}` no `build-llama.yml` depois de a matriz virar `family` → o **nome do artefato ia vazio** e o `upload-artifact` falharia (só num run de tag, longe do PR) | Ao renomear uma chave de matriz, `grep -n 'matrix\.'` no workflow inteiro; prefira `matrix.family` a nomes genéricos |
@@ -1222,6 +1354,7 @@ Ao **fim de cada sessão**, faça nesta ordem:
 | 2026-10-12 | Sessões #9–#13 (famílias → ISO Ubuntu → ferramentas de validação → Zen 3/4 + GPU → documentação por público). Corrigido o marcador "Última entrada" do topo (estava parado em #7) e a lista de marcadores do § 7 (era `@@PROFILE@@`, removido na refatoração). |
 | 2026-10-12 | Sessão #14 — fechadas as duas dúvidas de arquitetura da ISO (**air-gapped = sim**; **compilar no 1º boot > binário pré-colado**). Item 1 dos requisitos implementado (`--source`). Nova dúvida aberta: o modelo vai na mídia? |
 | 2026-10-12 | Sessão #15 — o **modelo `.gguf` vai na mídia** (`--iso-model`): implementada a corrente completa `--iso-model` → `/models` → `MODEL_FILE` → `AI_MODEL_FILE` → `--model-file`, com validação de magic/tamanho em 4 pontos e guardas (inclusive negativos) no CI. **Nenhuma dúvida de arquitetura em aberto**: as pendências agora são de execução. |
+| 2026-10-12 | Sessão #18 — **limpeza + CI consertado.** O `validate` estava **vermelho no `main`** havia duas sessões (o `--iso-repo auto`, valor *default*, abortava no caminho Debian) e o `make validate` local passava porque o passo do CI era um comando **duplicado**. Regra 13-a (default degrada, nunca aborta) + `make iso-dry-run-both` compartilhado; `iso.yml` alinhado de `@v4` para `@v6`/`@v7`; runner fixado em `ubuntu-24.04`; `build-llama` passou a **compilar do tarball** (prova o caminho offline com cmake real); removido o fantasma `profiles/`. |
 | 2026-10-12 | Sessão #17 — **a fonte do llama.cpp vai na mídia** (`--iso-source`): fecha o air-gapped no código (o 1º boot não precisa mais de rede). Corrente exercitada ponta a ponta num sandbox. Novo `ISO.md` § 9 (**checklist de fechamento**) e o achado do **limite de 2 GiB por arquivo de Release** do GitHub. |
 | 2026-10-12 | Sessão #16 — **repositório apt local na mídia** (`--iso-repo`, orçamento de 8 GB): fecho de dependências, índice com `dpkg-deb` (sem `dpkg-dev`), fonte **extra** (seção `sources`/`apt-setup/local0`), recusa de release diferente, limpeza da fonte morta no alvo e verificação no `verify-iso.sh`. **O `apt` real aceitou o repositório** montado pelo projeto. Falta só o item 2 para o 1º boot ser offline. |
 

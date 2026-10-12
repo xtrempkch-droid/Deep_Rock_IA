@@ -261,8 +261,11 @@ Opções principais:
                           DIR           — usa um diretório com .deb baixados
   --iso-repo-packages "…"  Pacotes que o repositório deve cobrir (padrão:
                         toolchain de build + dependências dos papéis).
-  --iso-repo-allow-mismatch  Permite montar o repo de uma release diferente da
-                        ISO (por padrão isso é recusado: as versões não casam).
+  --iso-repo-allow-mismatch  Monta o repo mesmo com release diferente da ISO.
+                        Sem isto, um repo que não casaria é PULADO com aviso
+                        (o build não falha: a ISO sai sem repo e precisa de rede).
+                        ⚠️ Use só para teste: .deb de outra release quebram a
+                        instalação.
   --work-dir DIR        Diretório de trabalho (padrão: iso/work).
   --keep-work           Não apaga o diretório de trabalho.
   --check-templates     Autoteste: substitui os templates e valida o YAML gerado
@@ -966,11 +969,30 @@ acquire_repo() {
   local pkgs="${ISO_REPO_PACKAGES:-$DEFAULT_REPO_PACKAGES}"
   local dest="${WORK_DIR}/${ISO_REPO_DIRNAME}"
 
-  if [[ "$ISO_REPO" == "auto" && "$DISTRO" == "debian" ]]; then
-    log_error "--iso-repo auto não funciona com --distro debian nesta máquina:"
-    log_error "  os .deb do Ubuntu não servem no Debian (e vice-versa)."
-    log_error "  Baixe os .deb do Debian e use: --iso-repo CAMINHO"
-    exit 1
+  # ---------------------------------------------------------------------------
+  # `auto` DEGRADA, nunca aborta.
+  # ---------------------------------------------------------------------------
+  # Regra aprendida na marra (CI vermelho na sessão #18): um valor DEFAULT não
+  # pode fazer o build falhar. `--iso-repo` nasce em `auto`, então qualquer
+  # invocação existente (`--distro debian --dry-run`, por exemplo) passaria a
+  # falhar — mesmo sendo um pedido razoável. Quando não dá para montar um
+  # repositório CORRETO, avisamos alto e seguimos sem ele: a ISO continua válida
+  # (só passa a precisar de rede para instalar pacotes).
+  #
+  # Quem pediu um caminho explícito (`--iso-repo DIR`) e errou o caminho
+  # continua recebendo erro fatal: aí a entrada é do usuário e é corrigível.
+  local host_id=""
+  if [[ -r /etc/os-release ]]; then
+    host_id="$(. /etc/os-release && printf '%s' "${ID:-}")"
+  fi
+
+  if [[ "$ISO_REPO" == "auto" && "$DISTRO" == "debian" && "$host_id" != "debian" ]]; then
+    log_warn "--iso-repo auto: esta máquina é '$host_id' e a ISO é Debian."
+    log_warn "Os .deb de uma base não servem na outra, então NÃO vou montar o repositório."
+    log_warn "A ISO sai sem ele (o alvo precisará de rede para instalar pacotes)."
+    log_warn "Para embutir: baixe os .deb do Debian e use --iso-repo CAMINHO."
+    ISO_REPO="none"
+    return 0
   fi
 
   # Um repositório montado com os .deb de OUTRA release produz versões que não
@@ -986,13 +1008,17 @@ acquire_repo() {
     elif [[ -z "$have" ]]; then
       log_warn "Não consegui ler /etc/os-release; não vou conferir a release."
     elif [[ "$have" != "$want" ]]; then
-      log_error "Release incompatível: a ISO é Ubuntu ${ver} (${want}) e esta máquina é '${have}'."
-      log_error "Os .deb baixados aqui não casam com a base da ISO. Três saídas:"
-      log_error "  1) rode o build numa ${want} (ou numa VM/container ${want});"
-      log_error "  2) use --iso-url para a ISO da SUA release (${have}), e aí os .deb casam;"
-      log_error "  3) baixe os .deb por fora e passe --iso-repo CAMINHO."
-      log_error "(--iso-repo-allow-mismatch existe, mas produz uma ISO que NÃO instala offline.)"
-      exit 1
+      # WARN (não ERROR): isto NÃO aborta — a ISO é gerada sem o repositório.
+      # Usar log_error aqui confundiria quem lê o log do CI procurando falha.
+      log_warn "Release incompatível: a ISO é Ubuntu ${ver} (${want}) e esta máquina é '${have}'."
+      log_warn "Os .deb baixados aqui não casam com a base da ISO. Três saídas:"
+      log_warn "  1) rode o build numa ${want} (ou numa VM/container ${want});"
+      log_warn "  2) use --iso-url para a ISO da SUA release (${have}), e aí os .deb casam;"
+      log_warn "  3) baixe os .deb por fora e passe --iso-repo CAMINHO."
+      log_warn "(ou --iso-repo-allow-mismatch, que monta o repo mesmo assim — teste, não produção.)"
+      log_warn "Seguindo SEM repositório local: a ISO valerá, mas o alvo precisará de rede."
+      ISO_REPO="none"
+      return 0
     else
       log_info "Release confere: ${have} (Ubuntu ${ver})."
     fi
@@ -1018,6 +1044,7 @@ acquire_repo() {
   APT_REPO_PATH_REL="$ISO_REPO_DIRNAME"
   APT_REPO_PATH="${APT_REPO_MOUNT}/${ISO_REPO_DIRNAME}"
 
+  # (a partir daqui o repositório VAI ser embutido)
   if [[ $DRY_RUN -eq 1 ]]; then
     if [[ "$ISO_REPO" == "auto" ]]; then
       log_info "[dry-run] baixaria o fecho de dependências de: ${pkgs}"
@@ -1045,9 +1072,6 @@ acquire_repo() {
     log_warn "A ISO final pode passar do tamanho esperado. Use --iso-repo-packages para reduzir."
   fi
 
-  REPO_DIR_LOCAL="$dest"
-  APT_REPO_PATH_REL="$ISO_REPO_DIRNAME"
-  APT_REPO_PATH="${APT_REPO_MOUNT}/${ISO_REPO_DIRNAME}"
   log_ok "Repositório pronto para embutir: ${REPO_PKG_COUNT} pacotes, ${REPO_SIZE_MB} MB"
 }
 

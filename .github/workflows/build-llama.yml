@@ -70,6 +70,26 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake git pkg-config libopenblas-dev
 
+      # Baixa a FONTE como tarball ANTES de compilar, para exercitar o caminho
+      # OFFLINE (`--source`) com cmake de verdade, nas 7 famílias. É o mesmo
+      # caminho do 1º boot da ISO air-gapped — incluindo a extração e o
+      # tratamento do diretório de topo do tarball do GitHub, que é onde mora o
+      # risco. Se o download falhar, cai no clone (`--ref`) e o job continua:
+      # o objetivo aqui é PROVAR, não depender da rede para passar.
+      - name: Baixar a fonte do llama.cpp (tarball)
+        id: src
+        run: |
+          set -euo pipefail
+          url="https://github.com/ggml-org/llama.cpp/archive/refs/heads/${LLAMA_REF}.tar.gz"
+          if curl -fsSL --retry 3 -o "$RUNNER_TEMP/llama-src.tar.gz" "$url"; then
+            echo "tarball=$RUNNER_TEMP/llama-src.tar.gz" >> "$GITHUB_OUTPUT"
+            echo "Escopo: tarball local (caminho offline/air-gapped)"
+            ls -la "$RUNNER_TEMP/llama-src.tar.gz"
+          else
+            echo "tarball=" >> "$GITHUB_OUTPUT"
+            echo "::warning::tarball indisponível para '${LLAMA_REF}'; caindo no clone (--ref)"
+          fi
+
       # Usa o PRÓPRIO script do projeto: valida ISA, decide flags e faz fallback.
       # --assume-family-isa = CROSS-BUILD: a ISA vem do family.conf, não do
       # runner. Sem isso, um runner com AVX-512 geraria binário que sofre SIGILL
@@ -79,13 +99,20 @@ jobs:
       - name: Compilar via script do projeto
         run: |
           set -euo pipefail
+          # --source e --ref são mutuamente exclusivos (o fonte local já define a
+          # versão): escolhemos um dos dois conforme o download acima.
+          if [ -n "${{ steps.src.outputs.tarball }}" ]; then
+            origem=(--source "${{ steps.src.outputs.tarball }}")
+          else
+            origem=(--ref "$LLAMA_REF")
+          fi
           bash llama-build.sh \
             --family "${{ matrix.family }}" \
             --assume-family-isa \
             --dir "$GITHUB_WORKSPACE/llama.cpp" \
-            --ref "$LLAMA_REF" \
             --jobs 4 \
-            --yes
+            --yes \
+            "${origem[@]}"
 
       - name: Verificar binários e execução (pega SIGILL cedo)
         run: |
@@ -131,6 +158,11 @@ jobs:
           {
             echo "ai-cpu-os — binários do llama.cpp (família ${{ matrix.family }})"
             echo "llama.cpp ref: ${LLAMA_REF}"
+            if [ -n "${{ steps.src.outputs.tarball }}" ]; then
+              echo "origem do fonte: tarball local (--source)"
+            else
+              echo "origem do fonte: clone (--ref)"
+            fi
             echo "commit: ${GITHUB_SHA}"
             echo "Flags: ${{ matrix.desc }}"
             echo

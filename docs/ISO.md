@@ -196,6 +196,12 @@ qualquer forma), preservando o espelho oficial.
 > na mídia, o **primeiro boot inteiro roda sem internet**: pacotes do repositório
 > local, modelo em `/opt/models`, fonte em `/opt/llama-src.tar.gz`.
 >
+> ⚠️ **Um valor DEFAULT não pode quebrar o build.** Decisão registrada na
+> sessão #18: `--iso-repo` nasce `auto`, então qualquer pedido que não possa ser
+> atendido **degrada com aviso** em vez de abortar — a ISO continua válida. Erro
+> fatal fica reservado para **entrada do usuário** (`--iso-repo DIR` inexistente
+> ou sem `.deb`), que é corrigível.
+>
 > ⚠️ **Honestidade sobre o que foi provado.** O que está **verificado de verdade**:
 > o índice gerado é **aceito pelo próprio `apt`** (foi rodado `apt-get update`
 > contra um repositório montado pelo código do projeto, com resolução de
@@ -432,7 +438,7 @@ root desabilitado); no Debian o root fica bloqueado por padrão.
 | **Modelo na mídia** | ✅ Implementado: `--iso-model auto|<caminho>|none`. Um `.gguf` inválido é recusado **antes** de montar a ISO (magic `GGUF` + tamanho), e o verificador reprova modelo pequeno na mídia. ⚠️ **Nunca validado num boot real** — o `late-command` nunca copiou um modelo de verdade, e o `firstboot` nunca passou `AI_MODEL_FILE` num sistema instalado. |
 | **Repositório apt na mídia** | ✅ Implementado: `--iso-repo auto|<dir>|none` + validação de release. O índice gerado é **aceito pelo `apt`** (testado de verdade, com resolução de dependência) e o `verify-iso.sh` reprova os 5 modos de falha testados. ⚠️ **Não validado no instalador**: que o Subiquity aceite a seção `sources` e que o debian-installer honre `apt-setup/local0/*` são **suposições documentadas** — o primeiro teste em VM deve confirmar. |
 | **Fonte do llama.cpp na mídia** | ✅ Implementado: `--iso-source auto|<tarball>|none`. A corrente foi exercitada num sandbox (late-command real copiando + `llama-build.sh` real compilando do tarball, com o manifesto dizendo `Rede: não usada`). ⚠️ **Nunca rodou num boot real.** |
-| **Release da ISO × máquina de build** | ⚠️ `--iso-repo auto` **exige a mesma release**: esta máquina é Ubuntu 25.10 e o padrão da ISO é 24.04 (LTS), então o build **recusa** (e faz certo: os `.deb` não casariam). Saídas: buildar numa noble, usar `--iso-url` da sua release, ou `--iso-repo CAMINHO`. |
+| **Release da ISO × máquina de build** | `--iso-repo auto` só monta o repositório se a release **casar** com a da ISO. Quando não casa (esta máquina é 25.10, a ISO padrão é 24.04), ele **pula o repositório com aviso** e a ISO sai valendo, mas o alvo passa a precisar de rede. Saídas para ter o repo: buildar na release certa, `--iso-url` da sua release, ou `--iso-repo CAMINHO`. |
 | Tamanho | ~2,7 GB (Ubuntu) / ~700 MB (Debian) + espaço do projeto. |
 | Assinatura | A ISO gerada **não é assinada**. Verifique o SHA256 que o script imprime. |
 | `md5sum.txt` | Debian: regenerado. Ubuntu: **removido** (ficaria obsoleto; o Subiquity não o usa). |

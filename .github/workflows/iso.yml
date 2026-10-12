@@ -56,7 +56,11 @@ concurrency:
 jobs:
   build-iso:
     name: Gerar ISO (${{ inputs.distro || 'ubuntu' }} · ${{ inputs.role || 'auto' }})
-    runs-on: ubuntu-latest
+    # ubuntu-24.04 (noble) FIXO, e não ubuntu-latest: o `--iso-repo auto` monta o
+    # repositório a partir da release DESTA máquina, e a ISO base padrão é a
+    # 24.04. Com ubuntu-latest o label muda sozinho (migra para Ubuntu 26 em
+    # 2026-10-19) e o repositório deixaria de ser montado por um motivo invisível.
+    runs-on: ubuntu-24.04
     env:
       ISO_DISTRO: ${{ inputs.distro || 'ubuntu' }}
       ISO_ROLE: ${{ inputs.role || 'auto' }}
@@ -72,7 +76,7 @@ jobs:
       # completo: o build roda o verify-iso.sh no fim e confere a corrente.
       ISO_PAYLOAD: ${{ inputs.air_gapped && 'auto' || 'none' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Instalar ferramentas de remasterização
         run: |
@@ -173,7 +177,7 @@ jobs:
             echo "Veja o Bloco M de \`docs/VALIDATION.md\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         # Artefato de varios GB consome a cota da conta, e o canal certo
         # para distribuicao (Release) tem limite de 2 GiB por arquivo.
         if: steps.size.outputs.too_big != 'true'

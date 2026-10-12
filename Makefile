@@ -32,7 +32,7 @@ SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
 
 .PHONY: help lint bashn shellcheck python yaml docs validate dry-run apply \
         build mods mods-check mods-test families families-test gpu-check \
-        iso iso-dry-run iso-lint iso-yaml iso-verify iso-vm \
+        iso iso-dry-run iso-dry-run-both iso-lint iso-yaml iso-verify iso-vm \
         docker docker-check ci clean
 
 help: ## Lista os alvos disponíveis
@@ -72,7 +72,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test ## Lint + docs + casamento CPU→família
+validate: lint docs families-test iso-dry-run-both ## Lint + docs + famílias + dry-run da ISO (2 caminhos)
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -113,6 +113,14 @@ iso-dry-run: ## Simula a geração da ISO (seguro, não baixa nada)
 	@bash iso/build-iso.sh --distro $(DISTRO) \
 	  --disk "$(or $(DISK),/dev/nvme0n1)" \
 	  --role $(ROLE) --family $(FAMILY) $(ISO_ARGS) --dry-run
+
+iso-dry-run-both: ## Dry-run dos DOIS caminhos (ubuntu+debian) SEM flags extras
+	@set -euo pipefail; \
+	bash iso/build-iso.sh --distro ubuntu --disk /dev/vda \
+	  --role inference --family intel-broadwell --serial-console --dry-run >/dev/null; \
+	bash iso/build-iso.sh --distro debian --disk /dev/vda \
+	  --role builder --family amd-zen2 --dry-run >/dev/null; \
+	echo "iso-dry-run-both: OK (ubuntu + debian, sem flags extras)"
 
 iso-yaml: ## Autoteste dos templates + das ferramentas da ISO (não gera ISO)
 	@bash iso/build-iso.sh --check-templates --yes

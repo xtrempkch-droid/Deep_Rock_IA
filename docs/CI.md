@@ -58,6 +58,13 @@ localmente com `--disk` apontando para o seu disco.
 Dispara em **todo push para `main` e em todo Pull Request**.
 
 ### Job `lint`
+
+> **Runner fixo em `ubuntu-24.04`** (e não `ubuntu-latest`). Motivo concreto:
+> este job roda o dry-run da ISO, e o `--iso-repo auto` compara a release
+> **desta máquina** com a da ISO base (24.04). Em `ubuntu-latest` o label muda
+> sozinho — a partir de **2026-10-19** ele migra para Ubuntu 26 — e o resultado
+> passaria a depender do ambiente, por um motivo invisível. Fixar a versão torna
+> o job determinístico.
 1. `bash -n` em todos os `.sh` — pega erro de sintaxe.
 2. `shellcheck -x -S warning` — pega bug real (`SC2046`, `SC2155`, `SC2034`...).
 3. `python3 -m compileall roles/` — valida o `shell-ia.py`.
@@ -74,6 +81,15 @@ Foi exatamente este job que motivou corrigir o `SC2046` no `build.sh`
 (passagem de flags via array em vez de substituição não-citada).
 
 ### Job `project-rules` — guarda-corpo da memória do projeto
+
+Além dos arquivos obrigatórios e das asserções negativas (`--gpu auto`,
+`--prebuilt`, `COPY build/bin`), ele verifica dois invariantes que nasceram de
+falhas reais:
+
+| Invariante | Por quê |
+|-----------|---------|
+| `iso-dry-run-both` existe no `Makefile`, está no `validate` e o CI **chama** esse alvo | Um comando duplicado entre CI e `make` deixou passar a regressão do `--iso-repo auto`, que quebrou o `validate` no GitHub com o `make validate` local verde |
+| Nenhum `actions/*` em major antigo (`@v1..@v4`) | O `iso.yml` ficou preso em `@v4` enquanto o resto do repo já estava em `@v6`/`@v7` — o bump do Dependabot não o alcançou |
 Este é o job que protege as regras do `AGENTS.md` de erosão:
 
 - Verifica que todos os **28 arquivos obrigatórios** existem.
@@ -182,6 +198,13 @@ visibilidade do pacote em *GitHub → Packages → ai-cpu-os-llama → Settings*
 ---
 
 ## 5. Reproduzindo localmente (`make`)
+
+> **Regra prática:** quando um passo do CI é um comando, ele **também** tem de
+> existir como alvo do `Makefile`, e o CI deve **chamar o alvo** em vez de
+> repetir o comando. Motivo real: o dry-run dos dois caminhos da ISO era um
+> `run:` duplicado no `validate.yml` — o CI falhava e o `make validate` local
+> passava. Agora os dois rodam `make iso-dry-run-both`, e há guarda que reprova
+> se alguém voltar a duplicar.
 
 O `Makefile` existe para que você não precise adivinhar o que o CI faz:
 

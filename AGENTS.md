@@ -301,6 +301,15 @@ Estas regras são **obrigatórias**:
     o **comportamento** (boota, instala e aplica no 1º boot). Nenhuma delas
     substitui a outra.
     ⚠️ Nunca declare a ISO pronta sem tê-la **bootado e instalado** em VM.
+13-a. **Um valor DEFAULT não pode fazer o build falhar.** Se a opção nasce em
+    `auto` e o ambiente não permite atendê-la, **degrade com aviso explícito** —
+    nunca `exit 1`. Erro fatal fica para **entrada do usuário** (um caminho que
+    ele digitou errado), que é corrigível. Regra derivada de um CI vermelho real
+    (sessão #18): o `--iso-repo auto` abortava no caminho Debian e derrubou o
+    `validate` do GitHub enquanto o `make validate` local passava.
+    **Corolário de processo:** todo comando que o CI roda precisa existir como
+    alvo do `Makefile`, e o CI deve **chamar o alvo** — comando duplicado é
+    comando que diverge. Há guarda no CI para os dois pontos.
 13-b. **A ISO deve ser AIR-GAPPED, e o llama.cpp é compilado no 1º boot**
     (decisões firmadas; ver `docs/ISO.md` § 3.1). Consequências obrigatórias:
     - **Nunca** embutir binário pré-compilado do llama.cpp como atalho: exigiria
@@ -351,7 +360,20 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-12
-- **O que mudou:** **O repositório apt também vai na mídia** (orçamento de 8 GB
+- **O que mudou:** **Limpeza + CI consertado (sessão #18).** O CI estava
+  **vermelho no `main`** e ninguém tinha visto: o `--iso-repo auto` (default)
+  abortava no caminho Debian e derrubava o passo "ISO (dry-run dos dois
+  caminhos)". Corrigido com a **Regra 13-a** (default degrada, nunca aborta) e
+  com o corolário de que o CI e o `make` compartilham o comando
+  (`make iso-dry-run-both`). Também: `iso.yml` estava preso em `actions/*@v4`
+  enquanto o resto do repo já usava `@v6`/`@v7` (o bump do Dependabot não o
+  alcançou); runner fixado em `ubuntu-24.04` nos jobs que dependem da release
+  (o label `ubuntu-latest` migra para Ubuntu 26 em 2026-10-19 e mudaria o
+  resultado sozinho); `build-llama` agora **compila do tarball** (`--source`),
+  exercitando o caminho offline com cmake real nas 7 famílias; removido o
+  diretório fantasma `profiles/` e corrigida a entrada obsoleta no `.gitignore`.
+  Novos guardas no CI para os dois invariantes.
+- **Data anterior:** 2026-10-12 — **O repositório apt também vai na mídia** (orçamento de 8 GB
   acordado). `--iso-repo auto|<dir>|none` resolve o **fecho de dependências** dos
   pacotes que o 1º boot precisa, baixa os `.deb`, gera o índice com `dpkg-deb`
   (**sem `dpkg-dev`**) e os embute em `/apt-repo`. A fonte entra como **extra**

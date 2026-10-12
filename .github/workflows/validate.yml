@@ -21,7 +21,11 @@ jobs:
   # ---------------------------------------------------------------------------
   lint:
     name: Lint (bash, shellcheck, python, yaml)
-    runs-on: ubuntu-latest
+    # ubuntu-24.04 FIXO: este job roda o dry-run da ISO, e o `--iso-repo auto`
+    # compara a release DESTA máquina com a da ISO base (24.04). Em ubuntu-latest
+    # o label muda sozinho (migra para Ubuntu 26 em 2026-10-19) e o resultado
+    # passaria a depender do ambiente.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -95,13 +99,10 @@ jobs:
       # O build real da ISO só roda em manual/tag (baixa ~2,6 GB). O dry-run dos
       # DOIS caminhos é barato e prova que a orquestração não quebrou.
       - name: ISO (dry-run dos dois caminhos)
-        run: |
-          set -euo pipefail
-          bash iso/build-iso.sh --distro ubuntu --disk /dev/vda \
-            --role inference --family intel-broadwell --serial-console --dry-run
-          bash iso/build-iso.sh --distro debian --disk /dev/vda \
-            --role builder --family amd-zen2 --dry-run
-          echo "Dry-run da ISO (ubuntu + debian): OK."
+        # Usa o MESMO alvo do Makefile que o `make validate` roda localmente:
+        # um só lugar para manter, e o que passa aqui passa lá (foi um comando
+        # duplicado que deixou passar a regressão do --iso-repo auto).
+        run: make iso-dry-run-both
 
   # ---------------------------------------------------------------------------
   # Dry-run: prova que a orquestração funciona nos dois papéis sem alterar nada.
@@ -314,6 +315,17 @@ jobs:
           grep -q -- '--llama-source' build.sh
           grep -q -- '--model-file' build.sh
           grep -q 'llama-src' iso/verify-iso.sh
+          # O dry-run dos DOIS caminhos da ISO tem de ser um alvo do Makefile, e
+          # o CI tem de CHAMAR esse alvo (e nao repetir o comando). Foi um
+          # comando duplicado que deixou passar a regressao do --iso-repo auto:
+          # o CI falhava e o `make validate` local passava.
+          grep -q 'iso-dry-run-both' Makefile
+          grep -q 'validate:.*iso-dry-run-both' Makefile
+          grep -q 'make iso-dry-run-both' .github/workflows/validate.yml
+          # Versoes de actions alinhadas: o iso.yml ficou preso em @v4 enquanto
+          # o resto do repo ja estava em @v6/@v7 (o bump do Dependabot nao o
+          # alcancou). Nada de actions/* em major antigo.
+          ! grep -qE 'uses: actions/[a-z-]+@v[1-4]$' .github/workflows/*.yml
           # E o atalho proibido continua proibido: nunca embutir binário
           # pré-compilado do llama.cpp (exigiria 1 ISO por família).
           ! grep -q -- '--prebuilt' iso/build-iso.sh

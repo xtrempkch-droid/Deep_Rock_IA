@@ -65,6 +65,9 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | `build.sh --model-file` / `--llama-source` (o `sudo` limpa o ambiente, então as flags são o caminho manual) | 2026-10-12 | 2026-10-12 |
 | `iso.yml`: input `air_gapped`, guarda de tamanho (limite de 2 GiB por arquivo de Release) e dry-run exercitando o payload | 2026-10-12 | 2026-10-12 |
 | `docs/ISO.md` § 9 — **checklist de fechamento** da ISO, com o que cada passo prova e onde roda | 2026-10-12 | 2026-10-12 |
+| **CI consertado** (o `validate` estava vermelho no `main`): `--iso-repo auto` degrada em vez de abortar + `make iso-dry-run-both` compartilhado entre CI e `make` | 2026-10-12 | 2026-10-12 |
+| `build-llama` do CI passou a **compilar do tarball** (`--source`): prova o caminho offline com cmake real, nas 7 famílias | 2026-10-12 | 2026-10-12 |
+| `iso.yml` alinhado em `actions/*@v6`/`@v7`, runner fixado em `ubuntu-24.04`, `.gitignore` corrigido e fantasma `profiles/` removido | 2026-10-12 | 2026-10-12 |
 | **`llama-build.sh --source <dir|tar.gz>`** — compila de um fonte **local**, sem rede e sem `git`; registra a origem em `AI-CPU-OS-BUILD.txt`. É o primeiro passo da ISO air-gapped | 2026-10-12 | 2026-10-12 |
 | **O modelo `.gguf` vai na mídia** (`--iso-model auto|<caminho>|none`) + `late-command` copiando para `/opt/models` + `AI_MODEL_FILE` no `firstboot` + **`--model-file`** no papel `inference` (instala modelo local sem rede) | 2026-10-12 | 2026-10-12 |
 | **Repositório apt local na mídia** (`--iso-repo auto|DIR|none`): fecho de dependências, índice gerado com `dpkg-deb`, embutido em `/apt-repo` e usado como fonte EXTRA (Ubuntu: seção `sources` do curtin; Debian: `apt-setup/local0/*`); build recusa release diferente | 2026-10-12 | 2026-10-12 |
