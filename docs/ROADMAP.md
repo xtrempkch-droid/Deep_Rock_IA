@@ -58,6 +58,9 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | Correção de **10 modelos mal atribuídos** achados pelo corpus: nenhum EPYC casava e a série Ryzen 8000 (Zen 4) caía em `generic` | 2026-10-12 | 2026-10-12 |
 | `build-llama` do CI passou a compilar também para `amd-zen3`, `amd-zen4` e `intel-skylake-avx512` | 2026-10-12 | 2026-10-12 |
 | **GPU como opção explícita:** `llama-build.sh --gpu <backend>` + `--gpu-check` + `--cmake-extra`, registro no `AI-CPU-OS-BUILD.txt`, `docs/GPU.md` e Bloco P de validação | 2026-10-12 | 2026-10-12 |
+| **Documentação separada por público:** `README.md` reescrito para o **usuário final** e criado o **`README.technical.md`** (manual do mantenedor: contratos, receitas de extensão, o que cada teste prova, CI por dentro, playbook de depuração, glossário) | 2026-10-12 | 2026-10-12 |
+| Guardas no CI para a dupla de READMEs (ambos precisam existir e se referenciar) | 2026-10-12 | 2026-10-12 |
+| Correção do nome de artefato do `build-llama` (`matrix.profile` → `matrix.family`; o upload falharia) | 2026-10-12 | 2026-10-12 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em

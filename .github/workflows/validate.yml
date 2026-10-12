@@ -153,6 +153,7 @@ jobs:
           set -euo pipefail
           required=(
             README.md AGENTS.md LICENSE
+            README.technical.md
             build.sh detect-hardware.sh
             docs/ROADMAP.md docs/ARCHITECTURE.md docs/STATE.md
             docs/HARDWARE.md docs/TUNING.md docs/TROUBLESHOOTING.md
@@ -199,6 +200,15 @@ jobs:
             || { echo "::error::AGENTS.md perdeu a diretriz de tutorial por marco"; exit 1; }
           grep -q 'TUTORIAL' README.md \
             || { echo "::error::README.md não referencia o tutorial"; exit 1; }
+          # O README do usuário final e o manual do mantenedor são públicos e
+          # precisam continuar existindo e se referenciando (o usuário precisa
+          # conseguir chegar nos detalhes técnicos).
+          grep -q 'README.technical.md' README.md \
+            || { echo "::error::README.md não aponta para o README.technical.md"; exit 1; }
+          grep -q 'README.md' README.technical.md \
+            || { echo "::error::README.technical.md não aponta de volta para o README.md"; exit 1; }
+          grep -q 'make validate' README.technical.md \
+            || { echo "::error::README.technical.md perdeu o fluxo de verificação local"; exit 1; }
           echo "Diretriz do tutorial OK."
 
       - name: Modo estrito (set -e / set -euo pipefail) em todos os scripts

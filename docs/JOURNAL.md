@@ -9,7 +9,7 @@
 > [`docs/STATE.md`](STATE.md).
 > **Quando escrever:** **ao fim de TODA sessão de trabalho** (ver § 8).
 >
-> **Última entrada:** sessão **#7** (2026-10-07) — ISO de instalação.
+> **Última entrada:** sessão **#13** (2026-10-12) — documentação separada por público (usuário × mantenedor).
 
 ---
 
@@ -22,6 +22,7 @@ Se você só tem 5 minutos, faça exatamente isto:
 less AGENTS.md            # propósito + regras
 less docs/STATE.md        # onde estamos + "Próxima ação imediata" (§ 6)
 less docs/JOURNAL.md      # este arquivo: § 5 (threads abertas) e § 6 (armadilhas)
+# (para MANTER o projeto, não só usar: less README.technical.md)
 
 # 2. Sincronizar e conferir a saúde do repositório
 cd /home/juju/Deep_Rock_IA
@@ -509,6 +510,99 @@ seria de bom tom deixar em aberto uma opção. vai que alguém queira usar uma g
 
 ---
 
+### Sessão #13 — 2026-10-12 · 📚 Documentação para dois públicos (usuário × mantenedor)
+
+**Objetivo (pedido do usuário, verbatim):** *"ótima decisão. agora só reformule
+o README para que fique o mais explicado possível para o usuário final e crie um
+readme técnico para que alguém mantenedor do projeto saber mais a fundo os
+detalhes"*.
+
+**Feito:**
+
+1. **`README.md` reescrito do zero para o usuário final** (556 linhas, 15
+   seções). O antigo era um bom resumo *de projeto* — mas pressupunha que o
+   leitor sabia o que é família, papel, `-march`, `GGML_NATIVE`. A nova versão
+   começa por *"isto serve para mim?"* (tabela ✅/❌), explica em uma frase o que
+   o projeto faz (*"rodar LLM local usando só o processador, sem placa de
+   vídeo"*), e só então desce. Conteúdo novo que não existia:
+   - **"O que muda na minha máquina"** em tabela, com coluna de **reversão**
+     (o medo real de quem vai `sudo ./build.sh`) e o aviso de consumo de energia.
+   - **Instalação em 5 passos** numerados, terminando em algo *observável*
+     (a API respondendo em `:8080`), não em "build concluído".
+   - **Uso diário**: API compatível com OpenAI, `shell-ia.py`, e a tabela de
+     variáveis de `/etc/default/ai-server` com **por que** cada uma importa.
+   - **Como medir**: `pp512` vs `tg128` explicados em português, e **regras de
+     medição** (nada mais rodando, mesma máquina, 3 execuções) — sem isso o
+     número é ruído.
+   - **Como desfazer tudo** (comando por mod + `revert`).
+   - **FAQ** com a tabela de tamanho de modelo × RAM (a pergunta nº 1 de quem
+     tem 16 GB) e a resposta honesta de que >7B Q4 não cabe.
+   - **Troubleshooting** em tabela (sintoma → causa → correção).
+2. **`README.technical.md` criado** (585 linhas, 13 seções) — o manual do
+   mantenedor. Ele é o que o `README.md` não deve ser: entra nos **contratos**.
+   Inclui o **playbook de depuração** com os bugs reais (o `readonly` que
+   colidia, o `HOSTNAME` *builtin*, o `$(função)` que capturou log, o regex de
+   EPYC com espaço duplo) e a **tabela de status de validação** que separa
+   "escrito", "verificado por ferramenta" e "validado em hardware".
+3. **Regra derivada, documentada nos dois arquivos:** *usuário → `README.md`;
+   mantenedor → `README.technical.md`; regras → `AGENTS.md`; "o que é fato
+   hoje" → `docs/STATE.md`.* Cada documento declara de quem é (§ 0 do técnico).
+4. **Integração e guardas:** `README.technical.md` entrou na lista `required` e
+   nos guardas do `project-rules` do CI (os dois arquivos precisam existir e se
+   referenciar; o técnico precisa manter `make validate`); `AGENTS.md` § 4/§ 5 e
+   o `help` do `Makefile` atualizados; `STATE`/`ROADMAP`/`JOURNAL` registrados.
+5. **🐛 Bug real corrigido de passagem.** Ao procurar o nome **exato** do
+   artefato para documentar, apareceu que `build-llama.yml` ainda usava
+   `${{ matrix.profile }}` — chave **removida** na refatoração (hoje é
+   `matrix.family`). O `upload-artifact` receberia uma string vazia: o upload
+   **falharia** (ou nomearia o artefato de forma inválida). Corrigido nos 3
+   lugares (nome do artefato, `INFO.txt`, nome do release).
+
+**Decisões (e por quê):**
+
+- **Dois arquivos, não um.** O problema do README antigo não era tamanho, era
+  **mistura de públicos**: quem quer instalar tropeça em `FAMILY_AVX512_POLICY`,
+  e quem quer manter se perde entre passos de instalação. Separar não é
+  cosmético — é o que permite o README do usuário ser *direto* sem omitir nada
+  (ele **aponta** para o técnico).
+- **O técnico declara "o que cada teste NÃO prova".** É o antídoto contra a
+  falha mais provável de um mantenedor novo: achar que `make validate` verde
+  significa que o sistema funciona. A lacuna estrutural (nenhum teste do CI
+  exercita o *efeito* dos ajustes de kernel) está escrita em negrito.
+- **Documentar revelou o bug.** Isso valida a própria separação: obrigar-se a
+  escrever o nome real do artefato forçou olhar o workflow com olhos de leitor,
+  não de autor.
+- **Guardas em vez de disciplina.** Um README que aponta para o outro é
+  verificado por `grep -q` no CI — se alguém renomear, o CI avisa em vez de a
+  documentação morrer em silêncio (o mesmo raciocínio do teste negativo do
+  `verify-iso.sh`).
+- **Amostras de saída fiéis.** O `detect-hardware.sh` foi executado de verdade
+  e a amostra do README reproduz o formato real (inclusive a seção de
+  recomendações de build e o `-march=broadwell -mtune=broadwell`, conferido
+  contra o `family.conf`). Documentação com saída inventada é dívida técnica.
+
+**Problemas encontrados e resolvidos:**
+
+- 🐛 **`matrix.profile` no `build-llama.yml`** (descrito acima) — sobrevivente
+  da refatoração; o CI ficaria vermelho no próximo run de tag.
+- A **primeira amostra de saída** escrita no README não correspondia ao formato
+  real do `detect-hardware.sh` (faltavam as seções de flags ISA, armazenamento e
+  recomendações). Corrigido rodando o script e copiando a estrutura real.
+- Verificados os 16 links do `README.md` e os 7 do técnico — todos resolvem.
+
+**NÃO feito / não testado (importante):**
+
+- **Nada mudou no status de validação.** Continua valendo: nenhuma ISO gerada
+  ou bootada, `iso/test-vm.sh` nunca executado, nenhum backend de GPU
+  compilado, zero medição em hardware real. A tabela do § 11 do
+  `README.technical.md` é explícita sobre isso.
+- Os números de exemplo de `README.md` § 7 (medição) são **ilustrativos** —
+  marcados como tal no texto. Não há `llama-bench` real no repositório.
+
+**Commits desta sessão:** (a preencher após o push).
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,
@@ -518,7 +612,7 @@ seria de bom tom deixar em aberto uma opção. vai que alguém queira usar uma g
 
 | Thread | Bloqueio |
 |--------|----------|
-| Gerar e bootar a ISO | Falta `xorriso`/`mtools`. *Solução:* `sudo apt install -y xorriso isolinux mtools`, ou rodar o workflow `iso` no GitHub. |
+| Gerar e bootar a ISO | Falta `xorriso`/`qemu`. *Solução:* `sudo apt install -y xorriso qemu-system-x86 qemu-utils curl`, ou rodar o workflow `iso` no GitHub. (No caminho **Ubuntu** não é preciso `mtools`: a remontagem por `-indev/-outdev -map` preserva os setores de boot da ISO oficial.) |
 | Validar em hardware real | Falta acesso físico ao Xeon e ao Ryzen. |
 | Medir tokens/s (`llama-bench`) | Depende do item acima. |
 | Compilar o llama.cpp localmente | CPU fraca (2 núcleos) — use os binários da Release `v0.2.0` ou o CI. |
@@ -539,7 +633,16 @@ seria de bom tom deixar em aberto uma opção. vai que alguém queira usar uma g
 |--------|----------|
 | A ISO deve ser **air-gapped** (sem internet)? | Hoje o 1º boot precisa de rede para clonar o llama.cpp. Um variante pode embutir o fonte + `.deb`. Ver `docs/ISO.md` § 8. |
 | Embutir o **binário pré-compilado** em vez de compilar no 1º boot? | Muito mais rápido, mas exige uma ISO **por perfil**. |
-| Suportar **Ubuntu** também? | O usuário pediu "Ubuntu ou Debian". Hoje só Debian. Ubuntu = autoinstall/Subiquity (mecanismo diferente). |
+
+> ✅ **Resolvido na sessão #10:** a dúvida "suportar Ubuntu também?" foi
+> encerrada — o **Ubuntu Server (autoinstall/Subiquity) passou a ser o padrão** e
+> o Debian (preseed) ficou como caminho legado, com o mesmo `late-command.sh`
+> para os dois instaladores.
+>
+> ✅ **Resolvido na sessão #13:** a dúvida sobre **quantos READMEs** o projeto
+> tem foi encerrada — são **dois**, por público: `README.md` (usuário final) e
+> `README.technical.md` (mantenedor), com guardas no CI garantindo que ambos
+> existem e se referenciam.
 
 > ✅ **Resolvido na sessão #8:** a dúvida "o Xeon é dual ou quad channel?" foi
 > encerrada — é **quad channel** (Haswell-EP tem 4 canais; 4 slots × 4 GB).
@@ -573,6 +676,8 @@ seria de bom tom deixar em aberto uma opção. vai que alguém queira usar uma g
 | `sed -i "s/.*texto.*/.../"` em `.md` | Pode quebrar linha sem intenção | Prefira edições por bloco com contexto |
 | Editar **bloco** de texto incluindo a quebra de linha final | O texto seguinte **gruda** na mesma linha (ex.: `perfil├── .github/`) e corrompe a árvore/lista | **Sempre confira o resultado** (`sed -n ...p`, `git diff`) e inclua a linha seguinte no contexto da edição |
 | `sed -i` na 1ª linha de um script com `#!` | Pode trocar o **shebang** (`#!/usr/bin/env bash` vs `#!/bin/sh`) e mudar o interpretador | Nunca use `sed -i '1s/…'`; confirme o shebang depois (o CI verifica o modo estrito por shebang) |
+| Renomear/remover uma **chave de matriz** do CI e esquecer quem a consome | Ficou `${{ matrix.profile }}` no `build-llama.yml` depois de a matriz virar `family` → o **nome do artefato ia vazio** e o `upload-artifact` falharia (só num run de tag, longe do PR) | Ao renomear uma chave de matriz, `grep -n 'matrix\.'` no workflow inteiro; prefira `matrix.family` a nomes genéricos |
+| Documentar citando **nomes/comandos de cabeça** | A doc descreve algo que não existe, e ninguém descobre até alguém tentar (ex.: `@@PROFILE@@`, removido na refatoração) | Sempre **copie a saída real** (rode o script) e confira nomes com `grep` no código antes de escrever |
 
 ---
 
@@ -583,12 +688,13 @@ Se você violar uma, o **CI fica vermelho**:
 
 | Regra verificada | Consequência |
 |------------------|--------------|
-| Arquivos obrigatórios presentes (inclui `iso/`, `docs/ISO.md`, `JOURNAL.md`) | Erro nomeando o arquivo que falta |
+| Arquivos obrigatórios presentes (inclui `iso/`, `docs/ISO.md`, `JOURNAL.md`, `README.technical.md`) | Erro nomeando o arquivo que falta |
 | `AGENTS.md` referencia `docs/TUTORIAL.md` e diz "entregável final" | Erro |
+| `README.md` referencia o `README.technical.md` **e vice-versa** (cada um mantém seu público) | Erro |
 | Modo estrito em todo `.sh` (bash: `set -euo pipefail`; sh: `set -eu`) | Erro nomeando o script |
 | `docs/STATE.md` tem "Próxima ação imediata", "Última atualização", "Métricas de performance" | Erro |
 | `docs/VALIDATION.md` segue preenchível (`_(preencher)_`, `Bloco F`, `Template de relatório`) | Erro |
-| Templates do preseed mantêm os marcadores (`@@PROFILE@@`, `late_command`, `firstboot-pending`) | Erro |
+| Templates do preseed mantêm os marcadores (`@@ROLE@@` em `firstboot.sh`, `@@FAMILY@@` em `late-command.sh`, `late_command`, `firstboot-pending`) | Erro |
 
 ### Como rodar **tudo** localmente antes de commitar
 
@@ -636,6 +742,7 @@ Ao **fim de cada sessão**, faça nesta ordem:
 | Data | Mudança |
 |------|---------|
 | 2026-10-07 | Criação — diário de continuidade (sessões #1–#8), inventário do ambiente, threads abertas e armadilhas. |
+| 2026-10-12 | Sessões #9–#13 (famílias → ISO Ubuntu → ferramentas de validação → Zen 3/4 + GPU → documentação por público). Corrigido o marcador "Última entrada" do topo (estava parado em #7) e a lista de marcadores do § 7 (era `@@PROFILE@@`, removido na refatoração). |
 
 > **Ao criar uma sessão nova, atualize também a "Última entrada" no topo deste
 > arquivo** — é o primeiro número que uma sessão futura olha para saber se está

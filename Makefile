@@ -39,7 +39,7 @@ help: ## Lista os alvos disponíveis
 	@printf '\n%balvos disponíveis:%b\n\n' '\033[36m' '\033[0m'
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[32m%-16s\033[0m %s\n", $$1, $$2}'
-	@printf '\n'
+	@printf '\n%bDocs:%b README.md (usuário final) · README.technical.md (mantenedor) · AGENTS.md (regras)\n\n' '\033[36m' '\033[0m'
 
 lint: bashn shellcheck python yaml iso-lint ## Lint completo (bash, shellcheck, python, yaml, iso)
 

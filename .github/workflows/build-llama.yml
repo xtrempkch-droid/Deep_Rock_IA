@@ -123,13 +123,13 @@ jobs:
         run: |
           set -euo pipefail
           safe_ref="${GITHUB_REF_NAME//\//-}"
-          name="ai-cpu-os-llama-${{ matrix.profile }}-${safe_ref}"
+          name="ai-cpu-os-llama-${{ matrix.family }}-${safe_ref}"
           mkdir -p "dist/${name}"
           cp -r llama.cpp/build/bin "dist/${name}/bin"
           cp README.md "dist/${name}/README.md"
           [[ -f llama.cpp/LICENSE ]] && cp llama.cpp/LICENSE "dist/${name}/LICENSE" || true
           {
-            echo "ai-cpu-os — binários do llama.cpp (perfil ${{ matrix.profile }})"
+            echo "ai-cpu-os — binários do llama.cpp (família ${{ matrix.family }})"
             echo "llama.cpp ref: ${LLAMA_REF}"
             echo "commit: ${GITHUB_SHA}"
             echo "Flags: ${{ matrix.desc }}"
@@ -141,7 +141,7 @@ jobs:
 
       - uses: actions/upload-artifact@v6
         with:
-          name: ai-cpu-os-llama-${{ matrix.profile }}
+          name: ai-cpu-os-llama-${{ matrix.family }}
           path: dist/*.tar.gz
           retention-days: 14
 

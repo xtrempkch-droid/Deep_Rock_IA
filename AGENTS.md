@@ -119,6 +119,7 @@ experiência de uso. Isso significa que:
 ```text
 ai-cpu-os/
 ├── README.md               # Visão geral, uso, avisos, contribuição
+├── README.technical.md     # Manual do MANTENEDOR (internals, contratos, CI)
 ├── AGENTS.md               # ← você está aqui (ponto de entrada)
 ├── LICENSE                 # MIT
 ├── Makefile                # Atalhos locais (make ci, lint, build-xeon, docker…)
@@ -205,6 +206,7 @@ ai-cpu-os/
 |----------------------------------------|----------------------------------------------|
 | Ver o que está feito/planejado         | `docs/ROADMAP.md`                            |
 | Entender a arquitetura e os fluxos     | `docs/ARCHITECTURE.md`                       |
+| **Entender o projeto POR DENTRO (mantenedor)** | **`README.technical.md`**            |
 | Saber o estado atual + próxima ação    | **`docs/STATE.md`**                          |
 | Detalhes de CPU/RAM/disco              | `docs/HARDWARE.md`                           |
 | Entender uma otimização específica     | `docs/TUNING.md`                             |
@@ -321,7 +323,18 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-12
-- **O que mudou:** **Ferramentas de validação da ISO.** Criados
+- **O que mudou:** **Documentação separada por público.** `README.md` foi
+  reescrito para o **usuário final** (explicado do zero: serve para mim?, o que
+  muda na minha máquina, instalação em 5 passos, uso diário, como medir, como
+  desfazer, FAQ) e criado o **`README.technical.md`** — manual do **mantenedor**
+  (modelo mental das três camadas, mapa do repo, contratos/invariantes, receitas
+  de "como estender", o que cada teste prova, CI por dentro, playbook de
+  depuração com os bugs reais, status de validação e glossário). Regra derivada:
+  **usuário → `README.md`; mantenedor → `README.technical.md`; regras → este
+  arquivo; "o que é fato hoje" → `docs/STATE.md`.** Corrigido de passagem um bug
+  real: o `build-llama.yml` ainda usava `matrix.profile` (removido na
+  refatoração) no nome do artefato — o upload falharia.
+- **Data anterior:** 2026-10-12 — **Ferramentas de validação da ISO.** Criados
   `iso/verify-iso.sh` (confere o **conteúdo** da ISO — config, projeto embutido,
   marcadores, YAML, entrada de boot, Volume ID — com modo `--dir` que dispensa
   `xorriso`, o que o torna testável no CI) e `iso/test-vm.sh` (boota a ISO em
