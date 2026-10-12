@@ -160,7 +160,45 @@ cat >> /target/etc/issue <<'ISSUE'
 ISSUE
 
 ## ---------------------------------------------------------------------------
-## 4-b. Console serial (opcional) — torna o primeiro boot observável sem tela.
+## 4-c. Remover fontes de apt apontando para a MÍDIA do sistema instalado
+## ---------------------------------------------------------------------------
+## A instalação usa o repositório local da mídia (/cdrom/apt-repo) para não
+## precisar de rede. Esse caminho deixa de existir depois da instalação — se a
+## fonte ficasse no alvo, todo `apt update` reclamaria de um repositório
+## inalcançável. Removemos APENAS o que aponta para a mídia: o espelho oficial
+## (que é o `primary`) permanece intacto.
+APT_REPO_PATH="@@APT_REPO_PATH@@"
+if [ -n "${APT_REPO_PATH}" ]; then
+    log "removendo fontes de apt que apontam para a mídia (${APT_REPO_PATH})"
+    for f in /target/etc/apt/sources.list /target/etc/apt/sources.list.d/*.list /target/etc/apt/sources.list.d/*.sources; do
+        [ -f "$f" ] || continue
+        if grep -q "${APT_REPO_PATH}" "$f" 2>/dev/null; then
+            # .sources (deb822) pode ter a URI num bloco multi-linha; nesses
+            # casos é mais seguro remover o arquivo inteiro.
+            case "$f" in
+                *.sources)
+                    case "$(basename "$f")" in
+                        ubuntu.sources|debian.sources) : ;;   # normais, não mexer
+                        *) rm -f "$f"; log "removido ${f}" ;;
+                    esac
+                    ;;
+                *)
+                    cp -a "$f" "${f}.bak" 2>/dev/null || true
+                    grep -v "${APT_REPO_PATH}" "${f}.bak" > "$f" 2>/dev/null || true
+                    log "limpo ${f} (backup em ${f}.bak)"
+                    ;;
+            esac
+        fi
+    done
+    if in_target apt-get update >/dev/null 2>&1; then
+        log "apt update do alvo OK após a limpeza"
+    else
+        log "AVISO: apt update no alvo falhou (sem rede agora é esperado); rode depois"
+    fi
+fi
+
+## ---------------------------------------------------------------------------
+## 4-d. Console serial (opcional) — torna o primeiro boot observável sem tela.
 ## ---------------------------------------------------------------------------
 ## Sem isto, um teste headless (iso/test-vm.sh) não vê nada do sistema
 ## instalado: a saída vai para a tela virtual, que ninguém está olhando.

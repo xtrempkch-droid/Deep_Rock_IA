@@ -85,6 +85,37 @@ readonly UBUNTU_ISO_PATTERN='live-server-amd64\.iso$'
 readonly SUGGESTED_MODEL_NAME="Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf"
 readonly SUGGESTED_MODEL_URL="https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
 
+# Repositório apt local embutido na mídia (--iso-repo).
+# POR QUE: a ISO é air-gapped (docs/ISO.md § 3.1). O alvo não pode precisar de
+# rede NEM PARA INSTALAR PACOTE — senão o primeiro boot pediria internet para
+# compilar o llama.cpp, e a promessa cairia.
+#
+# Forma: repositório "flat" (índice na raiz) adicionado como fonte EXTRA, via a
+# seção `sources` do curtin aceita pelo Subiquity. O espelho oficial continua
+# sendo o `primary`, então:
+#   * o sistema instalado fica com a configuração normal de arquivo (nada de
+#     `file:///cdrom` morto no sources.list);
+#   * se o repositório local estiver incompleto, o install AINDA funciona quando
+#     houver rede — degrada, não quebra;
+#   * sem rede, os pacotes vêm da mídia.
+# Qualquer linha de fonte apontando para /cdrom é removida do alvo no
+# late-command (ela morreria no primeiro boot, quando a mídia sai).
+readonly ISO_REPO_DIRNAME="apt-repo"
+# Onde a mídia é montada durante a instalação. É o MESMO caminho que o
+# late-command usa para ler /cdrom/ai-cpu-os — ou seja, vale nos dois
+# instaladores (debian-installer e Subiquity).
+readonly APT_REPO_MOUNT="/cdrom"
+# Pacotes que o PRIMEIRO BOOT precisa ter JÁ INSTALADOS (é isto que evita que o
+# llama-build.sh/install.sh baixem qualquer coisa). É a união de:
+#   * `llama-build.sh check_deps`      → build-essential cmake pkg-config
+#   * `roles/inference/install.sh`     → ccache libopenblas-dev libgomp1
+#                                        python3 python3-venv curl
+#                                        ca-certificates pciutils util-linux
+#   * `roles/builder` + EXTRA_PACKAGES → git gnupg jq openssh-server
+readonly DEFAULT_REPO_PACKAGES="build-essential cmake ccache pkg-config libopenblas-dev libgomp1 python3 python3-venv curl ca-certificates gnupg jq pciutils util-linux openssh-server git"
+# Orçamento da mídia: 8 GB acordados. Só avisa — o usuário decide.
+readonly ISO_REPO_BUDGET_MB=6000
+
 # --- configuração (sobrescrita por argumentos) ------------------------------
 DISTRO="ubuntu"
 DISK=""
@@ -130,6 +161,22 @@ CHECK_TEMPLATES=0
 ISO_MODEL="auto"
 MODEL_SRC=""      # caminho local do .gguf a embutir (vazio = sem modelo)
 MODEL_NAME=""     # nome do arquivo dentro da ISO (vazio = sem modelo)
+
+# --- repositório apt local (--iso-repo) --------------------------------------
+# auto  → baixa os .deb necessários NA MÁQUINA QUE GERA A ISO e embute.
+# none  → ISO sem repositório (o alvo precisará de rede para instalar pacotes).
+# DIR   → usa um diretório com .deb já baixados.
+ISO_REPO="auto"
+ISO_REPO_PACKAGES=""        # vazio = DEFAULT_REPO_PACKAGES
+ISO_REPO_ALLOW_MISMATCH=0   # permite repo de outra release (sabe o que faz)
+REPO_DIR_LOCAL=""           # árvore pronta do repo a embutir (vazio = sem repo)
+APT_REPO_PATH=""            # caminho dentro da ISO, ex.: /cdrom/apt-repo
+APT_REPO_PATH_REL=""        # o mesmo, relativo à raiz da ISO (ex.: apt-repo)
+# Espelho oficial: é o `primary` do autoinstall e é o que fica configurado no
+# sistema INSTALADO (o repositório local serve à instalação, não ao dia a dia).
+APT_PRIMARY_URI="http://archive.ubuntu.com/ubuntu"
+REPO_PKG_COUNT=0
+REPO_SIZE_MB=0
 
 if [[ -t 1 ]]; then
   C_RESET="\033[0m"; C_INFO="\033[36m"; C_WARN="\033[33m"; C_ERR="\033[31m"; C_OK="\033[32m"; C_BOLD="\033[1m"
@@ -190,6 +237,15 @@ Opções principais:
                           none          — nenhum modelo na ISO
                           CAMINHO       — um arquivo .gguf seu
                         O late-command o copia para /opt/models no alvo.
+  --iso-repo VALOR      Repositório apt local embutido na mídia (para o alvo
+                        instalar pacotes SEM internet):
+                          auto (padrão) — baixa os .deb necessários aqui
+                          none          — nenhum repositório na ISO
+                          DIR           — usa um diretório com .deb baixados
+  --iso-repo-packages "…"  Pacotes que o repositório deve cobrir (padrão:
+                        toolchain de build + dependências dos papéis).
+  --iso-repo-allow-mismatch  Permite montar o repo de uma release diferente da
+                        ISO (por padrão isso é recusado: as versões não casam).
   --work-dir DIR        Diretório de trabalho (padrão: iso/work).
   --keep-work           Não apaga o diretório de trabalho.
   --check-templates     Autoteste: substitui os templates e valida o YAML gerado
@@ -246,6 +302,9 @@ parse_args() {
       --mirror-dir)      [[ $# -ge 2 ]] || { log_error "--mirror-dir exige valor"; exit 2; }; MIRROR_DIR="$2"; shift 2 ;;
       --extra-packages)  [[ $# -ge 2 ]] || { log_error "--extra-packages exige valor"; exit 2; }; EXTRA_PACKAGES="$2"; shift 2 ;;
       --iso-model)       [[ $# -ge 2 ]] || { log_error "--iso-model exige valor (auto|none|CAMINHO)"; exit 2; }; ISO_MODEL="$2"; shift 2 ;;
+      --iso-repo)        [[ $# -ge 2 ]] || { log_error "--iso-repo exige valor (auto|none|DIR)"; exit 2; }; ISO_REPO="$2"; shift 2 ;;
+      --iso-repo-packages) [[ $# -ge 2 ]] || { log_error "--iso-repo-packages exige valor"; exit 2; }; ISO_REPO_PACKAGES="$2"; shift 2 ;;
+      --iso-repo-allow-mismatch) ISO_REPO_ALLOW_MISMATCH=1; shift ;;
       --work-dir)        [[ $# -ge 2 ]] || { log_error "--work-dir exige valor"; exit 2; }; WORK_DIR="$2"; shift 2 ;;
       --keep-work)       KEEP_WORK=1; shift ;;
       --check-templates) CHECK_TEMPLATES=1; DRY_RUN=1; shift ;;
@@ -658,6 +717,279 @@ inject_model() {
 }
 
 # ---------------------------------------------------------------------------
+# Repositório apt local (--iso-repo) — o que torna a instalação offline possível
+# ---------------------------------------------------------------------------
+# Codename do Ubuntu a partir do número da release. '' = não sei (não bloqueia,
+# só avisa): inventar um codename novo faria o build mentir.
+ubuntu_codename_for_version() {
+  case "$1" in
+    22.04) echo jammy ;;
+    24.04) echo noble ;;
+    24.10) echo oracular ;;
+    25.04) echo plucky ;;
+    25.10) echo questing ;;
+    *)     echo "" ;;
+  esac
+}
+
+# Release da ISO base (do --iso-url, ou do padrão). '' = não sei dizer.
+iso_release_version() {
+  printf '%s' "${ISO_URL:-$UBUNTU_CD_BASE_DEFAULT}" \
+    | sed -nE 's#.*releases\.ubuntu\.com/([0-9]+\.[0-9]+).*#\1#p'
+}
+
+# Linha de sources.list do repositório local (formato "flat": índice na raiz,
+# `./` como suite). `trusted=yes` porque um repositório local não é assinado —
+# e assinar exigiria gerenciar chave no alvo, o que não agrega aqui.
+apt_local_source_line() {
+  # SEM repositório na mídia, a linha tem de ser VAZIA — é isso que faz o
+  # bloco inteiro sumir (do YAML e do preseed). Devolver uma linha com caminho
+  # vazio inseriria uma fonte inútil e inválida.
+  [[ -n "$APT_REPO_PATH_REL" ]] || return 0
+  # O caminho é o da MÍDIA MONTADA (ex.: file:///cdrom/apt-repo) — não o nome
+  # relativo à raiz da ISO. Foi o harness de teste que pegou esta confusão.
+  printf 'deb [trusted=yes] file://%s/%s ./' "$APT_REPO_MOUNT" "$APT_REPO_PATH_REL"
+}
+
+# Gera o índice (Packages/Packages.gz) a partir dos .deb de um diretório.
+# Não usamos dpkg-scanpackages de propósito: ele vive no dpkg-dev, que não está
+# em toda máquina de build. O `control` do próprio .deb já traz Depends,
+# Provides, Pre-Depends etc., então basta despejá-lo e acrescentar os campos de
+# localização (Filename/Size/SHA256) que o apt exige.
+build_repo_index() {
+  local dir="$1" deb rel size hash n=0
+  : > "${dir}/Packages"
+  while IFS= read -r deb; do
+    [[ -n "$deb" ]] || continue
+    rel="${deb#"$dir"/}"
+    size="$(stat -c %s "$deb")"
+    hash="$(sha256sum "$deb" | cut -d' ' -f1)"
+    {
+      dpkg-deb -f "$deb"
+      printf 'Filename: %s\nSize: %s\nSHA256: %s\n\n' "$rel" "$size" "$hash"
+    } >> "${dir}/Packages"
+    n=$((n + 1))
+  done < <(find "$dir" -name '*.deb' -type f | sort)
+  gzip -9c "${dir}/Packages" > "${dir}/Packages.gz"
+
+  # Sanidade do índice: sem estes campos o apt descarta a entrada em silêncio.
+  local missing
+  missing="$(awk '/^Package: /{p=1} /^Filename: /{f=1} /^Size: /{s=1}
+                    /^$/{if(p&&!(f&&s)) print "entrada sem Filename/Size"; p=f=s=0}' \
+                  "${dir}/Packages" | wc -l)"
+  [[ "$missing" -eq 0 ]] \
+    || { log_error "Índice gerado em ${dir} tem ${missing} entrada(s) inválida(s)."; return 1; }
+
+  REPO_PKG_COUNT="$n"
+  REPO_SIZE_MB=$(( $(du -sm "$dir" | cut -f1) ))
+  log_ok "Índice do repositório: ${n} pacotes, ${REPO_SIZE_MB} MB"
+  return 0
+}
+
+# Baixa os .deb (pacotes + fecho de dependências) para o diretório final.
+download_repo_packages() {
+  local dir="$1" list="$2" out
+
+  # Fecho de dependências. `--no-*` desliga o que não é necessário para o
+  # pacote FUNCIONAR (recomendados/sugeridos/quebras), que só engordariam a
+  # mídia. Pre-Depends é mantido: omiti-lo quebraria instalações.
+  out="$(apt-cache depends --recurse --no-recommends --no-suggests \
+           --no-conflicts --no-breaks --no-replaces --no-enhances \
+           $list 2>/dev/null \
+         | grep -E '^[a-zA-Z0-9][a-zA-Z0-9+._-]*$' | sort -u)"
+
+  [[ -n "$out" ]] \
+    || { log_error "Não consegui calcular as dependências (apt-cache vazio)."; return 1; }
+
+  log_info "Fecho de dependências: $(printf '%s\n' "$out" | wc -l) pacotes (pedidos: $(printf '%s' "$list" | wc -w))"
+  log_info "Baixando os .deb em ${dir} (isto pode demorar)…"
+
+  mkdir -p "$dir/pool"
+  # Em lotes: um pacote virtual (sem candidato) faz o apt-get falhar, e em lote
+  # único isso abortaria o download dos demais.
+  printf '%s\n' "$out" \
+    | xargs -r -n 25 sh -c 'cd "$0" && apt-get download "$@"' "$dir/pool" \
+    >/dev/null 2>&1 || true
+
+  local got; got="$(find "$dir/pool" -name '*.deb' -type f | wc -l)"
+  log_info "${got} .deb baixados."
+  return 0
+}
+
+# Confere que cada pacote PEDIDO existe no repositório. O fecho pode ter falhas
+# toleradas; os pedidos, não — sem eles a ISO não cumpre a promessa offline.
+check_repo_completeness() {
+  local dir="$1" list="$2" p missing=0
+  for p in $list; do
+    # Aceita as duas formas: um diretório com índice (grep no Packages) ou um
+    # diretório CRU de .deb (find) — é o que permite ao --dry-run validar um
+    # --iso-repo DIR sem ter gerado nada.
+    local ok=0
+    if [[ -f "${dir}/Packages" ]] && grep -q "^Package: ${p}$" "${dir}/Packages"; then
+      ok=1
+    elif [[ -n "$(find "$dir" -name "${p}_*.deb" -type f -print -quit 2>/dev/null)" ]]; then
+      ok=1
+    fi
+    if [[ $ok -eq 0 ]]; then
+      log_error "Pacote pedido está AUSENTE no repositório: ${p}"
+      missing=1
+    fi
+  done
+  [[ "$missing" -eq 0 ]] || { log_error "Repositório incompleto — o alvo precisaria de rede."; return 1; }
+  return 0
+}
+
+# Obtém o repositório (baixando ou usando um diretório) e o materializa em
+# ${WORK_DIR}/apt-repo. Nada é embutido na ISO por esta função; isso é o
+# inject_repo.
+acquire_repo() {
+  section "Repositório apt local (--iso-repo ${ISO_REPO})"
+
+  REPO_DIR_LOCAL=""
+  APT_REPO_PATH=""
+  case "$ISO_REPO" in
+    none|no|"")
+      log_info "Sem repositório local: o alvo precisará de rede para instalar pacotes"
+      log_info "(o modelo e o fonte do llama.cpp vêm da mídia de qualquer forma)."
+      return 0 ;;
+  esac
+
+  local pkgs="${ISO_REPO_PACKAGES:-$DEFAULT_REPO_PACKAGES}"
+  local dest="${WORK_DIR}/${ISO_REPO_DIRNAME}"
+
+  if [[ "$ISO_REPO" == "auto" && "$DISTRO" == "debian" ]]; then
+    log_error "--iso-repo auto não funciona com --distro debian nesta máquina:"
+    log_error "  os .deb do Ubuntu não servem no Debian (e vice-versa)."
+    log_error "  Baixe os .deb do Debian e use: --iso-repo CAMINHO"
+    exit 1
+  fi
+
+  # Um repositório montado com os .deb de OUTRA release produz versões que não
+  # casam com a base da ISO — e o modo de falha é uma instalação quebrada.
+  if [[ "$ISO_REPO" == "auto" && $ISO_REPO_ALLOW_MISMATCH -eq 0 ]]; then
+    local ver want have
+    ver="$(iso_release_version)"
+    want="$(ubuntu_codename_for_version "$ver")"
+    have="$(. /etc/os-release 2>/dev/null && printf '%s' "${VERSION_CODENAME:-}")"
+    if [[ -z "$want" ]]; then
+      log_warn "Não sei o codename do Ubuntu ${ver:-<?>}; não vou conferir a release."
+      log_warn "Se a sua máquina não for a MESMA release da ISO, os .deb podem não casar."
+    elif [[ -z "$have" ]]; then
+      log_warn "Não consegui ler /etc/os-release; não vou conferir a release."
+    elif [[ "$have" != "$want" ]]; then
+      log_error "Release incompatível: a ISO é Ubuntu ${ver} (${want}) e esta máquina é '${have}'."
+      log_error "Os .deb baixados aqui não casam com a base da ISO."
+      log_error "Rode numa ${want} (ou numa VM ${want}), ou use --iso-repo-allow-mismatch."
+      exit 1
+    else
+      log_info "Release confere: ${have} (Ubuntu ${ver})."
+    fi
+  fi
+
+  # Validações que são SOMENTE LEITURA rodam também no --dry-run: o objetivo
+  # dele é pegar cedo um --iso-repo apontando para o lugar errado.
+  if [[ "$ISO_REPO" != "auto" ]]; then
+    [[ -d "$ISO_REPO" ]] \
+      || { log_error "--iso-repo ${ISO_REPO}: não existe (use auto, none ou um diretório)."; exit 1; }
+    local nfound
+    nfound="$(find "$ISO_REPO" -name '*.deb' -type f | wc -l)"
+    (( nfound > 0 )) \
+      || { log_error "--iso-repo ${ISO_REPO}: nenhum .deb encontrado."; exit 1; }
+    log_info "Diretório de .deb: ${ISO_REPO} (${nfound} arquivos)"
+    if ! check_repo_completeness "$ISO_REPO" "$pkgs"; then
+      log_error "Um --iso-repo assim geraria uma ISO que NÃO instala offline."
+      exit 1
+    fi
+  fi
+
+  REPO_DIR_LOCAL="$dest"
+  APT_REPO_PATH_REL="$ISO_REPO_DIRNAME"
+  APT_REPO_PATH="${APT_REPO_MOUNT}/${ISO_REPO_DIRNAME}"
+
+  if [[ $DRY_RUN -eq 1 ]]; then
+    if [[ "$ISO_REPO" == "auto" ]]; then
+      log_info "[dry-run] baixaria o fecho de dependências de: ${pkgs}"
+    else
+      log_info "[dry-run] copiaria ${ISO_REPO} → ${dest} e geraria o índice"
+    fi
+    return 0
+  fi
+
+  if [[ "$ISO_REPO" != "auto" ]]; then
+    # Diretório fornecido pelo usuário: copiamos os .deb para a árvore final
+    # (previsível e sem escrever no diretório dele).
+    run "Preparando ${dest}" mkdir -p "$dest/pool"
+    run "Copiando os .deb" cp -a "${ISO_REPO}"/*.deb "$dest/pool/"
+    build_repo_index "$dest" || exit 1
+    check_repo_completeness "$dest" "$pkgs" || exit 1
+  else
+    download_repo_packages "$dest" "$pkgs" || exit 1
+    build_repo_index "$dest" || exit 1
+    check_repo_completeness "$dest" "$pkgs" || exit 1
+  fi
+
+  if (( REPO_SIZE_MB > ISO_REPO_BUDGET_MB )); then
+    log_warn "Repositório com ${REPO_SIZE_MB} MB — acima do orçamento de aviso (${ISO_REPO_BUDGET_MB} MB)."
+    log_warn "A ISO final pode passar do tamanho esperado. Use --iso-repo-packages para reduzir."
+  fi
+
+  REPO_DIR_LOCAL="$dest"
+  APT_REPO_PATH_REL="$ISO_REPO_DIRNAME"
+  APT_REPO_PATH="${APT_REPO_MOUNT}/${ISO_REPO_DIRNAME}"
+  log_ok "Repositório pronto para embutir: ${REPO_PKG_COUNT} pacotes, ${REPO_SIZE_MB} MB"
+}
+
+# Copia a árvore do repositório para dentro da ISO. Sem repo, não faz nada.
+inject_repo() {
+  [[ -n "$REPO_DIR_LOCAL" && -n "$APT_REPO_PATH_REL" ]] || return 0
+
+  local base
+  if [[ "$DISTRO" == "ubuntu" ]]; then base="${UBUNTU_STAGE}"; else base="${ISO_ROOT}"; fi
+  local dest="${base}/${APT_REPO_PATH_REL}"
+
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log_info "[dry-run] copiaria ${REPO_DIR_LOCAL} → ${dest}"
+    return 0
+  fi
+
+  [[ -f "${REPO_DIR_LOCAL}/Packages.gz" ]] \
+    || { log_error "Índice ausente em ${REPO_DIR_LOCAL}/Packages.gz — não vou embutir um repo quebrado."; exit 1; }
+
+  mkdir -p "$dest"
+  run "Copiando o repositório para a ISO" cp -a "${REPO_DIR_LOCAL}/." "$dest/"
+  log_ok "Repositório na mídia: /${APT_REPO_PATH_REL}/ (Packages.gz + $(find "$dest" -name '*.deb' | wc -l) .deb)"
+}
+
+# Expande o marcador @@APT_LOCAL_SOURCES@@ no autoinstall: uma fonte EXTRA
+# (seção `sources` do curtin) ou nada, quando não há repositório na mídia.
+# Sintetizar YAML "por bloco" é a mesma técnica de expand_packages_block — e o
+# bloco desaparecer por completo é o que mantém o YAML válido nos dois casos.
+expand_apt_local_block() {
+  local f="$1" line
+  line="$(apt_local_source_line)"
+
+  awk -v line="$line" '
+    /^@@APT_LOCAL_SOURCES@@$/ {
+      if (line != "") {
+        print "  sources:"
+        print "    ai-cpu-os-local:"
+        printf "      source: \"%s\"\n", line
+      }
+      next
+    }
+    /^@@APT_LOCAL_PRESEED@@$/ {
+      if (line != "") {
+        print "d-i apt-setup/local0/repository string " line
+        print "d-i apt-setup/local0/comment string ai-cpu-os local repo (midia)"
+        print "d-i apt-setup/local0/source boolean true"
+      }
+      next
+    }
+    { print }
+  ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+}
+
+# ---------------------------------------------------------------------------
 # Templates: substituição de marcadores e gravação
 # ---------------------------------------------------------------------------
 # Escapa o que o `sed` trataria como sintaxe no lado da substituição.
@@ -724,6 +1056,8 @@ subst_template() {
     -e "s|@@GRUB_WITH_OTHER_OS@@|${GRUB_WITH_OTHER_OS}|g" \
     -e "s|@@EXTRA_PACKAGES@@|${EXTRA_PACKAGES}|g" \
     -e "s|@@ISO_MODEL@@|${MODEL_NAME}|g" \
+    -e "s|@@APT_REPO_PATH@@|${APT_REPO_PATH}|g" \
+    -e "s|@@APT_PRIMARY_URI@@|${APT_PRIMARY_URI}|g" \
     -e "s|@@STORAGE_LAYOUT@@|${store_esc}|g" \
     -e "s|@@PARTMAN_DISK@@|${PARTMAN_DISK_LINE}|g" \
     "$src" > "$dst"
@@ -749,6 +1083,7 @@ check_no_leftover_tokens() {
   local -a required_tokens=(
     DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME PASSWORD_HASH
     LOCALE KEYMAP TIMEZONE EXTRA_PACKAGES PACKAGES_BLOCK STORAGE_LAYOUT ISO_MODEL
+    APT_REPO_PATH APT_LOCAL_SOURCES APT_LOCAL_PRESEED APT_PRIMARY_URI
   )
   local t leftover=0
   for t in "${required_tokens[@]}"; do
@@ -776,6 +1111,10 @@ inject_templates() {
     subst_template "${ISO_DIR}/autoinstall/autoinstall.yaml" "${UBUNTU_STAGE}/autoinstall.yaml"
     # A lista de pacotes vira uma sequência em bloco do YAML (ver a função).
     expand_packages_block "${UBUNTU_STAGE}/autoinstall.yaml"
+    # Idem para o repositório local: a fonte extra entra — ou some por completo.
+    expand_apt_local_block "${UBUNTU_STAGE}/autoinstall.yaml"
+    # Idem para o repositório local: a fonte extra entra — ou some por completo.
+    expand_apt_local_block "${UBUNTU_STAGE}/autoinstall.yaml"
     chmod 0644 "${UBUNTU_STAGE}/autoinstall.yaml"
     inject_common_templates "${UBUNTU_STAGE}/preseed"
     check_no_leftover_tokens "${UBUNTU_STAGE}/autoinstall.yaml" \
@@ -805,6 +1144,7 @@ inject_templates() {
 
   mkdir -p "$dest"
   subst_template "${ISO_DIR}/preseed/ai-cpu-os.cfg" "${dest}/ai-cpu-os.cfg"
+  expand_apt_local_block "${dest}/ai-cpu-os.cfg"
   chmod 0644 "${dest}/ai-cpu-os.cfg"
   inject_common_templates "$dest"
   check_no_leftover_tokens "${dest}/ai-cpu-os.cfg" "${dest}/late-command.sh" "${dest}/firstboot.sh" || exit 1
@@ -1250,9 +1590,12 @@ check_templates() {
 
     subst_template "${ISO_DIR}/autoinstall/autoinstall.yaml" "${dir}/autoinstall.yaml"
     expand_packages_block "${dir}/autoinstall.yaml"
+    expand_apt_local_block "${dir}/autoinstall.yaml"
+    expand_apt_local_block "${dir}/autoinstall.yaml"
     subst_template "${ISO_DIR}/preseed/late-command.sh"       "${dir}/late-command.sh"
     subst_template "${ISO_DIR}/preseed/firstboot.sh"          "${dir}/firstboot.sh"
     subst_template "${ISO_DIR}/preseed/ai-cpu-os.cfg"         "${dir}/ai-cpu-os.cfg"
+    expand_apt_local_block "${dir}/ai-cpu-os.cfg"
 
     log_info "variante '${variant}': storage = $(storage_layout_line)"
     log_info "              packages =${EXTRA_PACKAGES:+ }${EXTRA_PACKAGES}"
@@ -1298,7 +1641,6 @@ check_templates() {
   else
     log_warn "ISO SEM modelo: o alvo sobe sem LLM. Instale um com --model-file (ver docs/ISO.md § 3.1)."
   fi
-
   if [[ $rc -eq 0 ]]; then
     log_ok "Autoteste dos templates: OK."
   else
@@ -1348,6 +1690,9 @@ main() {
   # O modelo é obtido ANTES de montar a árvore: um erro (arquivo errado,
   # magic inválido) falha cedo, sem gastar extração/remontagem.
   acquire_model
+  # Idem para o repositório: conferir a release e baixar os .deb é caro, e um
+  # erro aqui precisa aparecer ANTES da remontagem da ISO.
+  acquire_repo
 
   # A ordem importa: o layout (extração Debian / stage Ubuntu) precisa existir
   # antes de injetar o projeto, e o patch de boot precisa do kernel/initrd que
@@ -1356,14 +1701,15 @@ main() {
     prepare_ubuntu
     inject_project
     inject_model
+    inject_repo
     inject_templates
     patch_boot_ubuntu
   else
     extract_iso_debian
     inject_project
     inject_model
+    inject_repo
     inject_templates
-    # Kernel/initrd são descobertos no patch do isolinux; rodamos primeiro.
     patch_isolinux
     patch_efi_debian
     regenerate_md5sums
@@ -1385,6 +1731,15 @@ main() {
     log_info "Modelo embutido: /models/${MODEL_NAME} (o late-command copia para /opt/models)"
   else
     log_warn "ISO SEM modelo: o alvo sobe sem LLM. Instale um depois com --model-file (docs/ISO.md § 3.1)."
+  fi
+  if [[ -n "$APT_REPO_PATH" ]]; then
+    if [[ $DRY_RUN -eq 1 ]]; then
+      log_info "Repositório apt na mídia: ${APT_REPO_PATH} (dry-run: nada foi gerado)"
+    else
+      log_info "Repositório apt na mídia: ${APT_REPO_PATH} (${REPO_PKG_COUNT} pacotes, ${REPO_SIZE_MB} MB)"
+    fi
+  else
+    log_warn "ISO SEM repositório apt: instalar pacotes no alvo exigirá rede."
   fi
   if [[ -n "$GENERATED_PASSWORD" ]]; then
     log_warn "SENHA GERADA: ${GENERATED_PASSWORD} — anote agora, não é recuperável daqui."
@@ -1471,6 +1826,7 @@ selftest_iso_tools() {
   mkdir -p "${stage}/boot/grub"
   subst_template "${ISO_DIR}/autoinstall/autoinstall.yaml" "${stage}/autoinstall.yaml"
   expand_packages_block "${stage}/autoinstall.yaml"
+  expand_apt_local_block "${stage}/autoinstall.yaml"
   inject_common_templates "${stage}/preseed"
 
   # 2) O projeto real (o mesmo tar que o build injeia).

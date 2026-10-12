@@ -9,7 +9,7 @@
 > [`docs/STATE.md`](STATE.md).
 > **Quando escrever:** **ao fim de TODA sessão de trabalho** (ver § 8).
 >
-> **Última entrada:** sessão **#15** (2026-10-12) — o modelo `.gguf` vai na mídia (implementado de ponta a ponta).
+> **Última entrada:** sessão **#16** (2026-10-12) — repositório apt local na mídia (`--iso-repo`); o air-gapped depende só do item 2.
 
 ---
 
@@ -819,6 +819,128 @@ Ou seja: o usuário estava respondendo ativamente as dúvidas abertas do § 5.3.
 
 ---
 
+### Sessão #16 — 2026-10-12 · 📦 O repositório apt vai na mídia (orçamento de 8 GB)
+
+**Objetivo (pedido do usuário, verbatim):** *"a imagem do sistema chegar até 8 GB
+não tem problema, então pode incluir o que for necessário"*.
+
+Orçamento liberado: o item mais pesado que restava no § 3.1 do `docs/ISO.md`
+(repositório apt local, ~300–600 MB) deixou de ser caro o bastante para adiar.
+
+**Feito:**
+
+1. **`--iso-repo auto|DIR|none`** no `iso/build-iso.sh`:
+   - resolve o **fecho de dependências** dos pacotes que o 1º boot precisa
+     (`apt-cache depends --recurse`, sem recomendados/sugeridos — só o que faz o
+     pacote **funcionar**; `Pre-Depends` é mantido);
+   - baixa os `.deb` (`apt-get download`, **em lotes**: um pacote virtual sem
+     candidato faz o apt falhar e abortaria o resto da lista);
+   - gera o índice (`Packages` + `Packages.gz`) **com `dpkg-deb`**, sem depender
+     do `dpkg-dev` — o `control` do próprio `.deb` já traz `Depends`/`Provides`,
+     então basta despejá-lo e acrescentar `Filename`/`Size`/`SHA256`;
+   - confere que **todo pacote PEDIDO** está no repositório (o fecho pode ter
+     falhas toleradas; os pedidos, não).
+2. **A fonte entra como EXTRA, nunca como `primary`.** Decisão de projeto:
+   - como `primary`, o `sources.list` do **sistema instalado** apontaria para
+     `file:///cdrom/...`, que morre quando a mídia sai (`apt update` quebrado no
+     dia a dia) — e um repo incompleto **abortaria** a instalação;
+   - como fonte extra, o alvo nasce com o espelho oficial e um repo incompleto
+     **degrada** para a rede em vez de quebrar.
+   No Ubuntu: seção **`sources` do curtin** (o próprio Subiquity documenta como
+   "adicionar um PPA"). No Debian: `apt-setup/local0/repository`, `comment` e
+   `source boolean true`.
+3. **O caminho veio do harness, não da minha cabeça:** o valor é
+   `deb [trusted=yes] file:///cdrom/apt-repo ./` — repositório **flat** (índice
+   na raiz, `./` como suite) e `trusted=yes`, porque um repo local não é assinado
+   e gerenciar chave no alvo não agregaria nada.
+4. **O build RECUSA repositório de outra release.** Compara o codename derivado
+   da URL da ISO (24.04→noble, 25.10→questing…) com o `VERSION_CODENAME` de
+   `/etc/os-release`. `.deb` de outra release têm versões que não casam com a
+   base, e a falha só apareceria **no meio da instalação**. Escape:
+   `--iso-repo-allow-mismatch`. E `--iso-repo auto` com `--distro debian` é
+   recusado (`.deb` de Ubuntu não servem no Debian).
+5. **Blocos que aparecem ou somem:** `@@APT_LOCAL_SOURCES@@` (YAML) e
+   `@@APT_LOCAL_PRESEED@@` (preseed) são expandidos por
+   `expand_apt_local_block` — **ou viram o bloco, ou desaparecem por completo**,
+   que é o que mantém o YAML/preseed válidos nos dois casos.
+6. **O alvo não fica com fonte morta:** `late-command.sh` remove qualquer linha
+   apontando para a mídia (`@@APT_REPO_PATH@@`) de `/target/etc/apt/sources.list`
+   e de `sources.list.d/`, com backup, preservando o espelho oficial.
+7. **`verify-iso.sh` ganhou a seção do repositório**, com quatro invariantes:
+   índice legível (`gzip -t` + contagem de entradas); **todo `.deb` citado no
+   índice está presente na mídia**; magic `!<arch>` dos `.deb` (amostra no modo
+   `--iso`, todos no `--dir`) — pega download que trouxe **HTML de erro** com
+   nome de `.deb`; e **coerência mídia × configuração** nos dois sentidos.
+8. Guardas no CI: `--iso-repo`, `expand_apt_local_block`, `dpkg-deb`, `apt-repo`,
+   o marcador em cada template, a limpeza no late-command e a checagem no
+   verificador.
+
+**Decisões (e por quê):**
+
+- **Orçamento de 8 GB muda o que é "caro".** ~500 MB de `.deb` era "pesado demais
+  para agora"; com o orçamento dado, virou o passo natural. O build **avisa**
+  acima de 6 GB, mas **não bloqueia** — quem decide o tamanho da mídia é quem
+  gera.
+- **`dpkg-scanpackages` não foi usado de propósito:** ele vive no `dpkg-dev`, que
+  não está em toda máquina de build. Menos dependência, um só caminho de código.
+- **Recusar release diferente, e não avisar.** Um aviso seria ignorado e a falha
+  apareceria como "instalação quebrada", sem relação óbvia com a causa.
+- **Não provar o que não dá para provar.** O aceite do instalador (seção
+  `sources` do curtin / `apt-setup/local0`) **não** é verificável sem uma ISO
+  real. Ficou escrito como **suposição documentada**, com o **sintoma** a
+  procurar no primeiro teste em VM: "reclama de assinatura" → problema na fonte;
+  "instala mas pede rede" → repositório incompleto.
+
+**Problemas encontrados e resolvidos:**
+
+- 🐛 **Bug real: a linha da fonte saía `file:///apt-repo`** em vez de
+  `file:///cdrom/apt-repo`. Eu confundi o nome relativo à raiz da ISO com o
+  caminho da mídia montada. **Foi o harness** (extrair as funções reais do
+  script com `sed` e exercitá-las) que pegou, antes de qualquer teste no alvo.
+  Corrigido com a constante `APT_REPO_MOUNT="/cdrom"` e uma única fonte de
+  verdade para o caminho.
+- 🐛 **Sem repositório, a função ainda devolvia uma linha** (com caminho vazio) —
+  e o bloco seria **inserido** com uma fonte inválida. Corrigido: sem repo, a
+  linha é **vazia** e o bloco desaparece. O autoteste de templates não pegaria
+  (um bloco "a mais" não é erro de sintaxe); o harness pegou.
+- 🐛 **O `--dry-run` não validava nada do repositório** (saía antes): um
+  `--iso-repo` apontando para o diretório errado passava batido. Movido: as
+  validações **somente leitura** (existe? tem `.deb`? os pacotes pedidos estão
+  lá?) rodam **também** no dry-run.
+- 🐛 **Linha do resumo duplicada:** duas edições casaram em pontos diferentes do
+  `main()` e o mesmo bloco entrou duas vezes. Detectado contando ocorrências.
+- 🐛 **`main()` corrompido de novo, por edição de bloco.** A mesma armadilha da
+  sessão #15 — agora com o mesmo texto inserido em **dois** lugares. Reparado com
+  **âncoras exatas em script** + `assert` de contagem antes de escrever, que é a
+  defesa que a #15 tinha registrado. Terceira ocorrência do padrão; a defesa
+  nova **funcionou** e evitou o quarto caso.
+- **Duas provas fortes, feitas de verdade, sem ISO:** (a) o **`apt` real** rodou
+  `apt-get update` contra um repositório montado **pelo código do projeto** e
+  resolveu a dependência entre dois pacotes de teste (`fake-dep` → `fake-pkg`),
+  apontando para os `.deb` dentro da árvore — prova de que o **formato**, o flat
+  `./` e o `[trusted=yes]` em `file://` funcionam; (b) o `verify-iso.sh` reprovou
+  os **cinco** modos de falha testados (Packages.gz corrompido, `.deb` citado no
+  índice e ausente, `.deb` que é HTML de erro, repo sem a fonte no autoinstall,
+  fonte no autoinstall sem repo).
+
+**NÃO feito / não testado (importante):**
+
+- **Nenhuma ISO gerada, nenhum boot real.** Vale integralmente o § 6 do
+  `docs/ISO.md`.
+- **O `--iso-repo auto` nunca rodou de ponta a ponta:** exige rede e uma máquina
+  da **mesma release** da ISO (esta é 25.10/questing; a ISO é 24.04/noble) — o
+  próprio guarda de release impede o teste aqui. Os caminhos exercitados foram o
+  **diretório** (`--iso-repo DIR`), a **geração do índice** e a **verificação**.
+- **O aceite do instalador é suposição:** seção `sources` no Subiquity e
+  `apt-setup/local0/*` no debian-installer não foram vistos funcionando.
+- **O `late-command.sh` nunca removeu uma fonte de um alvo de verdade.**
+- Resta **só o item 2** do § 3.1 (`firstboot.sh` passar `--source`) para o 1º boot
+  ficar 100% offline.
+
+**Commits desta sessão:** (a preencher após o push).
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,
@@ -837,6 +959,8 @@ Ou seja: o usuário estava respondendo ativamente as dúvidas abertas do § 5.3.
 
 | Thread | Nota |
 |--------|------|
+| **Item 2 do air-gapped** (`firstboot.sh` passar `--source` em vez de `--ref`) | **É o único que falta** para o 1º boot não precisar de rede. Os itens 1, 3, 4 e 5 do § 3.1 do `docs/ISO.md` estão implementados. |
+| **Aceite do instalador para o repo local** | A seção `sources` (Subiquity) e `apt-setup/local0/*` (debian-installer) são **suposições documentadas** — não foram vistos funcionando. Sintoma a procurar: erro de assinatura; ou instalar mas pedir rede (repo incompleto). |
 | **PR #1 do Dependabot** | ✅ verde, rebaseado sobre `main`, **não mesclado**. Basta clicar em *Merge*. Bumps verificados com `git ls-remote`. |
 | **Bloco M** (`VALIDATION.md`) | Roteiro da ISO pronto; nenhuma execução ainda. |
 | **Blocos A–L** (`VALIDATION.md`) | Idem — nenhum resultado preenchido. |
@@ -901,6 +1025,8 @@ Ou seja: o usuário estava respondendo ativamente as dúvidas abertas do § 5.3.
 | `sed -i "s/.*texto.*/.../"` em `.md` | Pode quebrar linha sem intenção | Prefira edições por bloco com contexto |
 | Editar **bloco** de texto incluindo a quebra de linha final | O texto seguinte **gruda** na mesma linha (ex.: `perfil├── .github/`) e corrompe a árvore/lista | **Sempre confira o resultado** (`sed -n ...p`, `git diff`) e inclua a linha seguinte no contexto da edição |
 | Editar um **trecho grande** (uma função inteira) por substituição de bloco | O match pode cair em outro ponto, duplicar trechos e destruir código vizinho — 3 ocorrências em `build-iso.sh` de uma vez, e o `bash -n` acusou erro **longe da causa** | Para edição estrutural, extraia o original com `git show HEAD:arquivo` e reaplique as mudanças por **âncoras exatas** (linha inteira) em script |
+| Editar trecho grande / `main()` com `multi_replace` | Casou em **2 pontos**, inseriu o mesmo texto **duas vezes** e o arquivo ficou inválido (3ª vez que a armadilha aparece) | Extraia o original com `git show HEAD:arquivo`, reaplique por **âncoras exatas** e **asssine a contagem** (`assert`) ANTES de escrever |
+| Teste que só cobre o caso feliz do próprio código | Bug real passou batido: a função devolvia `file:///apt-repo` (sem `/cdrom`) e, sem repo, ainda devolvia linha com caminho vazio | Exercite as **funções reais** num harness (extraia com `sed`) e teste os caminhos **negativos**; o `--dry-run` também tem de validar |
 | Guarda negativo com `grep` de texto que aparece em **comentário** | O guarda reprova o repositório correto (ex.: o Dockerfile **cita** `COPY build/bin` para explicar por que NÃO usá-lo) | Ancore na forma do comando (`^COPY[[:space:]]+.*build/bin`) e teste o guarda com um caso positivo |
 | `sed -i` na 1ª linha de um script com `#!` | Pode trocar o **shebang** (`#!/usr/bin/env bash` vs `#!/bin/sh`) e mudar o interpretador | Nunca use `sed -i '1s/…'`; confirme o shebang depois (o CI verifica o modo estrito por shebang) |
 | Renomear/remover uma **chave de matriz** do CI e esquecer quem a consome | Ficou `${{ matrix.profile }}` no `build-llama.yml` depois de a matriz virar `family` → o **nome do artefato ia vazio** e o `upload-artifact` falharia (só num run de tag, longe do PR) | Ao renomear uma chave de matriz, `grep -n 'matrix\.'` no workflow inteiro; prefira `matrix.family` a nomes genéricos |
@@ -972,6 +1098,7 @@ Ao **fim de cada sessão**, faça nesta ordem:
 | 2026-10-12 | Sessões #9–#13 (famílias → ISO Ubuntu → ferramentas de validação → Zen 3/4 + GPU → documentação por público). Corrigido o marcador "Última entrada" do topo (estava parado em #7) e a lista de marcadores do § 7 (era `@@PROFILE@@`, removido na refatoração). |
 | 2026-10-12 | Sessão #14 — fechadas as duas dúvidas de arquitetura da ISO (**air-gapped = sim**; **compilar no 1º boot > binário pré-colado**). Item 1 dos requisitos implementado (`--source`). Nova dúvida aberta: o modelo vai na mídia? |
 | 2026-10-12 | Sessão #15 — o **modelo `.gguf` vai na mídia** (`--iso-model`): implementada a corrente completa `--iso-model` → `/models` → `MODEL_FILE` → `AI_MODEL_FILE` → `--model-file`, com validação de magic/tamanho em 4 pontos e guardas (inclusive negativos) no CI. **Nenhuma dúvida de arquitetura em aberto**: as pendências agora são de execução. |
+| 2026-10-12 | Sessão #16 — **repositório apt local na mídia** (`--iso-repo`, orçamento de 8 GB): fecho de dependências, índice com `dpkg-deb` (sem `dpkg-dev`), fonte **extra** (seção `sources`/`apt-setup/local0`), recusa de release diferente, limpeza da fonte morta no alvo e verificação no `verify-iso.sh`. **O `apt` real aceitou o repositório** montado pelo projeto. Falta só o item 2 para o 1º boot ser offline. |
 
 > **Ao criar uma sessão nova, atualize também a "Última entrada" no topo deste
 > arquivo** — é o primeiro número que uma sessão futura olha para saber se está

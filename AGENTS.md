@@ -310,8 +310,13 @@ Estas regras são **obrigatórias**:
     - **Nenhum passo pode exigir rede** na instalação ou no 1º boot. Tudo que
       fosse baixado tem de estar na mídia: fonte do llama.cpp (`--source`), o
       **modelo** (`--iso-model`, que embute o `.gguf` e o leva a `/opt/models`)
-      e o toolchain de build + pacotes do instalador (repo apt local — ainda
-      **não** implementado).
+      e o **toolchain + pacotes** (`--iso-repo`, que monta um repositório apt
+      local com os `.deb` e o embute em `/apt-repo`).
+    - O repositório local entra como fonte **EXTRA**, nunca como `primary`: o
+      sistema instalado tem de nascer apontando para o arquivo oficial, e um
+      repositório incompleto deve **degradar** (usar rede, se houver) em vez de
+      abortar a instalação. A linha `file:///cdrom/...` é removida do alvo no
+      `late-command.sh`.
     - O `llama-build.sh` **precisa** continuar aceitando `--source <dir|tar.gz>`
       (offline, sem rede e sem `git`) e o papel `inference` **precisa** manter
       `--model-file`/`AI_MODEL_FILE` (modelo local, sem download) — há guarda no
@@ -341,7 +346,20 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-12
-- **O que mudou:** **O modelo `.gguf` vai na mídia** (resposta à dúvida em
+- **O que mudou:** **O repositório apt também vai na mídia** (orçamento de 8 GB
+  acordado). `--iso-repo auto|<dir>|none` resolve o **fecho de dependências** dos
+  pacotes que o 1º boot precisa, baixa os `.deb`, gera o índice com `dpkg-deb`
+  (**sem `dpkg-dev`**) e os embute em `/apt-repo`. A fonte entra como **extra**
+  (seção `sources` do curtin no Ubuntu; `apt-setup/local0/*` no Debian) para o
+  `primary` continuar sendo o arquivo oficial — o alvo nasce com `apt` normal, e
+  um repositório incompleto degrada em vez de abortar. O build **recusa**
+  repositório de outra release. Com isso os 5 itens do § 3.1 do `docs/ISO.md`
+  estão implementados; **falta só o item 2** (`firstboot.sh` usar `--source`),
+  que é o que ainda faz o 1º boot precisar de rede para clonar o llama.cpp.
+  Prova real feita: o **`apt` do sistema aceitou** um repositório montado pelo
+  código do projeto e resolveu dependência; o `verify-iso.sh` reprova os 5 modos
+  de falha testados. **Nenhuma ISO gerada; nenhum boot real.**
+- **Data anterior:** 2026-10-12 — **O modelo `.gguf` vai na mídia** (resposta à dúvida em
   aberto): ~1 GB de ISO é preço justo por uma mídia que se basta. Implementado
   `--iso-model auto|<caminho>|none` no `iso/build-iso.sh` (recusa `.gguf`
   inválido — magic `GGUF` — **antes** de montar a ISO), a cópia para

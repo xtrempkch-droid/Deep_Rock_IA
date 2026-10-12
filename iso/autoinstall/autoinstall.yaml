@@ -70,12 +70,24 @@ storage:
 # --- Repositório determinístico ----------------------------------------------
 # geoip desligado + espelho explícito = mesma fonte em qualquer lugar.
 # Formato legado do curtin (amplamente usado e aceito em 20.04–24.04).
+#
+# Por que o espelho oficial continua sendo o `primary` mesmo na ISO offline:
+#   * o SISTEMA INSTALADO fica com a configuração normal de arquivo — se o
+#     repositório local (abaixo) fosse o primary, o sources.list do alvo
+#     apontaria para um `/cdrom` que não existe mais depois da instalação;
+#   * se o repositório local estiver incompleto, a instalação ainda funciona
+#     quando houver rede (degrada, em vez de abortar).
+# O repositório local entra como fonte EXTRA (seção `sources` do curtin), e o
+# marcador abaixo é expandido por `expand_apt_local_block` no build-iso.sh: ele
+# vira o bloco `sources:` ou desaparece por completo quando a ISO é gerada com
+# `--iso-repo none`.
 apt:
   preserve_sources_list: false
   geoip: false
   primary:
     - arches: [default]
-      uri: "http://archive.ubuntu.com/ubuntu"
+      uri: "@@APT_PRIMARY_URI@@"
+@@APT_LOCAL_SOURCES@@
 
 # --- Instalação previsível ----------------------------------------------------
 # Nada de atualizar o instalador no meio do caminho, nada de drivers de

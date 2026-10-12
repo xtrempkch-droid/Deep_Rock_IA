@@ -408,12 +408,18 @@ bash iso/test-vm.sh --iso iso/out/ai-cpu-os-ubuntu-*.iso --yes
 
 **O modelo vai dentro da ISO.** Por padrão, gerar a ISO baixa o modelo sugerido
 (~1,1 GB) na **sua máquina** e o embute na mídia — assim ela funciona sozinha,
-sem depender de internet. Para trocar ou dispensar:
+sem depender de internet. O mesmo vale para os **pacotes** que o sistema precisa
+para compilar o llama.cpp: eles também vão na mídia (um repositório apt local),
+para o primeiro boot não precisar baixar nada. Para trocar ou dispensar:
 
 ```bash
 bash iso/build-iso.sh --iso-model ~/modelos/meu.gguf   # usa um modelo seu
 bash iso/build-iso.sh --iso-model none                 # ISO sem modelo
+bash iso/build-iso.sh --iso-repo none                  # ISO sem repositório apt
 ```
+
+> 💡 A ISO fica em torno de **4,3–5 GB** com modelo e repositório. Com
+> `--iso-model none --iso-repo none`, uns 3,2 GB.
 
 Como funciona, em três linhas:
 
@@ -424,14 +430,13 @@ Como funciona, em três linhas:
 
 > 🎯 **Objetivo firmado: a ISO deve funcionar SEM internet.** Se a sua máquina
 > está numa rede isolada, a ISO tem de bastar-se — nada de baixar coisa no meio
-> da instalação. E o llama.cpp é **compilado no primeiro boot** (mais demorado,
-> porém é o que garante que o binário saia com as instruções exatas da sua CPU).
-> O **modelo já vai na mídia**; o que falta é o **ambiente de compilação**, e
-> isso está listado em [`docs/ISO.md`](docs/ISO.md) § 3.1. Ou seja: **hoje a ISO
-> ainda precisa de rede** no primeiro boot — mas o modelo, não.
+> da instalação. Hoje o **modelo** e os **pacotes** já vão na mídia; falta apenas
+> a **fonte do llama.cpp** (o resto está listado em [`docs/ISO.md`](docs/ISO.md)
+> § 3.1). Ou seja: **o primeiro boot ainda precisa de rede** para baixar o
+> código do llama.cpp, e só para isso.
 >
-> 💡 A ISO com o modelo fica em torno de **4,3 GB**; com `--iso-model none`, por
-> **3,2 GB** (estimativas).
+> 💡 A ISO com o modelo fica em torno de **4,3–5 GB**; com
+> `--iso-model none --iso-repo none`, por **3,2 GB**.
 >
 > 💡 **A ISO APAGA o disco** indicado em `--disk`. Teste em máquina virtual
 > **primeiro**, sempre.

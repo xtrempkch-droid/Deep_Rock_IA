@@ -298,6 +298,99 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 4-c. Repositório apt local (/apt-repo) — o que torna a instalação offline
+# ---------------------------------------------------------------------------
+# Invariantes que valem a pena vigiar (o modo de falha é silencioso ou tardio):
+#   1. o índice existe e o apt consegue lê-lo (Packages.gz de gzip válido);
+#   2. TODO .deb citado no índice está de fato na mídia — um repositório
+#      incompleto só aparece como "não instala sem rede" bem depois;
+#   3. os .deb parecem .deb (magic `!<arch>`) — pega download que trouxe uma
+#      página de erro HTML com nome de .deb;
+#   4. a CONFIGURAÇÃO e a MÍDIA concordam: repositório embutido exige a fonte
+#      extra no autoinstall, e fonte extra exige o repositório embutido.
+section "Repositório apt local (/apt-repo)"
+
+REPO_GZ="$(fetch "/apt-repo/Packages.gz" 2>/dev/null || true)"
+AI_FOR_REPO="$(fetch "/autoinstall.yaml" 2>/dev/null || true)"
+
+# A fonte extra aparece no autoinstall já SUBSTITUÍDO (o marcador vira o bloco).
+if [[ -n "$AI_FOR_REPO" ]] && grep -q 'cdrom/apt-repo' "$AI_FOR_REPO"; then
+  AI_WANTS_REPO=1
+else
+  AI_WANTS_REPO=0
+fi
+
+if [[ -z "$REPO_GZ" ]]; then
+  if [[ $AI_WANTS_REPO -eq 1 ]]; then
+    fail "o autoinstall aponta para um repositório local, mas /apt-repo NÃO está na mídia (a instalação vai falhar)"
+  else
+    skip "nenhum repositório apt na mídia (--iso-repo none) — instalar pacotes exigirá rede"
+  fi
+else
+  if ! gzip -t "$REPO_GZ" 2>/dev/null; then
+    fail "/apt-repo/Packages.gz não é um gzip válido (índice corrompido)"
+  else
+    GZ_TXT="$(gzip -dc "$REPO_GZ" 2>/dev/null || true)"
+    N_ENTRIES="$(printf '%s\n' "$GZ_TXT" | grep -c '^Package: ' || true)"
+    if (( N_ENTRIES > 0 )); then
+      pass "/apt-repo/Packages.gz: gzip válido com ${N_ENTRIES} pacote(s)"
+    else
+      fail "/apt-repo/Packages.gz não tem nenhuma entrada 'Package:'"
+    fi
+
+    # Lista de arquivos da mídia (uma chamada só; comparar em memória).
+    if [[ "$MODE" == "dir" ]]; then
+      REPO_FILES="$(find "${INPUT}/apt-repo" -type f 2>/dev/null | sed "s|^${INPUT}/apt-repo/||")"
+    else
+      REPO_FILES="$(xorriso -osirrox on -indev "$INPUT" -find /apt-repo -type f 2>/dev/null | sed 's|^/apt-repo/||')"
+    fi
+
+    MISSING=0; N_DEB_INDEX=0
+    while IFS= read -r rel; do
+      [[ -n "$rel" ]] || continue
+      case "$rel" in *.deb) N_DEB_INDEX=$((N_DEB_INDEX + 1)) ;; esac
+      if ! printf '%s\n' "$REPO_FILES" | grep -qxF "$rel"; then
+        fail "o índice cita ${rel}, que NÃO está na mídia (repositório incompleto)"
+        MISSING=$((MISSING + 1))
+      fi
+    done < <(printf '%s\n' "$GZ_TXT" | sed -n 's/^Filename: //p')
+
+    N_DEB_MEDIA="$(printf '%s\n' "$REPO_FILES" | grep -c '\.deb$' || true)"
+    if [[ $MISSING -eq 0 ]]; then
+      pass "todos os ${N_DEB_INDEX} .deb do índice estão presentes na mídia (${N_DEB_MEDIA} arquivos .deb)"
+    fi
+
+    # Magic dos .deb: `!<arch>` (formato ar). Amostra no modo --iso (extrair
+    # centenas de .deb seria caro); no modo --dir conferimos todos.
+    BAD_MAGIC=0; CHECKED=0
+    for rel in $(printf '%s\n' "$GZ_TXT" | sed -n 's/^Filename: //p'); do
+      [[ "$rel" == *.deb ]] || continue
+      if [[ "$MODE" == "iso" ]] && (( CHECKED >= 3 )); then break; fi
+      if [[ "$MODE" == "dir" ]]; then
+        d="${INPUT}/apt-repo/${rel}"
+      else
+        d="$(fetch "/apt-repo/${rel}" 2>/dev/null || true)"
+      fi
+      [[ -n "$d" && -f "$d" ]] || continue
+      CHECKED=$((CHECKED + 1))
+      if [[ "$(head -c 7 "$d" 2>/dev/null || true)" != '!<arch>' ]]; then
+        fail "${rel} não é um .deb (magic esperado '!<arch>') — download inválido?"
+        BAD_MAGIC=$((BAD_MAGIC + 1))
+      fi
+    done
+    if [[ $BAD_MAGIC -eq 0 && $CHECKED -gt 0 ]]; then
+      pass "amostra de ${CHECKED} .deb: magic '!<arch>' OK (arquivos íntegros)"
+    fi
+
+    if [[ $AI_WANTS_REPO -eq 1 ]]; then
+      pass "o autoinstall usa o repositório local (instalação pode ser offline)"
+    else
+      fail "o repositório está na mídia mas o autoinstall NÃO o usa (500 MB inúteis e instalação dependente de rede)"
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # 5. Conteúdo específico da distro
 # ---------------------------------------------------------------------------
 AI_LOCAL="$(fetch "/autoinstall.yaml" 2>/dev/null || true)"
