@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# common/hugepages.sh — Transparent Huge Pages e huge pages estáticas
+# mods/hugepages/hugepages.sh — Transparent Huge Pages e huge pages estáticas
 # -----------------------------------------------------------------------------
 # Huge pages reduzem TLB misses no acesso aos pesos do modelo (o gargalo real
 # de LLM em CPU é memória, não FLOPs). Este script:
@@ -9,7 +9,7 @@
 #   3. Persiste a configuração via /etc/sysctl.d e um serviço systemd.
 #
 # Uso:
-#   sudo bash common/hugepages.sh [--dry-run] [--yes] [--mode always|madvise]
+#   sudo bash mods/hugepages/hugepages.sh [--dry-run] [--yes] [--mode always|madvise]
 #
 # Idempotente.
 # -----------------------------------------------------------------------------
@@ -144,7 +144,7 @@ configure_static_pool() {
 
   write_file_if_changed "$SYSCTL_FILE" <<EOF
 # /etc/sysctl.d/99-ai-hugepages.conf
-# Gerado por ai-cpu-os/common/hugepages.sh — NÃO EDITAR À MÃO.
+# Gerado por ai-cpu-os/mods/hugepages/hugepages.sh — NÃO EDITAR À MÃO.
 # Reserva um pool de páginas de ${HUGEPAGE_SIZE_KB}kB (${HUGEPAGE_POOL_MB} MiB).
 # Nota: em alguns kernels o parâmetro é vm/nr_hugepages (sysctl vm.nr_hugepages).
 vm.nr_hugepages = ${pages}

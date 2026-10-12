@@ -7,7 +7,8 @@
 # use --strict para que qualquer falha resulte em exit != 0.
 #
 # Uso:
-#   bash tests/smoke-test.sh [--dry-run] [--strict] [--profile auto|xeon|ryzen]
+#   bash tests/smoke-test.sh [--dry-run] [--strict] \
+#        [--role auto|inference|builder] [--family auto|<id>]
 #
 # Idempotente e somente leitura.
 # -----------------------------------------------------------------------------
@@ -21,7 +22,8 @@ readonly REPO_ROOT
 
 DRY_RUN=0
 STRICT=0
-PROFILE="auto"
+ROLE="auto"
+FAMILY="auto"
 
 PASS=0; FAIL=0; SKIP=0
 
@@ -55,18 +57,23 @@ check() {
 }
 
 # ---------------------------------------------------------------------------
-# Resolver perfil
+# Resolver família + papel (delegado ao detect-hardware.sh)
 # ---------------------------------------------------------------------------
-resolve_profile() {
-  if [[ "$PROFILE" != "auto" ]]; then
-    return 0
-  fi
+resolve_targets() {
   local det="${REPO_ROOT}/detect-hardware.sh"
+  local out=""
   if [[ -x "$det" ]]; then
-    PROFILE="$("$det" --quiet 2>/dev/null | grep -E '^PROFILE=' | tail -1 | cut -d= -f2 || true)"
+    out="$("$det" --quiet 2>/dev/null || true)"
   fi
-  [[ -z "$PROFILE" ]] && PROFILE="auto"
-  log_info "Perfil resolvido: ${PROFILE}"
+  if [[ "$FAMILY" == "auto" ]]; then
+    FAMILY="$(printf '%s\n' "$out" | grep -E '^FAMILY=' | tail -1 | cut -d= -f2 || true)"
+    [[ -z "$FAMILY" ]] && FAMILY="unknown"
+  fi
+  if [[ "$ROLE" == "auto" ]]; then
+    ROLE="$(printf '%s\n' "$out" | grep -E '^ROLE=' | tail -1 | cut -d= -f2 || true)"
+    [[ -z "$ROLE" ]] && ROLE="unknown"
+  fi
+  log_info "Alvo: família=${FAMILY} · papel=${ROLE}"
 }
 
 # ---------------------------------------------------------------------------
@@ -111,15 +118,15 @@ test_common() {
 
   # Aviso (não falha) sobre AVX-512
   if grep -qm1 avx512f /proc/cpuinfo; then
-    log_warn "AVX-512 presente nesta CPU (hardware alvo NÃO tem; ok se for outra máquina)."
+    log_warn "AVX-512 presente nesta CPU: só é usado se a família permitir (política optin/auto)."
   fi
 }
 
 # ---------------------------------------------------------------------------
-# Testes do perfil xeon
+# Testes do papel 'inference' (servidor de inferência em CPU)
 # ---------------------------------------------------------------------------
-test_xeon() {
-  log_info "--- Testes do perfil xeon ---"
+test_inference() {
+  log_info "--- Testes do papel inference ---"
   check "Binário llama-server compilado" \
     '[[ -x /opt/llama.cpp/build/bin/llama-server || -x /opt/llama.cpp/build/bin/main ]]'
   check "Unit ai-server.service instalado" \
@@ -140,10 +147,10 @@ test_xeon() {
 }
 
 # ---------------------------------------------------------------------------
-# Testes do perfil ryzen
+# Testes do papel 'builder' (build + registry + Gitea)
 # ---------------------------------------------------------------------------
-test_ryzen() {
-  log_info "--- Testes do perfil ryzen ---"
+test_builder() {
+  log_info "--- Testes do papel builder ---"
   check "Docker instalado" 'command -v docker'
   check "Docker daemon ativo" 'systemctl is-active --quiet docker'
   check "docker compose disponível" 'docker compose version'
@@ -172,20 +179,24 @@ main() {
     case "$1" in
       --dry-run) DRY_RUN=1; shift ;;
       --strict)  STRICT=1; shift ;;
-      --profile) [[ $# -ge 2 ]] || { log_error "--profile exige valor"; exit 2; }; PROFILE="$2"; shift 2 ;;
-      -h|--help) echo "Uso: $0 [--dry-run] [--strict] [--profile auto|xeon|ryzen]"; exit 0 ;;
+      --role)    [[ $# -ge 2 ]] || { log_error "--role exige valor"; exit 2; }; ROLE="$2"; shift 2 ;;
+      --family)  [[ $# -ge 2 ]] || { log_error "--family exige valor"; exit 2; }; FAMILY="$2"; shift 2 ;;
+      --profile) [[ $# -ge 2 ]] || { log_error "--profile exige valor"; exit 2; }
+                 case "$2" in xeon) ROLE="inference" ;; ryzen) ROLE="builder" ;; *) ROLE="$2" ;; esac
+                 shift 2 ;;
+      -h|--help) echo "Uso: $0 [--dry-run] [--strict] [--role auto|inference|builder] [--family auto|<id>]"; exit 0 ;;
       *) log_error "Argumento desconhecido: $1"; exit 2 ;;
     esac
   done
 
   log_info "=== smoke-test.sh ==="
-  resolve_profile
+  resolve_targets
 
   test_common
-  case "$PROFILE" in
-    xeon)  test_xeon ;;
-    ryzen) test_ryzen ;;
-    *)     log_warn "Perfil '${PROFILE}' indeterminado; rodando apenas os testes comuns." ;;
+  case "$ROLE" in
+    inference) test_inference ;;
+    builder)   test_builder ;;
+    *)         log_warn "Papel '${ROLE}' indeterminado; rodando apenas os testes comuns." ;;
   esac
 
   printf '\n%bResumo:%b PASS=%d FAIL=%d SKIP=%d\n' "$C_INFO" "$C_RESET" "$PASS" "$FAIL" "$SKIP"

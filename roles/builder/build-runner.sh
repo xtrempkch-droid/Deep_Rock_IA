@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# profiles/ryzen/build-runner.sh — Build + push de imagens para o registry local
+# roles/builder/build-runner.sh — Build + push de imagens para o registry local
 # -----------------------------------------------------------------------------
 # Lê um Dockerfile de um repositório, faz o docker build com cache (usando
 # --cache-from do registry local) e faz push para localhost:5000.
 #
 # Uso:
-#   bash profiles/ryzen/build-runner.sh --context /caminho/do/repo \
+#   bash roles/builder/build-runner.sh --context /caminho/do/repo \
 #                                       --tag localhost:5000/meu/app:1.0 \
 #                                       [--dockerfile Dockerfile] \
 #                                       [--cache-from localhost:5000/meu/app:latest] \
@@ -78,7 +78,7 @@ require_docker() {
       log_warn "Docker não encontrado (dry-run: continuando a simulação)."
       return 0
     fi
-    log_error "Docker não encontrado. Rode: sudo bash profiles/ryzen/docker-setup.sh"
+    log_error "Docker não encontrado. Rode: sudo bash roles/builder/docker-setup.sh"
     exit 1
   fi
   if [[ $DRY_RUN -eq 0 ]] && ! docker info >/dev/null 2>&1; then

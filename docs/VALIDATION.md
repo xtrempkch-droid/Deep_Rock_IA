@@ -807,6 +807,129 @@ O bloco M só é **✅** quando:
 
 ---
 
+## Bloco N — 🧬 Famílias de CPU e papéis (2026-10-12)
+
+> Objetivo: provar que o **casamento CPU → família → ISA** acerta em cada máquina
+> alvo e que o `-march`/flags resultantes são os esperados.
+> Ver [`docs/FAMILIES.md`](FAMILIES.md).
+
+### N.1 Resolução automática (em cada alvo)
+
+| Máquina | Comando | `FAMILY=` obtido | Esperado | ✅/❌ |
+|---|---|---|---|---|
+| Xeon E5-2680 v4 | `bash families/resolve.sh --quiet` | _(preencher)_ | `intel-broadwell` | _(_ |
+| Ryzen 5 3500X | `bash families/resolve.sh --quiet` | _(preencher)_ | `amd-zen2` | _(_ |
+
+### N.2 Relatório completo e `-march`
+
+```bash
+bash families/resolve.sh
+bash build.sh --list-families
+./detect-hardware.sh --quiet      # FAMILY= e ROLE=
+```
+
+| Máquina | `-march` efetivo | ISA (presentes/ausentes) | AVX-512 | Papel detectado |
+|---|---|---|---|---|
+| Xeon E5-2680 v4 | _(preencher)_ | _(preencher)_ | `no` | `inference` |
+| Ryzen 5 3500X | _(preencher)_ | _(preencher)_ | `no` | `builder` |
+
+### N.3 Fallback de compilador (GCC antigo)
+
+Em um ambiente com GCC abaixo de `FAMILY_MARCH_MIN_GCC` (ex.: AMD com GCC 12),
+o `-march=znver4` deve cair para `znver3` **com aviso**, sem quebrar o build:
+
+```
+Resultado: _(preencher)_
+```
+
+### N.4 Provas de que a AVX-512 não liga sozinha
+
+```bash
+bash families/resolve.sh --quiet                       # AVX512=no em broadwell
+AI_ALLOW_AVX512=1 bash families/resolve.sh --family intel-broadwell --quiet
+bash families/resolve.sh --family generic --quiet       # policy=auto
+```
+
+| Comando | AVX-512 ligou? | Esperado |
+|---|---|---|
+| `intel-broadwell` (política `never`) | _(preencher)_ | **não**, mesmo com `--allow-avx512` |
+| `intel-skylake-avx512` sem opt-in | _(preencher)_ | não |
+| `intel-skylake-avx512 --allow-avx512` | _(preencher)_ | sim (só com a flag presente) |
+
+### N.5 Critério de "pronto" para o Bloco N
+
+- [ ] `FAMILY=` correto nos dois alvos.
+- [ ] `-march` igual ao da tabela de `docs/FAMILIES.md`.
+- [ ] Nenhum caminho liga AVX-512 sem opt-in explícito.
+- [ ] `make families` e `./detect-hardware.sh` sem erro.
+
+---
+
+## Bloco O — 🔧 Mods portáveis (2026-10-12)
+
+> Objetivo: provar que uma **mod** aplica, é **idempotente** e **reverte** de
+> verdade, e que o catálogo funciona em Ubuntu e Debian.
+> Ver [`docs/MODS.md`](MODS.md).
+
+### O.1 Catálogo e requisitos
+
+```bash
+bash mods/apply.sh list
+bash mods/apply.sh check
+bash mods/apply.sh info openblas-threads
+```
+
+| Comando | Resultado | ✅/❌ |
+|---|---|---|
+| `list` mostra as 4 mods com risco/reboot/conjunto | _(preencher)_ | _(_ |
+| `check` avalia todos os `MOD_REQUIRES` | _(preencher)_ | _(_ |
+
+### O.2 Ciclo apply → idempotência → revert (por mod)
+
+| Mod | `apply` OK | 2º `apply` = idempotente (sem duplicar) | `revert` OK | Sistema voltou ao estado anterior | ✅/❌ |
+|---|---|---|---|---|---|
+| `kernel-tuning` | _(preencher)_ | _(preencher)_ | _(preencher)_ | _(preencher)_ | _(_ |
+| `hugepages` | _(preencher)_ | _(preencher)_ | _(preencher)_ | _(preencher)_ | _(_ |
+| `governor` | _(preencher)_ | _(preencher)_ | _(preencher)_ | _(preencher)_ | _(_ |
+| `openblas-threads` | _(preencher)_ | _(preencher)_ | _(preencher)_ | _(preencher)_ | _(_ |
+
+Evidências úteis (cole os valores):
+
+```bash
+# kernel-tuning
+sysctl -n vm.swappiness ; cat /proc/cmdline
+# hugepages
+cat /sys/kernel/mm/transparent_hugepage/enabled ; sysctl -n vm.nr_hugepages
+# governor
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+# openblas-threads
+grep -A3 'openblas-threads' /etc/environment
+```
+
+### O.3 MODS no Ubuntu **e** no Debian
+
+| Distro | `apply --set system --dry-run` | `mods/apply.sh test` | Observações |
+|---|---|---|---|
+| Ubuntu Server 24.04 | _(preencher)_ | _(preencher)_ | _(preencher)_ |
+| Debian 12 | _(preencher)_ | _(preencher)_ | _(preencher)_ |
+
+### O.4 O que o `test` em container NÃO prova (registrar sempre)
+
+- Efeito real de **sysctl** (o container só mostra a escrita do arquivo).
+- Efeito de **governor** e **C-states** (não há `cpufreq` no container).
+- **Reboot** e persistência via GRUB.
+- Mods com requisito `cpuflag:` (a CPU do container não é a do alvo).
+
+### O.5 Critério de "pronto" para o Bloco O
+
+- [ ] As 4 mods aplicam e revertem sem erro.
+- [ ] Rodar `apply` duas vezes não duplica nenhum bloco.
+- [ ] `revert` devolve o sistema ao estado original (conferido por `sha256sum`
+      dos arquivos tocados, antes e depois).
+- [ ] `mods/apply.sh test` passa (container Ubuntu).
+
+---
+
 ## Consolidação (só depois de testar)
 
 Quando trouxer os resultados, estes arquivos devem ser atualizados
@@ -877,3 +1000,4 @@ Cole aqui (ou anexe o arquivo):
 |------|---------|
 | 2026-10-07 | Criação do protocolo (blocos A–L) para a versão `v0.2.0`; nenhum resultado preenchido ainda. |
 | 2026-10-07 | Adicionado o **Bloco M** — geração e boot da ISO de instalação (entregável final do projeto). |
+| 2026-10-12 | Adicionados os **Blocos N e O** — famílias de CPU/papéis (casamento, `-march`, política de AVX-512) e mods portáveis (apply/idempotência/revert em Ubuntu e Debian). Nenhum resultado preenchido ainda. |

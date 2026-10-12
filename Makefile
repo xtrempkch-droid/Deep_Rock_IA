@@ -3,13 +3,18 @@
 # Uso:
 #   make help          lista os alvos
 #   make ci            roda lint + dry-run (igual ao workflow 'validate')
-#   make build-xeon    compila o llama.cpp para o Xeon (AVX2)
-#   make build-ryzen   compila o llama.cpp para o Ryzen (znver2)
+#   make build         compila o llama.cpp para a FAMÍLIA detectada
+#   make build FAMILY=amd-zen2   força uma família
+#   make mods          lista as modificações portáveis
+#   make mods-check    confere os requisitos das mods neste sistema
 #   make docker        constrói a imagem de runtime localmente
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
+ROLE     ?= auto
+FAMILY   ?= auto
+# Legado: usado apenas pelos alvos da ISO (cuja base ainda é Debian).
 PROFILE  ?= auto
 JOBS     ?= 4
 LLAMA_REF ?= master
@@ -18,7 +23,8 @@ IMAGE    ?= ai-cpu-os-llama:local
 SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
 
 .PHONY: help lint bashn shellcheck python yaml docs validate dry-run apply \
-        build-xeon build-ryzen docker docker-check ci clean
+        build mods mods-check mods-test iso iso-dry-run iso-lint \
+        docker docker-check ci clean families
 
 help: ## Lista os alvos disponíveis
 	@printf '\n%balvos disponíveis:%b\n\n' '\033[36m' '\033[0m'
@@ -39,11 +45,11 @@ shellcheck: ## Roda shellcheck (severidade warning+)
 	@echo "shellcheck: OK"
 
 python: ## Compila os arquivos Python (checagem de sintaxe)
-	@python3 -m compileall -q profiles/ && echo "python: OK"
+	@python3 -m compileall -q roles/ && echo "python: OK"
 
 yaml: ## Lint dos arquivos YAML
 	@command -v yamllint >/dev/null || { echo "yamllint ausente"; exit 1; }
-	@yamllint -c .yamllint.yml .github/ docker/ profiles/
+	@yamllint -c .yamllint.yml .github/ docker/ roles/
 	@echo "yamllint: OK"
 
 docs: ## Verifica se os documentos obrigatórios existem
@@ -51,24 +57,34 @@ docs: ## Verifica se os documentos obrigatórios existem
 	for f in README.md AGENTS.md LICENSE docs/ROADMAP.md docs/ARCHITECTURE.md \
 	         docs/STATE.md docs/HARDWARE.md docs/TUNING.md \
 	         docs/TROUBLESHOOTING.md docs/TUTORIAL.md docs/CI.md \
-	         docs/VALIDATION.md docs/ISO.md docs/JOURNAL.md; do \
+	         docs/VALIDATION.md docs/ISO.md docs/JOURNAL.md \
+	         docs/FAMILIES.md docs/MODS.md; do \
 	  [[ -f "$$f" ]] || { echo "FALTANDO: $$f"; exit 1; }; \
 	done; \
 	echo "docs: OK"
 
 validate: lint docs ## Lint + presença dos documentos
 
-dry-run: ## Simula a aplicação completa do perfil (nada é alterado)
-	@sudo ./build.sh --profile $(PROFILE) --dry-run --yes --skip-tests
+dry-run: ## Simula a aplicação completa (nada é alterado)
+	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
 
 apply: ## Aplica o tuning de verdade (requer root; confirmação do build.sh)
-	@sudo ./build.sh --profile $(PROFILE)
+	@sudo ./build.sh --role $(ROLE) --family $(FAMILY)
 
-build-xeon: ## Compila o llama.cpp para o Xeon E5-2678 v3 (AVX2)
-	@bash profiles/xeon/llama-build.sh --ref $(LLAMA_REF) --jobs $(JOBS)
+build: ## Compila o llama.cpp para a família detectada (FAMILY= força)
+	@bash llama-build.sh --family $(FAMILY) --ref $(LLAMA_REF) --jobs $(JOBS)
 
-build-ryzen: ## Compila o llama.cpp para o Ryzen 5 3500X (znver2)
-	@bash profiles/ryzen/llama-build.sh --ref $(LLAMA_REF) --jobs $(JOBS)
+families: ## Lista as famílias de CPU suportadas
+	@bash build.sh --list-families
+
+mods: ## Lista as modificações portáveis (mods/)
+	@bash mods/apply.sh list
+
+mods-check: ## Confere os requisitos das mods neste sistema
+	@bash mods/apply.sh check
+
+mods-test: ## Testa as mods (sintaxe + dry-run idempotente em container)
+	@bash mods/apply.sh test
 
 iso: ## Gera a ISO de instalação (entregável final); requer DISK=/dev/xxx
 	@if [ -z "$(DISK)" ]; then \

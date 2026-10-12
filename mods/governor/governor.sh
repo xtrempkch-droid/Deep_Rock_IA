@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# common/governor.sh — CPU governor 'performance' e C-states rasos
+# mods/governor/governor.sh — CPU governor 'performance' e C-states rasos
 # -----------------------------------------------------------------------------
 # Trava todos os núcleos na maior frequência e reduz a latência de wake-up,
 # eliminando o jitter de escalonamento durante a inferência.
 #
 # Uso:
-#   sudo bash common/governor.sh [--dry-run] [--yes] [--governor performance]
+#   sudo bash mods/governor/governor.sh [--dry-run] [--yes] [--governor performance]
 #
 # Persistência: unit systemd aplicada no boot.
 # Idempotente.
@@ -131,7 +131,7 @@ report_cstates() {
       [[ -f "$s" ]] || continue
       log_info "    $(cat "$s")"
     done
-    log_info "Para desativar C-states profundos: common/kernel-tuning.sh (cmdline + reboot)."
+    log_info "Para desativar C-states profundos: mods/kernel-tuning/kernel-tuning.sh (cmdline + reboot)."
   else
     log_info "cpuidle não exposto (VM?) — C-states não gerenciados."
   fi

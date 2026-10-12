@@ -34,22 +34,26 @@ env:
 
 jobs:
   build:
-    name: Compilar (${{ matrix.profile }})
+    name: Compilar (${{ matrix.family }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - profile: xeon
-            desc: "Haswell-EP: AVX2/FMA/F16C (sem AVX-512)"
-          - profile: ryzen
-            desc: "Zen 2: AVX2/FMA/F16C + -march=znver2"
+          - family: intel-haswell
+            desc: "Haswell-EP (Xeon E5 v3): AVX2/FMA/F16C — sem AVX-512"
+          - family: intel-broadwell
+            desc: "Broadwell-EP (Xeon E5 v4): AVX2/FMA/F16C — sem AVX-512"
+          - family: amd-zen1
+            desc: "Zen/Zen+ (Ryzen 1000/2000): AVX2/FMA/F16C — sem AVX-512"
+          - family: amd-zen2
+            desc: "Zen 2 (Ryzen 3000): AVX2/FMA/F16C — sem AVX-512"
     steps:
       - uses: actions/checkout@v7
 
       - name: Info do alvo
         run: |
-          echo "Perfil: ${{ matrix.profile }} — ${{ matrix.desc }}"
+          echo "Família: ${{ matrix.family }} — ${{ matrix.desc }}"
           echo "llama.cpp ref: ${LLAMA_REF}"
           echo "--- CPU do runner (só informativo) ---"
           lscpu | grep -E 'Model name|Flags' | head -2 || true
@@ -61,12 +65,17 @@ jobs:
             build-essential cmake git pkg-config libopenblas-dev
 
       # Usa o PRÓPRIO script do projeto: valida ISA, decide flags e faz fallback.
+      # --assume-family-isa = CROSS-BUILD: a ISA vem do family.conf, não do
+      # runner. Sem isso, um runner com AVX-512 geraria binário que sofre SIGILL
+      # nos alvos (E5 v3/v4 e Ryzen 3500X têm apenas AVX2).
       # Sem cache, para manter o build determinístico e reprodutível (filosofia
       # do projeto). O trigger é semanal/tag/manual, então o custo é aceitável.
       - name: Compilar via script do projeto
         run: |
           set -euo pipefail
-          bash "profiles/${{ matrix.profile }}/llama-build.sh" \
+          bash llama-build.sh \
+            --family "${{ matrix.family }}" \
+            --assume-family-isa \
             --dir "$GITHUB_WORKSPACE/llama.cpp" \
             --ref "$LLAMA_REF" \
             --jobs 4 \

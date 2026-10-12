@@ -1,10 +1,10 @@
-# gitea-compose.yml — Gitea (SQLite) para o perfil ryzen do ai-cpu-os
+# gitea-compose.yml — Gitea (SQLite) para o papel 'builder' do ai-cpu-os
 #
 # Sobe um servidor Gitea para hospedar projetos e servir como origem de
 # repositórios a serem construídos pelo build-runner.sh.
 #
 # Uso:
-#   cd profiles/ryzen
+#   cd roles/builder
 #   docker compose -f gitea-compose.yml up -d
 #
 # Acesse:  http://localhost:3000

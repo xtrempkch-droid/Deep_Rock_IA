@@ -1,6 +1,6 @@
 ---
 # Configuração do yamllint para o ai-cpu-os.
-# Rodamos com: yamllint -c .yamllint.yml .github/ docker/ profiles/
+# Rodamos com: yamllint -c .yamllint.yml .github/ docker/ roles/
 extends: default
 
 ignore: |

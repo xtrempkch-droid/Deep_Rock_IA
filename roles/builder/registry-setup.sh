@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# profiles/ryzen/registry-setup.sh — Registry Docker privado (localhost:5000)
+# roles/builder/registry-setup.sh — Registry Docker privado (localhost:5000)
 # -----------------------------------------------------------------------------
 # Sobe um container 'registry:2' em localhost:5000 com volume persistente,
 # configurando o Docker para aceitar o registry como insecure (sem TLS) —
 # adequado para uso local/privado.
 #
 # Uso:
-#   sudo bash profiles/ryzen/registry-setup.sh [--dry-run] [--yes]
+#   sudo bash roles/builder/registry-setup.sh [--dry-run] [--yes]
 #                                              [--port 5000] [--data-dir /var/lib/registry]
 #
 # Idempotente.
@@ -52,7 +52,7 @@ require_docker() {
       log_warn "Docker não encontrado (dry-run: continuando a simulação)."
       return 0
     fi
-    log_error "Docker não encontrado. Rode primeiro: sudo bash profiles/ryzen/docker-setup.sh"
+    log_error "Docker não encontrado. Rode primeiro: sudo bash roles/builder/docker-setup.sh"
     exit 1
   fi
   if [[ $DRY_RUN -eq 0 ]] && ! docker info >/dev/null 2>&1; then

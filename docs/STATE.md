@@ -1,16 +1,21 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-07 (criação inicial)
+> **Última atualização:** 2026-10-12 (refatoração para **famílias + papéis + mods**)
 
 ---
 
 ## 1. Versão
 
-- **Versão do projeto:** `0.2.0` (marco de **CI/CD** — nenhuma validação nova de
-  hardware nesta versão; ver seção 2)
-- **Commit de referência:** tag `v0.2.0` (commit `4cde4bb`)
-- **Sistema operacional alvo testado:** Debian 12 Bookworm (a confirmar)
+- **Versão do projeto:** `0.3.0-dev` — marco **FAMÍLIAS de CPU + PAPÉIS + MODS**
+  (a `0.2.0` foi o marco de CI/CD). **Nenhuma validação nova de hardware** foi
+  feita nesta refatoração — ver § 2.
+- **Commit de referência:** `1d14cbb` (último commit verde antes da refatoração)
+- **Sistema operacional alvo:** **Ubuntu Server 22.04+/24.04+** (referência do
+  projeto); Debian 12+ continua suportado como base das mods.
+- **Suporte de hardware:** por **família de microarquitetura** (8 famílias, com
+  herança) — ver [`docs/FAMILIES.md`](FAMILIES.md). O modelo “um perfil por
+  processador” foi descontinuado.
 
 ---
 
@@ -175,34 +180,44 @@ publicada com os binários `.tar.gz` dos dois perfis. Ver § 3.1.
 > **Basta executar os blocos e trazer os resultados preenchidos** — depois eles
 > são consolidados aqui (§ 2/§ 3/§ 5/§ 6) e no `docs/TUTORIAL.md`.
 
-**Passo 1 (AGORA) — Subir uma VM Debian 12 e validar `detect-hardware.sh` +
-`build.sh --dry-run`.**
+**Passo 1 (AGORA) — ISO em base Ubuntu Server (`--distro ubuntu` + autoinstall).**
 
-Motivo: é o caminho de menor risco para capturar erros de runtime (nomes de
-pacotes, caminhos, permissões) sem tocar em hardware físico. Numa VM,
+O usuário definiu que o SO de referência passa a ser **Ubuntu Server** ("a ideia
+é ter uma imagem do Ubuntu Server-MOD com essas otimizações"). A remasterização
+Debian atual continua funcional (legado), mas precisa nascer a variante Ubuntu:
+
+1. Criar `iso/autoinstall/{user-data,meta-data}` (Subiquity/cloud-init nocloud)
+   com late-command equivalente ao preseed atual (copia o projeto para
+   `/opt/ai-cpu-os` e habilita o serviço de primeiro boot).
+2. Adicionar `--distro ubuntu|debian` ao `iso/build-iso.sh`, com **ubuntu como
+   padrão** e `debian` preservado.
+3. Atualizar `docs/ISO.md` (§ base do SO, decisões) e o **Bloco M** de
+   `docs/VALIDATION.md`.
+4. `make iso-lint` → `make iso-dry-run` → bootar a ISO numa **VM**.
+   > ⚠️ **Nada disso foi executado ainda.** Não declare a ISO pronta sem
+   > bootar e instalar em VM.
+
+**Passo 2 — validar a camada de famílias em hardware real.**
+
+Rodar `bash families/resolve.sh`, `./detect-hardware.sh` e
+`sudo ./build.sh --dry-run` em **cada** máquina alvo (Xeon E5-2680 v4 e Ryzen 5
+3500X) e preencher o **Bloco N** de `docs/VALIDATION.md`. Rodar também
+`bash mods/apply.sh check` e `make mods-test` (Bloco O).
+
+**Passo 3 — subir uma VM Ubuntu Server 24.04 e validar `detect-hardware.sh` +
+`build.sh --dry-run` + `mods/apply.sh apply --set system --dry-run`.** Numa VM,
 `--dry-run` mostra toda a sequência sem aplicar nada.
 
-Passos concretos:
-
 ```bash
-# 1. Criar VM Debian 12 (virt-manager ou libvirt), instalar minimal + sudo.
-# 2. Clonar o repositório dentro da VM.
 git clone <repo> && cd ai-cpu-os
-chmod +x build.sh detect-hardware.sh common/*.sh profiles/*/*.sh tests/*.sh
-
-# 3. Sintaxe de todos os scripts.
-bash -n build.sh && bash -n detect-hardware.sh
-for f in common/*.sh profiles/xeon/*.sh profiles/ryzen/*.sh tests/*.sh; do bash -n "$f" || echo "FALHOU: $f"; done
-
-# 4. Detecção + dry-run.
-./detect-hardware.sh || true
-sudo ./build.sh --profile auto --dry-run
+chmod +x build.sh detect-hardware.sh llama-build.sh tests/*.sh
+chmod +x mods/apply.sh mods/*/*.sh families/resolve.sh roles/*/*.sh
+bash -n build.sh && bash -n detect-hardware.sh && bash -n llama-build.sh
+./detect-hardware.sh || true          # FAMILY= e ROLE=
+sudo ./build.sh --dry-run
 ```
 
-**Passo 2 (após VM):** rodar `tests/smoke-test.sh` num Xeon físico com
-`llama-server` de pé e preencher a seção 5 acima.
-
-**Passo 3 (ao fechar o marco de validação):** atualizar `docs/TUTORIAL.md`
+**Passo 4 (ao fechar o marco de validação):** atualizar `docs/TUTORIAL.md`
 com o que passou a ser testado e com os números reais de `llama-bench`
 (diretriz obrigatória — Regra 9 do `AGENTS.md`).
 
@@ -234,3 +249,4 @@ Ao terminar qualquer tarefa:
 | 2026-10-07 | Criado **`docs/VALIDATION.md`**: protocolo preenchível de testes em hardware (blocos A–L). É o caminho para trazer os resultados e fechar a validação real. Ver § 6. |
 | 2026-10-07 | Registrado o **entregável final = ISO de instalação**; criado `iso/` (`build-iso.sh` + preseed + serviço de 1º boot) e `docs/ISO.md`. Nenhuma ISO gerada/bootada ainda. |
 | 2026-10-07 | Criado **`docs/JOURNAL.md`** (diário de continuidade) + "Retomada rápida" no `AGENTS.md` + **Regra 14**. Unificado o Xeon como **quad channel** e corrigido `detect-hardware.sh` (agora conta os canais reais via `Bank Locator`). |
+| 2026-10-12 | **Refatoração: FAMÍLIAS de CPU + PAPÉIS + MODS.** Criadas as camadas `families/` (8 famílias com herança + `resolve.sh` + política de AVX-512), `roles/` (papel `inference` e `builder`, substituindo `profiles/xeon` e `profiles/ryzen`) e `mods/` (motor `list/info/check/apply/revert/test` + 4 mods com `revert`). O build do llama.cpp virou um **script único** dirigido pela família (`llama-build.sh`), com padrão **portátil** (`GGML_NATIVE=OFF`) e `--assume-family-isa` para cross-build. SO de referência passou a **Ubuntu Server**. CPU do Sistema A: **E5-2680 v4**. Comentários do README aplicados e removidos. Novos docs: `docs/FAMILIES.md`, `docs/MODS.md`, `mods/README.md`, `roles/README.md`. `make validate` verde (25 scripts). |

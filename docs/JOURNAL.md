@@ -204,6 +204,76 @@ Isto evita perder tempo (re)descobrindo o que já se sabe sobre **esta** máquin
 
 ---
 
+### Sessão #9 — 2026-10-12 · 🧬 Refatoração: FAMÍLIAS + PAPÉIS + MODS
+
+**Objetivo (pedido do usuário, verbatim):** *"deixar muito fechado a somente um
+processador é muito desperdício de tempo, vamos abranger famílias […] separe o
+suporte por família assim cada família tem sua modificação específica. o sistema
+operacional vamos começar com Ubuntu e se forem modificações que podem ser
+feitas por script então crie uma seção onde qualquer um possa aplicar e testar
+em seu sistema operacional"*.
+
+**Feito:**
+
+1. **`families/`** — 8 famílias com **herança** (`intel-haswell` →
+   `intel-broadwell` → `intel-skylake-avx512`; `amd-zen1` → `zen2` → `zen3` →
+   `zen4`; `generic` como fallback), `_base/family.conf`, `resolve.sh`
+   (`pick_family`/`load_family`/`compute_isa`) e política de AVX-512
+   (`never`/`optin`/`auto`).
+2. **`roles/`** — `profiles/xeon` → `roles/inference`, `profiles/ryzen` →
+   `roles/builder` (via `git mv`, preservando histórico).
+3. **`mods/`** — `common/*.sh` → `mods/{kernel-tuning,hugepages,governor}/`,
+   cada uma com `mod.conf` + `apply.sh` + `revert.sh`, mais a mod nova
+   `openblas-threads`. Motor `mods/apply.sh` com
+   `list/info/check/apply/revert/test` e conjuntos `system`/`portable`.
+4. **`llama-build.sh` na raiz** — build **único** dirigido pela família,
+   substituindo os dois scripts por perfil.
+5. `build.sh` agora usa `--role`/`--family` (com `--profile` como alias
+   obsoleto), `detect-hardware.sh` emite `FAMILY=` e `ROLE=`.
+6. SO de referência passou a **Ubuntu Server** (README, AGENTS.md, STATE).
+7. Comentários `#` deixados pelo usuário no README **aplicados e removidos**.
+
+**Decisões:**
+
+- **Herança** em vez de duplicação: um ajuste em `intel-haswell` vale também
+  para Broadwell-EP e Skylake-SP.
+- **Papel ≠ família:** ISA fica na família; software/serviço fica no papel. O
+  build é compartilhado.
+- **`--profile` mantido como alias** (`xeon`→`inference`, `ryzen`→`builder`)
+  para não quebrar a ISO e os scripts já escritos.
+- **“Mod” = aplicável + reversível + testável em container**, com fronteira
+  explícita: o teste em container **não** prova efeito de sysctl/governor.
+
+**Problemas encontrados e resolvidos:**
+
+- 🐛 **Bug latente de portabilidade no CI (achado nesta sessão):** o
+  `build-llama.yml` compilava com `GGML_NATIVE=ON` no *runner*. Um runner com
+  AVX-512 geraria binário que sofre **SIGILL** nos alvos (E5 v3/v4 e Ryzen
+  3500X têm só AVX2). Corrigido com `GGML_NATIVE=OFF` como padrão +
+  `--assume-family-isa` no CI.
+- `resolve.sh` declarava `FAMILIES_DIR` como `readonly`; ao ser carregado por
+  `build.sh` (que já tinha essa variável) o script morria com
+  *"readonly variable"*. Renomeado para `RESOLVE_FAMILIES_DIR`.
+- `FAMILY_ISA_FINAL` saía como `-avx2 -fma -f16c` (ambíguo). Agora é explícito
+  (`+avx2 -fma`) e as flags ausentes geram aviso (`FAMILY_ISA_MISSING`).
+- `shellcheck -S warning`: `SC2034` em `ASSUME_YES`/`FAMILY_MATCH_REASON` —
+  ajustado nos scripts novos.
+
+**NÃO feito / não testado (importante):**
+
+- A **ISO ainda é Debian**: a variante Ubuntu com autoinstall **não** foi
+  escrita nem bootada. É a próxima ação (STATE § 6).
+- **Nada foi validado em hardware real.** A resolução de família foi exercitada
+  só com nomes de CPU simulados (o notebook de dev é um AMD A4-3300M → cai no
+  `generic`).
+- `docs/{HARDWARE,ARCHITECTURE,ROADMAP,TUTORIAL,VALIDATION}.md` ainda têm
+  referências ao modelo antigo de perfis (pendência registrada abaixo).
+
+**Commits desta sessão:** (a preencher após o push) — refatoração em um único
+commit de arquitetura (`refactor: suporte por famílias de CPU + papéis + mods`).
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,

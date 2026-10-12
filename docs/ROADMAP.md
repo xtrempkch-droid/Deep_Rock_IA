@@ -1,7 +1,7 @@
 # ROADMAP — ai-cpu-os
 
 > Documento vivo. Atualizado a cada mudança de estado.
-> **Última atualização:** 2026-10-07
+> **Última atualização:** 2026-10-12
 
 Legenda de status: ✅ Concluído · 🔄 Em Progresso · ⏳ Planejado · 💡 Ideia
 
@@ -39,6 +39,14 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | **ISO de instalação:** `iso/build-iso.sh` + preseed + serviço de 1º boot + `docs/ISO.md` | 2026-10-07 | 2026-10-07 |
 | `docs/JOURNAL.md` — diário de sessões e continuidade (Regra 14) + "Retomada rápida" | 2026-10-07 | 2026-10-07 |
 | Unificação do hardware: Xeon = **quad channel** (era "dual" em alguns docs) | 2026-10-07 | 2026-10-07 |
+| **`families/` — suporte por FAMÍLIA de CPU com herança** (8 famílias + `resolve.sh` + política de AVX-512 `never`/`optin`/`auto`) | 2026-10-12 | 2026-10-12 |
+| **`roles/` — papéis separados do hardware** (`inference`, `builder`) substituindo `profiles/xeon` e `profiles/ryzen` | 2026-10-12 | 2026-10-12 |
+| **`mods/` — modificações portáveis** (motor `list/info/check/apply/revert/test`, conjuntos `system`/`portable`, 4 mods com `revert`) | 2026-10-12 | 2026-10-12 |
+| `llama-build.sh` único, dirigido pela família, com padrão **portátil** (`GGML_NATIVE=OFF`) e `--assume-family-isa` para cross-build | 2026-10-12 | 2026-10-12 |
+| Correção do **bug latente de portabilidade do CI** (`GGML_NATIVE=ON` no runner → risco de `SIGILL` no alvo) | 2026-10-12 | 2026-10-12 |
+| `docs/FAMILIES.md` + `docs/MODS.md` + `mods/README.md` + `roles/README.md` | 2026-10-12 | 2026-10-12 |
+| Sistema operacional de referência passou a **Ubuntu Server** | 2026-10-12 | 2026-10-12 |
+| Comentários de instrução do usuário no README **aplicados e removidos** | 2026-10-12 | 2026-10-12 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em
@@ -50,24 +58,34 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 
 | Item                                                        | Início     | Nota                                                        |
 |-------------------------------------------------------------|------------|-------------------------------------------------------------|
-| Validação em hardware real (Xeon E5-2678 v3)                | 2026-10-07 | Aguardando acesso ao servidor físico para rodar o smoke-test |
-| Validação em hardware real (Ryzen 5 3500X)                  | 2026-10-07 | Aguardando build da imagem + teste do registry/Gitea        |
+| Validação em hardware real (Xeon E5-2680 v4, família `intel-broadwell`)      | 2026-10-07 | Aguardando acesso ao servidor físico para rodar o smoke-test |
+| Validação em hardware real (Ryzen 5 3500X, família `amd-zen2`)              | 2026-10-07 | Aguardando build da imagem + teste do registry/Gitea        |
 | Medição de baseline vs. pós-tuning com `llama-bench`        | 2026-10-07 | Depende dos dois itens acima para preencher `docs/STATE.md` |
 | Validar a Release `v0.2.0` (binários) e a imagem do GHCR no hardware alvo | 2026-10-07 | Primeiro uso real dos artefatos do CI |
 | Executar o protocolo `docs/VALIDATION.md` (blocos A–L) | 2026-10-07 | Roteiro preenchível pronto; **resultados pendentes** |
 | **🎯 Construir e bootar a ISO de instalação numa VM** (Bloco M) | 2026-10-07 | Entregável final; maior risco não validado do projeto |
+| **ISO em base Ubuntu Server** (`--distro ubuntu` + autoinstall/Subiquity) | 2026-10-12 | Pedido explícito do usuário; **escrito ainda não — a ISO atual é Debian** |
+| **Validar a resolução de famílias em hardware real** (blocos N/O do `VALIDATION.md`) | 2026-10-12 | Testado só com nomes de CPU simulados |
 
 ---
 
 ## ⏳ Planejado
 
 ### Prioridade Alta
+- [ ] **🎯 ISO em base Ubuntu Server** — `iso/autoinstall/{user-data,meta-data}`
+      + `--distro ubuntu|debian` no `build-iso.sh` (ubuntu como padrão).
+      É o pedido do usuário e a próxima ação imediata (`STATE.md` § 6).
 - [ ] **🎯 Gerar a ISO e instalar numa VM** (Bloco M do `VALIDATION.md`) —
       é o critério de conclusão do projeto e o maior risco não validado.
 - [ ] **Validar o boot UEFI da ISO** (com e sem `mtools`) e o `md5sum.txt`.
-- [ ] **Atualizar o tutorial ao validar cada perfil em hardware** — ao fechar
-      o marco de validação do `xeon`/`ryzen`, revisar `docs/TUTORIAL.md`
+- [ ] **Validar os blocos N e O do `VALIDATION.md`** — famílias em hardware
+      real e ciclo `apply`/`revert` das mods.
+- [ ] **Atualizar o tutorial ao validar cada família em hardware** — ao fechar
+      o marco de validação, revisar `docs/TUTORIAL.md`
       (diretriz obrigatória — Regra 9 do `AGENTS.md`). *(início previsto: a definir)*
+- [ ] **Alinhar `docs/{HARDWARE,ARCHITECTURE,TUTORIAL,VALIDATION}.md` ao modelo
+      de famílias/papéis** — ainda citam perfis `xeon`/`ryzen` em alguns trechos.
+      *(início previsto: a definir)*
 - [ ] **Empacotar como imagem/VM de referência** — gerar `qcow2` pré-afinada
       para pular a etapa de build. *(início previsto: a definir)*
 - [ ] **Validar persistência de kernel cmdline** — confirmar que

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# profiles/xeon/install.sh — Perfil xeon (servidor de inferência em CPU)
+# roles/inference/install.sh — Papel 'inference' (servidor de inferência em CPU)
 # -----------------------------------------------------------------------------
 # Instala dependências, compila o llama.cpp (via llama-build.sh), aplica o
 # sysctl do perfil, cria o usuário de serviço, instala a unit systemd e
 # (opcionalmente) baixa um modelo pequeno.
 #
 # Uso:
-#   sudo bash profiles/xeon/install.sh [--dry-run] [--yes]
+#   sudo bash roles/inference/install.sh [--dry-run] [--yes]
 #                                      [--download-model URL]
 #                                      [--model-path /opt/models/model.gguf]
 #
@@ -63,7 +63,7 @@ confirm() {
 # Etapas
 # ---------------------------------------------------------------------------
 install_deps() {
-  log_info "Instalando dependências do perfil xeon..."
+  log_info "Instalando dependências do papel inference..."
   run "apt update" apt-get update
   run "Instalando pacotes base" apt-get install -y --no-install-recommends \
     build-essential cmake git ccache pkg-config \
@@ -77,11 +77,11 @@ build_llama() {
   local flags=()
   [[ $DRY_RUN -eq 1 ]]    && flags+=(--dry-run)
   [[ $ASSUME_YES -eq 1 ]] && flags+=(--yes)
-  run "Executando llama-build.sh" bash "${SCRIPT_DIR}/llama-build.sh" "${flags[@]+"${flags[@]}"}" --dir "$LLAMA_DIR"
+  run "Executando llama-build.sh" bash "${REPO_ROOT}/llama-build.sh" "${flags[@]+"${flags[@]}"}" --dir "$LLAMA_DIR"
 }
 
 apply_sysctl() {
-  log_info "Aplicando sysctl do perfil xeon..."
+  log_info "Aplicando sysctl do papel inference..."
   local f="/etc/sysctl.d/99-ai-tuning.conf"
   local src="${SCRIPT_DIR}/sysctl.conf"
   if [[ $DRY_RUN -eq 1 ]]; then
@@ -116,7 +116,7 @@ install_service() {
   write_env_file() {
     local tmp; tmp="$(mktemp)"
     cat > "$tmp" <<EOF
-# Configuração do ai-server (gerado por profiles/xeon/install.sh)
+# Configuração do ai-server (gerado por roles/inference/install.sh)
 MODEL_PATH=${MODEL_PATH}
 LLAMA_THREADS=$(nproc --all 2>/dev/null || echo 24)
 LLAMA_CTX=4096
@@ -187,7 +187,7 @@ main() {
     exit 1
   fi
 
-  log_info "=== install.sh (perfil xeon · servidor de IA em CPU) ==="
+  log_info "=== install.sh (papel inference · servidor de IA em CPU) ==="
   log_warn "Xeon E5-2678 v3: 12c/24t, AVX2 apenas (SEM AVX-512)."
   log_warn "16 GB de RAM: modelos acima de ~7B Q4 não caberão."
 
@@ -204,9 +204,9 @@ main() {
     log_info "Modelo esperado em MODEL_PATH: ${MODEL_PATH}"
   fi
 
-  log_ok "install.sh (xeon) concluído."
+  log_ok "install.sh (inference) concluído."
   log_info "Próximos passos:"
-  log_info "  1. (Opcional) sudo bash ${REPO_ROOT}/profiles/xeon/install.sh --auto-model --yes"
+  log_info "  1. (Opcional) sudo bash ${REPO_ROOT}/roles/inference/install.sh --auto-model --yes"
   log_info "  2. sudo systemctl start ai-server && curl -s http://127.0.0.1:8080/health"
   log_info "  3. python3 ${SCRIPT_DIR}/shell-ia.py"
   log_info "  4. Reinicie se o kernel-tuning alterou a cmdline do kernel."

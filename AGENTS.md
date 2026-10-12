@@ -38,10 +38,24 @@ latência de memória e escalonamento**. Um sistema "genérico" desperdiça cicl
 em page faults, migração de páginas, C-states profundos e swappiness agressivo
 — desperdício que, somado, custa dezenas de por cento de tokens/s.
 
+O projeto é organizado em **duas dimensões independentes** — e misturá-las é o
+principal erro a evitar:
+
+- **Família de CPU** (`families/`) — *quem é o hardware*: define `-march`, ISA e
+  a política de AVX-512. Uma família cobre **dezenas de modelos** e há
+  **herança** entre gerações (o tuning do Broadwell-EP vale para toda a família
+  E5 **v4**; o de Haswell-EP, para toda a **v3**).
+- **Papel** (`roles/`) — *para que serve a máquina*: `inference` (servidor de
+  inferência) ou `builder` (Docker + registry + Gitea). Qualquer família pode
+  exercer qualquer papel.
+- **Mods** (`mods/`) — *modificações isoladas e reversíveis* que qualquer
+  pessoa aplica e testa no seu próprio sistema operacional.
+
 O projeto foi desenhado em torno de **dois sistemas reais**: um **servidor de
-inferência** baseado em Intel Xeon E5-2678 v3 (perfil `xeon`) e uma **máquina
-de build** baseada em AMD Ryzen 5 3500X (perfil `ryzen`), que também serve um
-registry Docker privado e um servidor Gitea.
+inferência** baseado em Intel Xeon E5-2680 v4 (família `intel-broadwell`,
+papel `inference`) e uma **máquina de build** baseada em AMD Ryzen 5 3500X
+(família `amd-zen2`, papel `builder`), que também serve um registry Docker
+privado e um servidor Gitea.
 
 Todo o sistema é gerado por **script** (`build.sh`), é **idempotente**, suporta
 `--dry-run` e documenta *cada* otimização com a razão técnica de existir.
@@ -78,9 +92,9 @@ experiência de uso. Isso significa que:
 
 ## 3. Hardware alvo (resumo)
 
-### Sistema A — Perfil `xeon` (Servidor de IA)
-- **CPU:** Intel Xeon E5-2678 v3 — 12c/24t, Haswell-EP, **AVX2 apenas** (sem
-  AVX-512, sem AMX).
+### Sistema A — Família `intel-broadwell` · papel `inference` (Servidor de IA)
+- **CPU:** Intel Xeon E5-2680 v4 — 14c/28t, **Broadwell-EP**, **AVX2 apenas**
+  (sem AVX-512, sem AMX). Herda o tuning de `intel-haswell` (E5 v3).
 - **Placa-mãe:** JGINYUE X99M-D3 (LGA2011-3, DDR3).
 - **RAM:** 16 GB DDR3-1333, 4×4 GB, **quad channel** (4 canais; Haswell-EP,
   1 pente por canal).
@@ -88,7 +102,7 @@ experiência de uso. Isso significa que:
 - **GPU:** nenhuma (inferência 100% CPU).
 - **Limitação conhecida:** modelos > 7B Q4 não cabem em 16 GB.
 
-### Sistema B — Perfil `ryzen` (Build + Registry + Gitea)
+### Sistema B — Família `amd-zen2` · papel `builder` (Build + Registry + Gitea)
 - **CPU:** AMD Ryzen 5 3500X — 6c/6t, Zen 2, **AVX2 apenas**.
 - **Placa-mãe:** MSI B550 (AM4).
 - **RAM:** 64 GB DDR4, 4×16 GB, operando em **SINGLE CHANNEL** ⚠️ (perda de
@@ -141,24 +155,37 @@ ai-cpu-os/
 │   ├── VALIDATION.md       # Protocolo de testes em hardware (preenchível)
 │   ├── ISO.md              # 🎯 A ISO de instalação (decisões e como gerar)
 │   └── JOURNAL.md          # 📓 Diário de sessões + continuidade (retomada)
-├── profiles/
-│   ├── xeon/               # Servidor de inferência
+│   └── build-runner.sh # Build Docker + push p/ registry local
+├── families/               # 🧬 Suporte por FAMÍLIA de microarquitetura
+│   ├── README.md           # Conceito família × papel, como adicionar família
+│   ├── resolve.sh          # "Cérebro": casa o CPU → família → ISA/march
+│   ├── _base/family.conf   # Padrões herdados por todas as famílias
+│   ├── intel-haswell/      # Xeon E5 v3 (AVX2)
+│   ├── intel-broadwell/    # Xeon E5 v4 (AVX2) — herda de intel-haswell
+│   ├── intel-skylake-avx512/ # Scalable v5/v6 — AVX-512 por opt-in
+│   ├── amd-zen1/ … amd-zen4/ # Ryzen 1000/2000 … 7000/9000 (herança em cadeia)
+│   └── generic/            # Fallback x86-64 (ISA em runtime, AVX-512 auto)
+├── roles/                  # 🎯 O que a máquina FAZ (independente da CPU)
+│   ├── README.md           # Fronteira papel × família
+│   ├── inference/          # Servidor de inferência em CPU
 │   │   ├── install.sh      # Instala deps + llama.cpp + serviço
-│   │   ├── llama-build.sh  # Compila llama.cpp com flags do Haswell-EP
-│   │   ├── sysctl.conf     # Tuning sysctl do perfil
+│   │   ├── sysctl.conf     # Referência do sysctl do papel
 │   │   ├── shell-ia.py     # Shell-IA em Python (tools + sandbox)
 │   │   └── ai-server.service # Unit systemd do llama-server
-│   └── ryzen/              # Build + registry + Gitea
-│       ├── install.sh      # Orquestra o perfil ryzen
+│   └── builder/            # Build + registry + Gitea
+│       ├── install.sh      # Orquestra o papel builder
 │       ├── docker-setup.sh # Docker Engine + Compose
 │       ├── registry-setup.sh # Registry privado localhost:5000
 │       ├── gitea-compose.yml # Gitea via docker compose
-│       ├── build-runner.sh # Build Docker + push p/ registry local
-│       └── llama-build.sh  # Compila o llama.cpp com -march=znver2 (Zen 2)
-├── common/
-│   ├── kernel-tuning.sh    # sysctl + cmdline + io_uring
-│   ├── hugepages.sh        # Transparent/static huge pages
-│   └── governor.sh         # Governor performance
+│       └── build-runner.sh # Build Docker + push p/ registry local
+├── llama-build.sh          # Compila o llama.cpp para a FAMÍLIA (compartilhado)
+├── mods/                    # 🔧 Modificações portáveis (aplicar/testar/reverter)
+│   ├── README.md            # Catálogo
+│   ├── apply.sh             # Motor: list/info/check/apply/revert/test
+│   ├── kernel-tuning/       # sysctl + cmdline + io_uring   (conjunto system)
+│   ├── hugepages/           # THP + huge pages estáticas    (conjunto system)
+│   ├── governor/            # scaling_governor=performance (conjunto system)
+│   └── openblas-threads/    # OPENBLAS_NUM_THREADS=1       (conjunto portable)
 └── tests/
     └── smoke-test.sh       # Testes rápidos pós-build
 ```
@@ -175,15 +202,18 @@ ai-cpu-os/
 | Detalhes de CPU/RAM/disco              | `docs/HARDWARE.md`                           |
 | Entender uma otimização específica     | `docs/TUNING.md`                             |
 | Resolver um problema                   | `docs/TROUBLESHOOTING.md`                    |
+| **Saber/testar uma otimização específica** | **`mods/`**, **`docs/MODS.md`**   |
+| **Entender as famílias de CPU / adicionar uma** | **`families/README.md`**, **`docs/FAMILIES.md`** |
 | **Aprender o projeto do zero (passo a passo explicado)** | **`docs/TUTORIAL.md`**        |
 | Como o CI compila/valida o sistema     | `.github/workflows/`, `docs/CI.md`, `Makefile` |
 | **Testar em hardware e registrar resultados** | **`docs/VALIDATION.md`**              |
 | **Gerar a ISO de instalação (entregável final)** | **`iso/build-iso.sh`**, **`docs/ISO.md`** |
 | **Retomar/continuar depois de um tempo parado** | **`docs/JOURNAL.md`** (§ 1 retomada, § 5 threads abertas) |
-| Scripts principais                     | `build.sh`, `detect-hardware.sh`             |
-| Perfil Xeon (inferência)               | `profiles/xeon/`                             |
-| Perfil Ryzen (build/registry/Gitea)    | `profiles/ryzen/`                            |
-| Tuning comum a ambos                   | `common/`                                    |
+| Scripts principais                     | `build.sh`, `detect-hardware.sh`, `llama-build.sh` |
+| Famílias de CPU (ISA/march)            | `families/`                                  |
+| Papel: inferência                      | `roles/inference/`                           |
+| Papel: build/registry/Gitea            | `roles/builder/`                             |
+| Modificações portáveis                 | `mods/`                                      |
 | Testes                                 | `tests/smoke-test.sh`                        |
 
 ---
@@ -221,17 +251,31 @@ Estas regras são **obrigatórias**:
 11. **ANTES** de abrir um Pull Request, rodar `make ci` localmente e garantir
     o CI verde (workflow `validate`). Nunca faça merge com CI vermelho.
     Se você alterar os jobs, atualize `docs/CI.md`.
-12. **NUNCA** habilitar AVX-512 (`-mavx512*`, `GGML_AVX512=ON`) em código,
-    script ou imagem: nenhum dos dois hardwares alvo suporta (o build faz
-    `SIGILL`). Em containers, `GGML_NATIVE` deve permanecer `OFF` — dentro do
-    Docker o CMake detectaria a CPU do runner de CI, não a do alvo.
+12. **NUNCA** escreva `-mavx512*` / `GGML_AVX512=ON` **fixo** em código,
+    script ou imagem. Mas **AVX-512 não é proibido para sempre**: ele é
+    decidido pela `FAMILY_AVX512_POLICY` (`never` | `optin` | `auto`) do
+    `family.conf`, sempre com verificação em runtime e opt-in explícito
+    (`--allow-avx512`). Máquinas com AVX-512/AMX (Skylake-SP, Zen 5, futuras)
+    são suportadas — via família, nunca por flag hardcoded. Em containers,
+    `GGML_NATIVE` deve permanecer `OFF` (dentro do Docker o CMake detectaria a
+    CPU do runner de CI, não a do alvo).
+12-b. **Padrão de build = portátil, não nativo.** O default do `llama-build.sh`
+    é `GGML_NATIVE=OFF` + flags explícitas da família. Em cross-build (CI, para
+    OUTRA máquina) use `--assume-family-isa`: sem isso, um runner com AVX-512
+    gera binário que sofre `SIGILL` no alvo.
 13. **A ISO é o entregável final e define "terminado".** Qualquer trabalho deve
     manter funcional o caminho `iso/build-iso.sh` → instalação → primeiro boot.
-    Se você mudar `build.sh`, `detect-hardware.sh`, os perfis ou o
+    Se você mudar `build.sh`, `detect-hardware.sh`, as famílias, os papéis ou o
     `docker/`, **verifique se a ISO continua coerente** (o `late-command.sh`
     copia o projeto inteiro; o `firstboot.sh` o executa). Ao mexer na ISO,
     atualize **`docs/ISO.md`** e o **Bloco M** de `docs/VALIDATION.md`.
     ⚠️ Nunca declare a ISO pronta sem tê-la **bootado e instalado** em VM.
+    A base de referência é **Ubuntu Server** (ver `docs/ISO.md`); a remasterização
+    Debian segue como caminho legado funcional.
+15. **Integridade da tríade `build.sh` → `detect-hardware.sh` → `families/`.**
+    Ao adicionar família, papel ou mod, atualize **as três** superfícies que o CI
+    cobra: a lista `required` de `.github/workflows/validate.yml`, a árvore do § 4
+    deste arquivo e a tabela de `docs/MODS.md` / `docs/FAMILIES.md`.
 14. **SEMPRE** registrar o fim da sessão em **`docs/JOURNAL.md`**: acrescente
     uma entrada (§ 4 — objetivo, feito, decisões, problemas, commits), atualize
     as **threads abertas** (§ 5) e as **armadilhas** (§ 6). Junto com a
@@ -249,11 +293,20 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-07
-- **O que mudou:** Criado **`docs/JOURNAL.md`** (diário de sessões +
-  continuidade) e a seção "Retomada rápida" no topo deste arquivo; nova
-  **Regra 14** (registrar o fim da sessão no diário). Também unificado o
-  hardware: o Xeon é **quad channel** (era "dual" em alguns docs).
+- **Data:** 2026-10-12
+- **O que mudou:** **Refatoração para FAMÍLIAS de CPU + PAPÉIS + MODS.**
+  Suporte deixou de ser "um processador por perfil" e passou a ser por
+  **família de microarquitetura com herança** (`families/`, 8 famílias, AVX-512
+  por política), com **papéis** separados do hardware (`roles/inference`,
+  `roles/builder`) e **mods portáveis** aplicáveis/reversíveis em qualquer
+  sistema (`mods/`, com `apply`/`revert`/`test`). O build do llama.cpp virou um
+  script único dirigido pela família (`llama-build.sh`), com padrão **portátil**
+  (`GGML_NATIVE=OFF`) e modo `--assume-family-isa` para cross-build. Sistema de
+  referência passou a **Ubuntu Server**. CPU do Sistema A: E5-2680 v4
+  (Broadwell-EP, 14c/28t). Comentários do README aplicados e removidos.
+- **Data anterior:** 2026-10-07 — Criado **`docs/JOURNAL.md`** (diário de
+  sessões + continuidade) e a seção "Retomada rápida"; nova **Regra 14**.
+  Unificado o hardware: o Xeon é **quad channel**.
 - **Data anterior:** 2026-10-07 — Registrado o **entregável final = ISO de
   instalação** (meta no § 1, regra 13) e criada a implementação em `iso/`.
 - **Data anterior:** 2026-10-07 — Criado `docs/VALIDATION.md` — protocolo

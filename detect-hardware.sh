@@ -3,13 +3,16 @@
 # detect-hardware.sh — Detecção automática de hardware do ai-cpu-os
 # -----------------------------------------------------------------------------
 # Detecta CPU (modelo, núcleos, threads), flags ISA (AVX2/AVX-512/AMX),
-# RAM total, canais de memória (single/dual) e tipo de armazenamento
-# (NVMe vs SATA). Ao final, imprime a linha 'PROFILE=<xeon|ryzen>' para
-# consumo pelo build.sh.
+# RAM total, canais de memória (single/dual/quad) e tipo de armazenamento
+# (NVMe vs SATA).
+#
+# Ao final, imprime duas linhas consumíveis por scripts:
+#   FAMILY=<id>      família de microarquitetura (ex.: intel-broadwell)
+#   ROLE=<id>        papel sugerido da máquina (inference | builder)
 #
 # Uso:
 #   ./detect-hardware.sh            # relatório completo
-#   ./detect-hardware.sh --quiet    # apenas a linha PROFILE=...
+#   ./detect-hardware.sh --quiet    # apenas as linhas FAMILY= e ROLE=
 #
 # Este script é SOMENTE LEITURA — não altera nada no sistema.
 # -----------------------------------------------------------------------------
@@ -32,12 +35,12 @@ section()   { [[ $QUIET -eq 1 ]] && return 0; printf '\n%b== %s ==%b\n' "$C_BOLD
 
 usage() {
   cat <<'EOF'
-detect-hardware.sh — relatório de hardware e escolha de perfil
+detect-hardware.sh — relatório de hardware, família de CPU e papel
 
 Uso:
   ./detect-hardware.sh [--quiet]
 
-  --quiet    Imprime somente a linha 'PROFILE=<xeon|ryzen>'.
+  --quiet    Imprime somente as linhas 'FAMILY=<id>' e 'ROLE=<inference|builder>'.
   -h|--help  Mostra esta ajuda.
 
 Variáveis:
@@ -114,9 +117,10 @@ detect_isa() {
   log_info "AMX:     $(yn $HAS_AMX)"
 
   if [[ $HAS_AVX512 -eq 1 ]]; then
-    log_warn "AVX-512 detectado — hardware não é o alvo típico (Xeon E5-2678 v3 / Ryzen 5 3500X não têm AVX-512)."
+    log_warn "AVX-512 detectado: presente nas famílias Intel Skylake-SP+ (v5+) e AMD Zen 5+."
+    log_warn "Não é habilitado automaticamente — exige opt-in explícito (--allow-avx512)."
   else
-    log_ok "Sem AVX-512/AMX (esperado para os hardwares alvo)."
+    log_ok "Sem AVX-512/AMX (esperado para as famílias Haswell/Broadwell-EP e Zen 1-4)."
   fi
 }
 
@@ -227,58 +231,84 @@ detect_storage() {
 }
 
 # ---------------------------------------------------------------------------
-# Escolha de perfil
+# Família de CPU (delegado a families/resolve.sh)
 # ---------------------------------------------------------------------------
-choose_profile() {
-  local lower_model
-  lower_model="$(tr '[:upper:]' '[:lower:]' <<<"${CPU_MODEL}")"
-  local lower_vendor
-  lower_vendor="$(tr '[:upper:]' '[:lower:]' <<<"${CPU_VENDOR}")"
+FAMILY_ID=""
+FAMILY_NAME=""
+FAMILY_MARCH_EFFECTIVE=""
+FAMILY_ISA_FINAL=""
+AVX512_ENABLED="no"
+AVX512_REASON=""
 
-  # Regras:
-  #   Intel Xeon (ou qualquer Intel Xeon/Silver/Gold/Bronze) → xeon
-  #   AMD Ryzen                                             → ryzen
-  #   fallback por RAM: <=32GB → xeon (servidor de inferência), >32GB → ryzen (build)
-  if [[ "$lower_vendor" == *intel* && "$lower_model" == *xeon* ]]; then
-    echo "xeon"
+resolve_family() {
+  local resolve_sh
+  resolve_sh="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/families/resolve.sh"
+  if [[ ! -f "$resolve_sh" ]]; then
+    log_warn "families/resolve.sh não encontrado: família não será detectada."
+    FAMILY_ID="unknown"
     return 0
   fi
-  if [[ "$lower_vendor" == *amd* && "$lower_model" == *ryzen* ]]; then
-    echo "ryzen"
-    return 0
-  fi
-  if [[ "$lower_model" == *xeon* ]]; then echo "xeon"; return 0; fi
-  if [[ "$lower_model" == *ryzen* ]]; then echo "ryzen"; return 0; fi
-
-  # Fallback por RAM total
-  if [[ "$RAM_TOTAL_MB" -le $(( 32 * 1024 )) ]]; then
-    echo "xeon"
-  else
-    echo "ryzen"
-  fi
+  # shellcheck source=/dev/null
+  . "$resolve_sh"
+  pick_family "$CPU_MODEL"
+  load_family "$FAMILY_ID"
+  compute_isa
 }
 
 # ---------------------------------------------------------------------------
-# Recomendações de flags de compilação
+# Papel sugerido da máquina (inference | builder)
 # ---------------------------------------------------------------------------
-print_recommendations() {
-  local profile="$1"
-  section "Recomendações de build (llama.cpp)"
+# O papel é uma decisão de USO, não de CPU: o mesmo hardware pode servir para
+# inferência ou para build/registry. A heurística abaixo acerta os dois alvos
+# reais do projeto (Xeon 16GB = inferência; Ryzen 64GB = build) e cai no bom
+# senso pela RAM em qualquer outra máquina.
+choose_role() {
+  local lower_model lower_vendor
+  lower_model="$(tr '[:upper:]' '[:lower:]' <<<"${CPU_MODEL}")"
+  lower_vendor="$(tr '[:upper:]' '[:lower:]' <<<"${CPU_VENDOR}")"
 
-  local base="-DGGML_NATIVE=ON"
-  [[ $HAS_AVX2 -eq 1 ]] && base+=" -DGGML_AVX2=ON"
-  [[ $HAS_FMA  -eq 1 ]] && base+=" -DGGML_FMA=ON"
-  [[ $HAS_F16C -eq 1 ]] && base+=" -DGGML_F16C=ON"
-  base+=" -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
-
-  if [[ "$profile" == "ryzen" ]]; then
-    log_info "cmake -B build ${base} -DCMAKE_C_FLAGS=\"-march=znver2 -mtune=znver2 -O3\""
-  else
-    log_info "cmake -B build ${base}"
+  # Xeon/EPYC → servidor de inferência (mesmo perfil de uso dos alvos).
+  if [[ "$lower_model" == *xeon* || "$lower_model" == *epyc* ]]; then
+    echo "inference"
+    return 0
   fi
 
-  if [[ $HAS_AVX512 -eq 1 ]]; then
-    log_warn "AVX-512 presente, mas NÃO habilitado por padrão (hardware alvo não tem). Ajuste manualmente se desejar."
+  # Fallback por RAM total: pouca RAM = inferência; muita RAM = build.
+  if [[ "${RAM_TOTAL_MB:-0}" -le $(( 32 * 1024 )) ]]; then
+    echo "inference"
+  else
+    echo "builder"
+  fi
+  # lower_vendor mantido para futuras regras por fabricante (ex.: Intel Core → builder).
+  : "$lower_vendor"
+}
+
+# ---------------------------------------------------------------------------
+# Recomendações de flags de compilação (vêm da família)
+# ---------------------------------------------------------------------------
+print_recommendations() {
+  section "Recomendações de build (llama.cpp)"
+
+  if [[ -z "$FAMILY_ID" || "$FAMILY_ID" == "unknown" ]]; then
+    log_warn "Família não resolvida: use o llama-build.sh (que detecta sozinho)."
+    return 0
+  fi
+
+  log_info "Família:   ${FAMILY_ID} — ${FAMILY_NAME}"
+  log_info "March:     ${FAMILY_MARCH_EFFECTIVE:-<nenhum: usa a ISA detectada>}"
+  log_info "ISA:       ${FAMILY_ISA_FINAL:-<não avaliada>}"
+  log_info "AVX-512:   ${AVX512_ENABLED} (${AVX512_REASON:-—})"
+
+  local march="${FAMILY_MARCH_EFFECTIVE:-}"
+  local flags
+  flags="$(printf '%s' "${FAMILY_GGML_FLAGS:-}")"
+  log_info "Como compilar (não portátil entre máquinas — use só se compilar no alvo):"
+  log_info "  cmake -B build -DGGML_NATIVE=OFF ${flags}${march:+ -DCMAKE_C_FLAGS=\"${march} -O3\"}"
+  log_info "Caminho recomendado (portátil, usa a família):"
+  log_info "  sudo bash llama-build.sh --family ${FAMILY_ID}"
+
+  if [[ $HAS_AVX512 -eq 1 && "$AVX512_ENABLED" == "no" ]]; then
+    log_warn "Esta CPU tem AVX-512 mas a política da família é '${FAMILY_AVX512_POLICY}' — ver docs/FAMILIES.md para opt-in."
   fi
 }
 
@@ -308,29 +338,34 @@ main() {
   detect_isa
   detect_ram
   detect_storage
+  resolve_family
 
-  local profile
-  profile="$(choose_profile)"
+  local role
+  role="$(choose_role)"
 
   if [[ $QUIET -eq 0 ]]; then
     section "Resultado"
-    log_ok "Perfil escolhido: ${profile}"
-    print_recommendations "$profile"
+    log_ok "Família de CPU: ${FAMILY_ID}"
+    log_ok "Papel sugerido: ${role}"
+    print_recommendations
 
-    # Avisos específicos do hardware alvo
-    section "Avisos do hardware alvo"
-    log_warn "Xeon E5-2678 v3 e Ryzen 5 3500X NÃO possuem AVX-512 (apenas AVX2)."
-    if [[ "$profile" == "ryzen" ]]; then
-      log_warn "Single channel no Ryzen custa ~50% de banda de memória — verifique os slots."
-      log_warn "RX 580: usar APENAS para vídeo, nunca para computação (artefatos sob carga)."
+    # Avisos genéricos (a família já explica o que se aplica ao SEU hardware).
+    section "Avisos"
+    if [[ $HAS_AVX512 -eq 0 ]]; then
+      log_info "Sem AVX-512: é o caso das famílias Haswell/Broadwell-EP e Zen 1-4."
     fi
-    if [[ "$profile" == "xeon" ]]; then
-      log_warn "16 GB de RAM no Xeon: modelos acima de ~7B Q4 não caberão."
+    if [[ "$role" == "inference" ]]; then
+      log_info "Inferência: confira a RAM disponível — modelos acima do que cabe começarão a usar swap (fatal)."
+    fi
+    if [[ "$role" == "builder" ]]; then
+      log_info "Build/registry: verifique se a RAM está em dual channel (single channel custa ~50% de banda)."
+      log_info "GPU: usar apenas para vídeo, nunca para computação."
     fi
   fi
 
-  # Linha consumível por scripts.
-  printf 'PROFILE=%s\n' "$profile"
+  # Linhas consumíveis por scripts (build.sh, smoke-test.sh, CI).
+  printf 'FAMILY=%s\n' "${FAMILY_ID:-unknown}"
+  printf 'ROLE=%s\n' "$role"
 }
 
 main "$@"

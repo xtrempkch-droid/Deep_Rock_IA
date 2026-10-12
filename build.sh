@@ -2,16 +2,18 @@
 #
 # build.sh — Orquestrador principal do ai-cpu-os
 # -----------------------------------------------------------------------------
-# Transforma um Debian/Ubuntu minimal em um sistema otimizado para inferência
-# de LLMs 100% em CPU, aplicando tuning de kernel comum e delegando para o
-# perfil escolhido (xeon | ryzen).
+# Transforma um Ubuntu/Debian minimal em um sistema otimizado para inferência
+# de LLMs 100% em CPU. Separa dois conceitos que antes estavam misturados:
+#
+#   FAMÍLIA  = quem é o hardware  (intel-broadwell, amd-zen2, …)  → ISA/march
+#   PAPEL    = para que serve     (inference | builder)           → o que instala
 #
 # Uso:
-#   sudo ./build.sh --profile auto            # detecta e aplica
-#   sudo ./build.sh --profile xeon            # força perfil xeon
-#   sudo ./build.sh --profile ryzen           # força perfil ryzen
-#   sudo ./build.sh --profile auto --dry-run  # simula, não aplica
-#   sudo ./build.sh --profile auto --yes      # não pede confirmação
+#   sudo ./build.sh                       # detecta família e papel, pergunta
+#   sudo ./build.sh --role inference      # força o papel
+#   sudo ./build.sh --family amd-zen2     # força a família
+#   sudo ./build.sh --dry-run             # simula, não aplica
+#   sudo ./build.sh --yes                 # não pede confirmação
 #
 # Regras de qualidade: set -euo pipefail, logs com timestamp e nível,
 # idempotência, --dry-run, confirmação antes de ações sensíveis.
@@ -24,16 +26,18 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly COMMON_DIR="${SCRIPT_DIR}/common"
-readonly PROFILES_DIR="${SCRIPT_DIR}/profiles"
+readonly MODS_DIR="${SCRIPT_DIR}/mods"
+readonly ROLES_DIR="${SCRIPT_DIR}/roles"
+readonly FAMILIES_DIR="${SCRIPT_DIR}/families"
 readonly TESTS_DIR="${SCRIPT_DIR}/tests"
 readonly LOG_FILE="/var/log/ai-cpu-os-build.log"
 
-PROFILE="auto"
+ROLE="auto"
+FAMILY="auto"
 DRY_RUN=0
 ASSUME_YES=0
 SKIP_TESTS=0
-SKIP_COMMON=0
+SKIP_MODS=0
 
 # Cores (desativadas se não for TTY)
 if [[ -t 1 ]]; then
@@ -110,20 +114,26 @@ Uso:
   sudo ./build.sh [opções]
 
 Opções:
-  --profile <auto|xeon|ryzen>  Perfil a aplicar (padrão: auto).
-  --dry-run                    Simula, sem alterar o sistema.
-  --yes                        Não pede confirmação (automação/CI).
-  --skip-common                Não aplica tuning de kernel comum.
-  --skip-tests                 Não roda o smoke-test ao final.
-  -h, --help                   Mostra esta ajuda.
+  --role <auto|inference|builder>   Papel da máquina (padrão: auto).
+  --family <auto|ID>                Família de CPU (ex.: intel-broadwell).
+  --dry-run                         Simula, sem alterar o sistema.
+  --yes                             Não pede confirmação (automação/CI).
+  --skip-mods                       Não aplica as mods do conjunto 'system'.
+  --skip-tests                      Não roda o smoke-test ao final.
+  --list-families                   Lista as famílias suportadas e sai.
+  -h, --help                        Mostra esta ajuda.
 
-Variável de ambiente:
-  AI_PROFILE                   Alternativa a --profile.
+Variáveis de ambiente:
+  AI_ROLE      Alternativa a --role.
+  AI_FAMILY    Alternativa a --family.
+  AI_PROFILE   Nome antigo de AI_ROLE (compatibilidade: xeon→inference,
+               ryzen→builder).
 
 Exemplos:
-  sudo ./build.sh --profile auto
-  sudo ./build.sh --profile xeon --dry-run
-  sudo ./build.sh --profile ryzen --yes
+  sudo ./build.sh
+  sudo ./build.sh --role inference --family intel-broadwell
+  sudo ./build.sh --dry-run
+  sudo ./build.sh --role builder --yes
 EOF
 }
 
@@ -133,27 +143,72 @@ EOF
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --role)
+        [[ $# -ge 2 ]] || { log_error "--role exige um valor."; exit 2; }
+        ROLE="$2"; shift 2 ;;
+      --family)
+        [[ $# -ge 2 ]] || { log_error "--family exige um valor."; exit 2; }
+        FAMILY="$2"; shift 2 ;;
+      # Compatibilidade com a interface antiga (perfil).
       --profile)
         [[ $# -ge 2 ]] || { log_error "--profile exige um valor."; exit 2; }
-        PROFILE="$2"; shift 2 ;;
+        log_warn "--profile está obsoleto; use --role (xeon→inference, ryzen→builder)."
+        case "$2" in
+          xeon)  ROLE="inference" ;;
+          ryzen) ROLE="builder" ;;
+          *)     ROLE="$2" ;;
+        esac
+        shift 2 ;;
       --dry-run)     DRY_RUN=1; shift ;;
       --yes)         ASSUME_YES=1; shift ;;
-      --skip-common) SKIP_COMMON=1; shift ;;
+      --skip-mods)   SKIP_MODS=1; shift ;;
+      --skip-common) SKIP_MODS=1; shift ;;
       --skip-tests)  SKIP_TESTS=1; shift ;;
+      --list-families) list_families; exit 0 ;;
       -h|--help)     usage; exit 0 ;;
       *) log_error "Argumento desconhecido: $1"; usage; exit 2 ;;
     esac
   done
 
-  # Variável de ambiente como fallback
-  if [[ "$PROFILE" == "auto" && -n "${AI_PROFILE:-}" ]]; then
-    PROFILE="$AI_PROFILE"
+  # Variáveis de ambiente como fallback (--role/--family têm precedência).
+  if [[ "$ROLE" == "auto" ]]; then
+    if [[ -n "${AI_ROLE:-}" ]]; then
+      ROLE="$AI_ROLE"
+    elif [[ -n "${AI_PROFILE:-}" ]]; then
+      case "$AI_PROFILE" in
+        xeon)  ROLE="inference" ;;
+        ryzen) ROLE="builder" ;;
+        *)     ROLE="$AI_PROFILE" ;;
+      esac
+    fi
+  fi
+  if [[ "$FAMILY" == "auto" && -n "${AI_FAMILY:-}" ]]; then
+    FAMILY="$AI_FAMILY"
   fi
 
-  case "$PROFILE" in
-    auto|xeon|ryzen) ;;
-    *) log_error "Perfil inválido: '${PROFILE}'. Use auto, xeon ou ryzen."; exit 2 ;;
+  case "$ROLE" in
+    auto|inference|builder) ;;
+    *) log_error "Papel inválido: '${ROLE}'. Use auto, inference ou builder."; exit 2 ;;
   esac
+}
+
+# Lista as famílias suportadas (delegado a families/resolve.sh).
+list_families() {
+  local r="${FAMILIES_DIR}/resolve.sh"
+  if [[ ! -f "$r" ]]; then
+    log_error "families/resolve.sh não encontrado."
+    exit 1
+  fi
+  # shellcheck source=/dev/null
+  . "$r"
+  section_pretty() { printf '\n== %s ==\n' "$1"; }
+  section_pretty "Famílias suportadas"
+  local id
+  for id in $(families_available); do
+    load_family "$id"
+    printf '  %-22s %-12s %s\n' "$id" "${FAMILY_AVX512_POLICY:-?}" "${FAMILY_NAME:-}"
+  done
+  printf '\nUse: sudo ./build.sh --family <id>\n'
 }
 
 # ---------------------------------------------------------------------------
@@ -211,30 +266,38 @@ require_file() {
 }
 
 # ---------------------------------------------------------------------------
-# Detecção de perfil via detect-hardware.sh
+# Detecção de família e papel via detect-hardware.sh
 # ---------------------------------------------------------------------------
-resolve_profile() {
-  if [[ "$PROFILE" != "auto" ]]; then
-    log_info "Perfil forçado manualmente: '${PROFILE}'."
-    return 0
-  fi
-
+resolve_role() {
   local detector="${SCRIPT_DIR}/detect-hardware.sh"
   require_file "$detector"
 
-  log_info "Perfil 'auto': executando detect-hardware.sh..."
-  # detect-hardware.sh imprime a linha 'PROFILE=<nome>' no final.
-  local detected
-  detected="$("$detector" --quiet 2>/dev/null | grep -E '^PROFILE=' | tail -1 | cut -d= -f2 || true)"
+  local out
+  out="$("$detector" --quiet 2>/dev/null || true)"
 
+  if [[ "$FAMILY" == "auto" ]]; then
+    FAMILY="$(printf '%s\n' "$out" | grep -E '^FAMILY=' | tail -1 | cut -d= -f2 || true)"
+    [[ -n "$FAMILY" ]] || FAMILY="unknown"
+    log_ok "Família detectada: '${FAMILY}'."
+  else
+    log_info "Família forçada manualmente: '${FAMILY}'."
+  fi
+
+  if [[ "$ROLE" != "auto" ]]; then
+    log_info "Papel forçado manualmente: '${ROLE}'."
+    return 0
+  fi
+
+  local detected
+  detected="$(printf '%s\n' "$out" | grep -E '^ROLE=' | tail -1 | cut -d= -f2 || true)"
   case "$detected" in
-    xeon|ryzen)
-      PROFILE="$detected"
-      log_ok "Perfil detectado: '${PROFILE}'."
+    inference|builder)
+      ROLE="$detected"
+      log_ok "Papel detectado: '${ROLE}'."
       ;;
     *)
-      log_error "Não foi possível detectar o perfil automaticamente."
-      log_error "Rode './detect-hardware.sh' para inspecionar e use --profile xeon|ryzen."
+      log_error "Não foi possível detectar o papel automaticamente."
+      log_error "Rode './detect-hardware.sh' para inspecionar e use --role inference|builder."
       exit 1
       ;;
   esac
@@ -251,28 +314,29 @@ child_flags() {
   return 0
 }
 
-run_common_tuning() {
-  if [[ $SKIP_COMMON -eq 1 ]]; then
-    log_warn "Tuning comum pulado (--skip-common)."
+run_system_mods() {
+  if [[ $SKIP_MODS -eq 1 ]]; then
+    log_warn "Mods do conjunto 'system' puladas (--skip-mods)."
     return 0
   fi
-  log_info "=== Etapa 1/4: Tuning de kernel comum ==="
-  local s
+  log_info "=== Etapa 1/4: Mods do conjunto 'system' ==="
+  local engine="${MODS_DIR}/apply.sh"
+  require_file "$engine"
   local -a flags=()
   mapfile -t flags < <(child_flags)
-  for s in kernel-tuning.sh hugepages.sh governor.sh; do
-    require_file "${COMMON_DIR}/${s}"
-    run "Aplicando common/${s}" bash "${COMMON_DIR}/${s}" "${flags[@]+"${flags[@]}"}"
-  done
+  run "Aplicando conjunto 'system'" bash "$engine" apply --set system "${flags[@]}"
 }
 
-run_profile_install() {
-  log_info "=== Etapa 2/4: Instalação do perfil '${PROFILE}' ==="
-  local installer="${PROFILES_DIR}/${PROFILE}/install.sh"
+run_role_install() {
+  log_info "=== Etapa 2/4: Instalação do papel '${ROLE}' (família ${FAMILY}) ==="
+  local installer="${ROLES_DIR}/${ROLE}/install.sh"
   require_file "$installer"
   local -a flags=()
   mapfile -t flags < <(child_flags)
-  run "Executando ${installer}" bash "$installer" "${flags[@]+"${flags[@]}"}"
+  # A família é repassada por ambiente; os scripts de papel usam o
+  # llama-build.sh, que resolve a ISA sozinho (ou respeita AI_FAMILY).
+  export AI_FAMILY="$FAMILY"
+  run "Executando ${installer}" bash "$installer" "${flags[@]}"
 }
 
 run_verification() {
@@ -336,40 +400,36 @@ main() {
 
   banner
   log_info "ai-cpu-os build.sh — início"
-  log_info "Argumentos: profile=${PROFILE} dry_run=${DRY_RUN} yes=${ASSUME_YES}"
+  log_info "Argumentos: role=${ROLE} family=${FAMILY} dry_run=${DRY_RUN} yes=${ASSUME_YES}"
 
   start_file_log
   check_root
   check_os
 
-  log_warn "LEMBRETE: Xeon E5-2678 v3 e Ryzen 5 3500X NÃO possuem AVX-512 (apenas AVX2)."
-  log_warn "LEMBRETE: RX 580 apenas para vídeo; single channel no Ryzen custa ~50% de banda."
+  log_warn "AVX-512 só é habilitado por opt-in explícito e se a CPU realmente tiver — ver docs/FAMILIES.md."
 
-  resolve_profile
+  resolve_role
 
-  if [[ "$PROFILE" == "ryzen" ]]; then
-    log_warn "Perfil 'ryzen' detectado: verifique o alerta de single channel no install."
-  fi
-
-  if ! confirm "Aplicar tuning e instalar perfil '${PROFILE}' agora?"; then
+  if ! confirm "Aplicar mods 'system' e instalar papel '${ROLE}' (família '${FAMILY}') agora?"; then
     log_warn "Cancelado pelo usuário."
     exit 0
   fi
 
-  run_common_tuning
-  run_profile_install
+  run_system_mods
+  run_role_install
   run_verification
   run_tests
 
-  log_ok "Concluído (perfil '${PROFILE}')."
+  log_ok "Concluído (papel '${ROLE}', família '${FAMILY}')."
 
   # Avisos de follow-up (reboot pendente, modelo, etc.)
   if [[ $DRY_RUN -eq 0 ]]; then
     log_info "Ações de follow-up possíveis:"
     log_info "  - Se alterou C-states (cmdline), reinicie: sudo reboot"
-    log_info "  - Se for o perfil xeon, baixe um modelo e suba o serviço:"
+    log_info "  - Se for o papel 'inference', baixe um modelo e suba o serviço:"
     log_info "      sudo systemctl enable --now ai-server"
     log_info "  - Meça performance: llama-bench (ver README)."
+    log_info "  - Mods extras e reversíveis: bash mods/apply.sh list"
     log_info "  - Atualize docs/STATE.md com os resultados (regra do AGENTS.md)."
   fi
 }

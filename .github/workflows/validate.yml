@@ -66,47 +66,48 @@ jobs:
       - name: Python (compilação)
         run: |
           set -euo pipefail
-          python3 -m compileall -q profiles/
+          python3 -m compileall -q roles/
           echo "Python OK."
 
       - name: YAML (yamllint)
         run: |
           set -euo pipefail
-          yamllint -c .yamllint.yml .github/ docker/ profiles/
+          yamllint -c .yamllint.yml .github/ docker/ roles/
           echo "YAML OK."
 
   # ---------------------------------------------------------------------------
   # Dry-run: prova que a orquestração funciona nos dois perfis sem alterar nada.
   # ---------------------------------------------------------------------------
   dry-run:
-    name: Dry-run (${{ matrix.profile }})
+    name: Dry-run (papel ${{ matrix.role }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        profile: [xeon, ryzen]
+        role: [inference, builder]
     steps:
       - uses: actions/checkout@v7
 
       - name: Tornar scripts executáveis
         run: |
           set -euo pipefail
-          chmod +x build.sh detect-hardware.sh \
-                   common/*.sh profiles/*/*.sh profiles/xeon/shell-ia.py tests/*.sh
+          chmod +x build.sh detect-hardware.sh llama-build.sh \
+                   mods/apply.sh mods/*/*.sh families/resolve.sh \
+                   roles/*/*.sh roles/inference/shell-ia.py tests/*.sh
 
       - name: detect-hardware.sh
         run: ./detect-hardware.sh
 
-      - name: build.sh --dry-run (${{ matrix.profile }})
+      - name: build.sh --dry-run (${{ matrix.role }})
         run: |
           set -euo pipefail
-          sudo ./build.sh --profile "${{ matrix.profile }}" \
+          sudo ./build.sh --role "${{ matrix.role }}" \
                --dry-run --yes --skip-tests
 
       - name: smoke-test.sh --dry-run
         run: |
           set -euo pipefail
-          bash tests/smoke-test.sh --dry-run --profile "${{ matrix.profile }}"
+          bash tests/smoke-test.sh --dry-run --role "${{ matrix.role }}"
 
   # ---------------------------------------------------------------------------
   # Guarda-corpo das regras do projeto (AGENTS.md).
@@ -131,13 +132,21 @@ jobs:
             iso/build-iso.sh iso/preseed/ai-cpu-os.cfg
             iso/preseed/late-command.sh iso/preseed/firstboot.sh
             iso/preseed/ai-cpu-os-firstboot.service
-            profiles/xeon/install.sh profiles/xeon/llama-build.sh
-            profiles/xeon/sysctl.conf profiles/xeon/shell-ia.py
-            profiles/xeon/ai-server.service
-            profiles/ryzen/install.sh profiles/ryzen/llama-build.sh
-            profiles/ryzen/docker-setup.sh profiles/ryzen/registry-setup.sh
-            profiles/ryzen/gitea-compose.yml profiles/ryzen/build-runner.sh
-            common/kernel-tuning.sh common/hugepages.sh common/governor.sh
+            families/resolve.sh families/_base/family.conf
+            families/intel-haswell/family.conf families/intel-broadwell/family.conf
+            families/intel-skylake-avx512/family.conf families/generic/family.conf
+            families/amd-zen1/family.conf families/amd-zen2/family.conf
+            families/amd-zen3/family.conf families/amd-zen4/family.conf
+            llama-build.sh mods/apply.sh mods/README.md
+            mods/kernel-tuning/mod.conf mods/kernel-tuning/apply.sh mods/kernel-tuning/revert.sh
+            mods/hugepages/mod.conf mods/hugepages/apply.sh mods/hugepages/revert.sh
+            mods/governor/mod.conf mods/governor/apply.sh mods/governor/revert.sh
+            mods/openblas-threads/mod.conf mods/openblas-threads/apply.sh mods/openblas-threads/revert.sh
+            roles/inference/install.sh roles/inference/sysctl.conf
+            roles/inference/shell-ia.py roles/inference/ai-server.service
+            roles/builder/install.sh roles/builder/docker-setup.sh
+            roles/builder/registry-setup.sh roles/builder/gitea-compose.yml
+            roles/builder/build-runner.sh
             tests/smoke-test.sh
           )
           fail=0

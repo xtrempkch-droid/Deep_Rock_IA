@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# common/kernel-tuning.sh — Tuning de kernel/sysctl do ai-cpu-os
+# mods/kernel-tuning/kernel-tuning.sh — Tuning de kernel/sysctl do ai-cpu-os
 # -----------------------------------------------------------------------------
 # Aplica /etc/sysctl.d/99-ai-tuning.conf, verifica io_uring e orienta o ajuste
 # da cmdline do kernel (C-states profundos) para reduzir latência de memória e
 # de wake-up durante a inferência.
 #
 # Uso:
-#   sudo bash common/kernel-tuning.sh [--dry-run] [--yes]
+#   sudo bash mods/kernel-tuning/kernel-tuning.sh [--dry-run] [--yes]
 #
 # Idempotente: só escreve/reinicia quando necessário.
 # -----------------------------------------------------------------------------
@@ -174,7 +174,7 @@ main() {
 
   write_file_if_changed "$SYSCTL_FILE" <<EOF
 # /etc/sysctl.d/99-ai-tuning.conf
-# Gerado por ai-cpu-os/common/kernel-tuning.sh — NÃO EDITAR À MÃO.
+# Gerado por ai-cpu-os/mods/kernel-tuning/kernel-tuning.sh — NÃO EDITAR À MÃO.
 # Ver docs/TUNING.md para a justificativa de cada valor.
 
 # --- Memória ---

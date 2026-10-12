@@ -40,31 +40,61 @@ inferência em CPU, com foco obsessivo em:
 
 ## 🖥️ Hardware suportado
 
-O projeto foi desenhado em torno de **dois sistemas reais** e possui um perfil
-dedicado para cada um.
+O projeto é organizado em duas dimensões independentes:
 
-| Perfil  | CPU                      | Núcleos/Threads | ISA                | Memória            | Armazenamento | Função principal                        |
-|---------|--------------------------|-----------------|--------------------|--------------------|---------------|-----------------------------------------|
-| `xeon`  | Intel Xeon E5-2680 v4    | 14c / 28t       | Broadwell-EP, AVX2 | 16 GB DDR3-1333 QC | NVMe 256 GB   | Servidor de inferência (llama.cpp)      |  # tem que corrigir todo o projeco devido a atualizaçao depois da atualizaçao por favor apagar esse comentario
-| `ryzen` | AMD Ryzen 5 3500X        | 6c / 6t         | Zen 2, AVX2        | 64 GB DDR4 SC ⚠️   | NVMe + HDD 1T | Build (Docker), registry privado, Gitea |  #deixar todo o sistema de uma forma que todos os Ryzen se beneficie e depois da mudança apagar esse comentario
+- **Família de CPU** (`families/`) — define `-march` e ISA. **Uma família cobre
+  dezenas de modelos**: o tuning do Broadwell-EP (E5-2680 v4) vale para o
+  E5-2620 v4 e para toda a família **v4**; o de Haswell-EP vale para toda a
+  família **v3**; e o mesmo vale para *todos* os Ryzen de uma geração.
+- **Papel** (`roles/`) — define *para que serve* a máquina: `inference` ou
+  `builder`. Qualquer família pode exercer qualquer papel.
 
-> ⚠️ **Nenhuma das duas CPUs possui AVX-512 ou AMX.** Qualquer guia que    # deixar em aberto a opçao para que outras maquias possao usar ( ate mesmo as que tem avx-512) e depois apagar o comentario
-> sugira habilitar `-mavx512` para este hardware está errado. O script
-> **verifica as flags em `/proc/cpuinfo`** antes de aplicar qualquer `-march`.
+| Família | CPU | Microarquitetura | ISA | AVX-512 | Herda de |
+|---|---|---|---|---|---|
+| `intel-haswell` | Xeon E5 **v3** | Haswell-EP | AVX2 | nunca | — |
+| `intel-broadwell` | Xeon E5 **v4** | Broadwell-EP | AVX2 | nunca | `intel-haswell` |
+| `intel-skylake-avx512` | Xeon Scalable **v5/v6** | Skylake-SP / Cascade Lake | AVX2+512 | **opt-in** | `intel-broadwell` |
+| `amd-zen1` | Ryzen **1000/2000** | Zen / Zen+ | AVX2 | nunca | — |
+| `amd-zen2` | Ryzen **3000/4000** | Zen 2 | AVX2 | nunca | `amd-zen1` |
+| `amd-zen3` | Ryzen **5000/6000** | Zen 3 | AVX2 | nunca | `amd-zen2` |
+| `amd-zen4` | Ryzen **7000/9000** | Zen 4 | AVX2 | nunca | `amd-zen3` |
+| `generic` | qualquer x86-64 | — | detectada | **auto** | — |
+
+**Os dois sistemas de referência do projeto:**
+
+| Papel | CPU (família) | Núcleos/Threads | Memória | Armazenamento | Função |
+|---|---|---|---|---|---|
+| `inference` | Intel Xeon E5-2680 v4 (`intel-broadwell`) | 14c / 28t | 16 GB DDR3-1333 QC | NVMe 256 GB | Servidor de inferência (llama.cpp) |
+| `builder` | AMD Ryzen 5 3500X (`amd-zen2`) | 6c / 6t | 64 GB DDR4 | NVMe + HDD 1T | Build (Docker), registry privado, Gitea |
+
+> ⚠️ **Nenhuma dessas duas CPUs possui AVX-512 ou AMX** — qualquer `-mavx512`
+> fixo para elas está errado e causa `SIGILL`.
+>
+> **Mas o AVX-512 está aberto para outras máquinas.** Ele é decidido por
+> **política de família**, nunca por código fixo: `never` (Haswell/Broadwell/
+> Zen 1–4), `optin` (Skylake-SP, exige `--allow-avx512`), `auto` (`generic`).
+> O script **verifica as flags em `/proc/cpuinfo`** e só habilita com opt-in
+> explícito — ver [`docs/FAMILIES.md`](docs/FAMILIES.md) § 5.
 
 ### Placas-mãe de referência
 
 - **Xeon:** JGINYUE X99M-D3 (LGA2011-3, DDR3, quad-channel).
-- **Ryzen:** MSI B550 (AM4, DDR4)
+- **Ryzen:** MSI B550 (AM4, DDR4). Em AM4, confira se a RAM está em **dual
+  channel** — single channel custa ~50% de banda e o `detect-hardware.sh` avisa.
+
 ---
 
 ## 📋 Pré-requisitos
 
-- **Debian 12+ (Bookworm)** ou **Ubuntu 22.04+ (Jammy)** — instalação mínima.  # a ideia e ter uma imagem do ubuntu server-MOD com essas otimizaçoes #
+- **Ubuntu Server 22.04+ ou 24.04+ (LTS)** — instalação mínima. É o sistema de
+  referência: o objetivo é a **imagem Ubuntu Server-MOD** com estas otimizações
+  já embutidas (ver [`docs/ISO.md`](docs/ISO.md)).
+- **Debian 12+ (Bookworm)** também funciona como base (todas as mods de
+  `mods/` são portáveis e testadas em ambas).
 - Acesso `root` (ou `sudo`).
 - Conexão com a internet para baixar pacotes e o llama.cpp.
 - ~10 GB livres em disco (build do llama.cpp + modelos pequenos).
-- **Kernel ≥ 5.1** para `io_uring` (Debian 12 traz 6.1 — ok).
+- **Kernel ≥ 5.1** para `io_uring` (Ubuntu 22.04 traz 5.15 — ok).
 
 Confira sua versão:
 
@@ -92,23 +122,40 @@ chmod +x detect-hardware.sh
 ```
 
 Isso imprime um relatório completo: CPU, flags (AVX2/AVX-512/AMX), RAM,
-canais de memória, tipo de disco e qual perfil foi escolhido.
+canais de memória, tipo de disco, a **família** (ex.: `intel-broadwell`) e o
+**papel** sugerido (ex.: `inference`).
 
 ### 3. Aplicar o build
 
 ```bash
-sudo ./build.sh --profile auto
+sudo ./build.sh
 ```
 
-- `--profile auto` → usa o perfil detectado automaticamente.
-- `--profile xeon` / `--profile ryzen` → força um perfil.
+- `--role auto|inference|builder` → papel da máquina (padrão: `auto`).
+- `--family auto|<id>` → força uma família de CPU (ex.: `--family amd-zen2`).
 - `--dry-run` → mostra o que seria feito, **sem** aplicar nada.
 - `--yes` → não pede confirmação (para automação/CI).
+- `--list-families` → mostra as famílias suportadas.
+
+> As opções antigas `--profile xeon|ryzen` continuam aceitas por compatibilidade
+> (`xeon`→`inference`, `ryzen`→`builder`), mas emitem um aviso.
 
 ### 4. Simular antes de aplicar (recomendado na 1ª vez)
 
 ```bash
-sudo ./build.sh --profile auto --dry-run
+sudo ./build.sh --dry-run
+```
+
+### 5. Aplicar uma modificação isolada (mods)
+
+Se você não quer o sistema inteiro, qualquer mod é aplicável — e reversível —
+**sozinha**, no seu próprio Ubuntu/Debian:
+
+```bash
+bash mods/apply.sh list                    # catálogo
+bash mods/apply.sh info openblas-threads   # o que faz, risco, requisitos
+sudo bash mods/apply.sh apply openblas-threads
+sudo bash mods/apply.sh revert openblas-threads
 ```
 
 ---
@@ -215,7 +262,8 @@ cd /opt/llama.cpp
 ```
 
 Compare **antes** e **depois** do tuning (rode o benchmark, aplique o
-`build.sh`, rode de novo). Para o Xeon, use `-t 24`; para o Ryzen, `-t 6`.
+`build.sh`, rode de novo). Use `-t` igual ao número de threads da sua CPU
+(ex.: 24 no Xeon E5-2680 v4, 6 no Ryzen 5 3500X — veja `nproc`).
 
 Salve os resultados em `docs/STATE.md` na seção "Métricas de performance".
 
@@ -223,13 +271,14 @@ Salve os resultados em `docs/STATE.md` na seção "Métricas de performance".
 
 ## ⚠️ Avisos e limitações (leia antes de tudo)
 
-1. **Xeon E5-2678 v3 NÃO tem AVX-512.** Apenas AVX2. Não compile com
-   `-mavx512*`.
-2. **Ryzen 5 3500X NÃO tem AVX-512.** Apenas AVX2. O `-march` correto é
-   `znver2`.
-3. **Single channel no Ryzen** reduz a banda de memória em **~50%**. Para
-   inferência em CPU, isto é gravíssimo — o script **alerta explicitamente**
-   durante a detecção. Se possível, popule um segundo canal.
+1. **AVX-512 não é habilitado por acidente.** Ele só entra quando a família
+   permite (`optin`/`auto`) **e** a CPU reporta a flag **e** você pede
+   (`--allow-avx512`). Nunca escreva `-mavx512*` fixo em código ou imagem.
+2. **As CPUs alvo (E5-2680 v4 / Ryzen 5 3500X) têm apenas AVX2.** O `-march`
+   correto vem da família (`broadwell`, `znver2`) — não de um guia genérico.
+3. **Single channel custa ~50% de banda.** No Ryzen 5 3500X (AM4) isso é
+   gravíssimo para inferência em CPU — o `detect-hardware.sh` alerta
+   explicitamente. Se possível, popule um segundo canal.
 4. **A RX 580 não deve ser usada para computação** — apresenta artefatos de
    tela sob carga. Use-a apenas para saída de vídeo.
 5. **Modelos acima de 7B Q4 não caberão em 16 GB de RAM** no Xeon (sem contar

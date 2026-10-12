@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-shell-ia.py — Shell de IA em linguagem natural para o perfil xeon do ai-cpu-os.
+shell-ia.py — Shell de IA em linguagem natural para o papel 'inference' do ai-cpu-os.
 
 Este script recebe comandos em linguagem natural, envia ao llama-server
 (backend llama.cpp exposto via HTTP) e executa ferramentas SEGURAS quando o
@@ -349,7 +349,7 @@ def interactive(messages: list[dict[str, str]], verbose: bool = False) -> int:
     return 0
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Shell-IA do ai-cpu-os (perfil xeon).")
+    parser = argparse.ArgumentParser(description="Shell-IA do ai-cpu-os (papel inference).")
     parser.add_argument("-p", "--prompt", help="Executa um único prompt e sai.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Mostra a resposta bruta do modelo.")
     parser.add_argument("--url", help="Sobrescreve AI_SERVER_URL.")

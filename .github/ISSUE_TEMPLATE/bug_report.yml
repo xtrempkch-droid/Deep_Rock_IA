@@ -26,7 +26,7 @@ body:
     attributes:
       label: Componente
       description: Qual script/arquivo falhou?
-      placeholder: "ex.: build.sh, common/kernel-tuning.sh, profiles/xeon/llama-build.sh"
+      placeholder: "ex.: build.sh, mods/kernel-tuning/kernel-tuning.sh, llama-build.sh"
     validations:
       required: true
   - type: textarea

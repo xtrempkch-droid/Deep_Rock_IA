@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# profiles/ryzen/docker-setup.sh — Instala Docker Engine + Compose (oficial)
+# roles/builder/docker-setup.sh — Instala Docker Engine + Compose (oficial)
 # -----------------------------------------------------------------------------
 # Instala o Docker a partir do repositório oficial da Docker (não o pacote
 # 'docker.io' do Debian, que costuma ser mais antigo), configura o daemon para
 # aceitar o registry inseguro em localhost:5000 e habilita o serviço.
 #
 # Uso:
-#   sudo bash profiles/ryzen/docker-setup.sh [--dry-run] [--yes]
+#   sudo bash roles/builder/docker-setup.sh [--dry-run] [--yes]
 #
 # Idempotente.
 # -----------------------------------------------------------------------------

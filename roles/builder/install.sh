@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# profiles/ryzen/install.sh — Perfil ryzen (Build + Registry + Gitea)
+# roles/builder/install.sh — Papel 'builder' (Build + Registry + Gitea)
 # -----------------------------------------------------------------------------
 # Orquestra a instalação do perfil de build:
 #   1. Docker Engine + Compose (docker-setup.sh)
@@ -9,7 +9,7 @@
 #   4. Alerta explícito de single channel (perda de ~50% de banda)
 #
 # Uso:
-#   sudo bash profiles/ryzen/install.sh [--dry-run] [--yes] [--skip-docker]
+#   sudo bash roles/builder/install.sh [--dry-run] [--yes] [--skip-docker]
 #                                       [--skip-registry] [--skip-gitea]
 #
 # Idempotente.
@@ -149,7 +149,7 @@ step_gitea() {
 }
 
 print_next_steps() {
-  log_info "Próximos passos do perfil ryzen:"
+  log_info "Próximos passos do papel builder:"
   log_info "  1. Registry:  http://localhost:5000/v2/_catalog"
   log_info "  2. Gitea:     http://localhost:3000/ (crie o admin no primeiro acesso)"
   log_info "  3. Build:     ${SCRIPT_DIR}/build-runner.sh --context /caminho/repo \\"
@@ -180,7 +180,7 @@ main() {
     exit 1
   fi
 
-  printf '%b=== install.sh (perfil ryzen · build + registry + Gitea) ===%b\n' "$C_BOLD" "$C_RESET"
+  printf '%b=== install.sh (papel builder · build + registry + Gitea) ===%b\n' "$C_BOLD" "$C_RESET"
   alert_single_channel
 
   step_docker
@@ -188,7 +188,7 @@ main() {
   step_gitea
   print_next_steps
 
-  log_ok "install.sh (ryzen) concluído."
+  log_ok "install.sh (builder) concluído."
   log_info "Referências: ${REPO_ROOT}/docs/TUNING.md e docs/TROUBLESHOOTING.md"
 }
 
