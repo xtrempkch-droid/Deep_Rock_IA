@@ -198,6 +198,7 @@ Estes são os pontos que, se violados, quebram de forma silenciosa e cara.
 | Nada de `-mavx512*` fixo | Só entra via política da família + opt-in (`--allow-avx512`). |
 | Container mantém `GGML_NATIVE=OFF` | Dentro do Docker, o CMake detectaria a CPU do **runner**, não a do usuário. |
 | Nunca `COPY build/bin` no Dockerfile | O llama.cpp usa `BUILD_SHARED_LIBS=ON` e os binários têm RPATH absoluto → `exit 127`. Use `cmake --install` + `CMAKE_INSTALL_RPATH=/usr/local/lib` + `ldconfig`. |
+| `--source <dir|tar.gz>` **nunca** pode exigir rede ou `git` | É o único caminho de build **offline** (ISO air-gapped, Regra 13-b). Ao mexer nele, teste as duas formas em `--dry-run` **e** de verdade (a extração remove o diretório de topo do tarball). |
 
 ### 4.2 Mods
 
@@ -227,6 +228,9 @@ Estes são os pontos que, se violados, quebram de forma silenciosa e cara.
 | Senha **só** como hash crypt | Nunca texto puro numa mídia. |
 | Tuning acontece no **1º boot**, nunca no late-command | Durante a instalação não há systemd do alvo, o kernel é outro e o hardware real não está visível. Detalhes: `docs/ISO.md` § 3. |
 | O template do `autoinstall.yaml` **não** é YAML válido | O `@` é indicador reservado do YAML. Só o arquivo **substituído** é validável — por isso existe o autoteste. |
+| **Air-gapped: nenhum passo pode exigir rede** | Decisão firmada (`docs/ISO.md` § 3.1). Se você introduzir um download num script, papel ou template, **embuta-o na mídia** ou torne-o explicitamente opcional com aviso. |
+| **Nunca embutir binário pré-compilado do llama.cpp** | Seria mais rápido, mas exigiria **uma ISO por família** e reintroduziria o risco de `SIGILL`. Compilar no 1º boot é o que garante o `-march` da família **realmente detectada**. |
+| O `llama-build.sh` deve manter `--source <dir|tar.gz>` | É o único caminho de build **sem rede e sem git**. Se ele sumir, a ISO volta a depender de internet. Há guarda no CI. |
 
 ### 4.5 Convenções de Bash (cobradas pelo CI)
 
@@ -413,6 +417,7 @@ Esta seção é um **playbook**. Todos os itens abaixo aconteceram de verdade.
 | Container: `exit code 127` | `BUILD_SHARED_LIBS=ON` + RPATH absoluto → `COPY build/bin` quebra o loader | `cmake --install` + `CMAKE_INSTALL_RPATH=/usr/local/lib` + `ldconfig` |
 | `SIGILL` na máquina do usuário | Binário compilado para outra CPU (native/cross-build sem `--assume-family-isa`) | Recompilar com `--family <correta>` |
 | Flag `-march` rejeitada pelo GCC | GCC velho demais para o `-march` da família | O `resolve.sh` já cai para `FAMILY_MARCH_FALLBACK` (confira o aviso) |
+| `tar -xf` "extraiu" mas o CMake não acha o projeto | O tarball do GitHub tem **diretório de topo** (`llama.cpp-<ref>/`) | O `--source` já entra nesse diretório automaticamente (glob, não `find \| head` — com `pipefail` o SIGPIPE do `head` reprovaria a extração) |
 
 > **Lição registrada:** *lint verde ≠ build comprovado*. Os dois primeiros bugs
 > acima só apareceram porque o CI **executa** o que compila.
@@ -514,6 +519,8 @@ Cada linha é um erro real, com o custo que teve.
 | Regex de família com espaço duplo | CPU cai em `generic` e perde `-march` **em silêncio** | `make families-test` no CI |
 | Verificador que nunca falha | Falsa segurança | **Teste negativo** obrigatório no autoteste |
 | Documento citando comando que não existe | Usuário perde tempo | Guarda no CI + revisão de caminhos ao refatorar |
+| `find \| head -1` com `set -o pipefail` | O SIGPIPE do `head` **reprova** a extração que deu certo | Glob (`"$dir"/*/`) em vez de pipe para "pegar um item" |
+| Editar bloco **sem** incluir a linha seguinte | Duas linhas grudam (`grep x file # comentário`) e o texto/código fica corrompido | Confira sempre com `sed -n ...p` / `git diff` depois de editar |
 
 ---
 
@@ -526,6 +533,7 @@ Leia isto **antes** de afirmar que algo funciona.
 | Scripts (sintaxe/lint) | ✅ | ✅ `make validate` | n/a |
 | Casamento CPU → família | ✅ | ✅ corpus (~60 CPUs) | ⚠️ só nos 2 alvos |
 | Build do llama.cpp | ✅ | ✅ CI compila **e executa** (7 famílias em ~4 que rodam no CI) | ❌ |
+| Build **offline** (`--source`) | ✅ | ⚠️ `--dry-run` (dir + tarball) e extração real com ferramentas de build **simuladas**; **compilação real de um fonte do llama.cpp não executada** | ❌ |
 | Ajustes de kernel (mods) | ✅ | ⚠️ só `--dry-run`/sintaxe | ❌ |
 | Revert das mods | ✅ | ⚠️ não exercitado de ponta a ponta | ❌ |
 | Serviço de IA (`ai-server`) | ✅ | ❌ | ❌ |
@@ -552,6 +560,8 @@ em `docs/FAMILIES.md` § 9.3. Se você melhorar qualquer linha desta tabela,
 | **política de AVX-512** | `never` (nunca), `optin` (só com `--allow-avx512`), `auto` (se a CPU tiver; só em `generic`). |
 | **herança** | `FAMILY_INHERITS` encadeia famílias: corrigir a raiz corrige os descendentes. |
 | **`--assume-family-isa`** | Faz a decisão de ISA vir do `family.conf` em vez do `/proc/cpuinfo` local. |
+| **`--source`** | Compila de um fonte **local** (diretório ou tarball): sem rede, sem `git`. É o caminho do 1º boot numa ISO air-gapped; `--ref` e `--source` são exclusivos. |
+| **air-gapped** | Sem rede — nem na instalação, nem no 1º boot. Objetivo firmado da ISO (`docs/ISO.md` § 3.1); **ainda não implementado** além do `--source`. |
 | **`AI-CPU-OS-BUILD.txt`** | Registro ao lado dos binários: família, `-march`, ISA, AVX-512, GPU, ref. |
 | **duas provas** | `verify-iso.sh` (conteúdo) × `test-vm.sh` (comportamento). Não se substituem. |
 | **conjunto de mods** | `system` (o que o `build.sh` aplica) ou `portable` (seguras, uma a uma). |

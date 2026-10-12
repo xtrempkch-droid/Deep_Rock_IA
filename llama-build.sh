@@ -8,7 +8,8 @@
 #
 # Uso:
 #   bash llama-build.sh [--family auto|<id>] [--allow-avx512] [--native]
-#                       [--dir /opt/llama.cpp] [--jobs N] [--ref REF]
+#                       [--dir /opt/llama.cpp] [--jobs N]
+#                       [--ref REF | --source CAMINHO]
 #                       [--dry-run] [--yes]
 #
 #   --family auto      Detecta a família pelo nome do CPU (padrão).
@@ -19,6 +20,12 @@
 #                      correto para compilar para OUTRA máquina (CI/release).
 #   --native           Usa GGML_NATIVE=ON (compila para ESTA máquina).
 #                      ⚠️ O binário passa a NÃO ser portátil entre máquinas.
+#   --dir <caminho>    Onde clonar/compilar o llama.cpp (padrão: /opt/llama.cpp).
+#   --jobs N           Paralelismo do build (padrão: número de núcleos).
+#   --ref REF          Ref do llama.cpp no GitHub (padrão: master). Exige REDE.
+#   --source CAMINHO   Fonte LOCAL: um DIRETÓRIO ou um .tar.gz/.tar.xz/.tar.
+#                      Não usa rede nem git — é o modo OFFLINE, usado no
+#                      primeiro boot de uma ISO air-gapped (ver docs/ISO.md § 8).
 #
 #   ---- BACKEND DE GPU (OPCIONAL, sempre EXPLÍCITO) -----------------------
 #   --gpu CHECK        Compila um backend de GPU. CHECK é um de:
@@ -53,6 +60,11 @@ ASSUME_YES=0
 SRC_DIR="/opt/llama.cpp"
 JOBS="$(nproc --all 2>/dev/null || echo 4)"
 LLAMA_REF="master"
+REF_SET=0
+# --source: fonte LOCAL (diretório ou tarball). Vazio = clonar do GitHub.
+# Quando preenchido, NENHUM acesso à rede é feito — é o caminho OFFLINE.
+SRC_LOCAL=""
+SOURCE_DESC="ref ${LLAMA_REF} (git clone do GitHub)"
 # AI_FAMILY (exportada pelo build.sh) permite forçar a família de fora.
 FORCE_FAMILY="${AI_FAMILY:-auto}"
 USE_NATIVE=0
@@ -124,16 +136,27 @@ resolve_family() {
 check_deps() {
   local missing=()
   local c
+  local -a need=(cmake make cc pkg-config)
+  local extra_pkg=""
+  # git só é necessário quando o fonte vem do GitHub. Com --source (offline)
+  # não há clone nenhum — exigir git aqui impediria a ISO air-gapped.
+  if [[ -z "$SRC_LOCAL" ]]; then
+    need=(git "${need[@]}")
+    extra_pkg="git "
+  elif [[ ! -d "$SRC_LOCAL" ]]; then
+    need=(tar "${need[@]}")   # tarball precisa de tar
+  fi
   # pkg-config é OBRIGATÓRIO: o backend BLAS do ggml usa find_package(PkgConfig).
-  for c in git cmake make cc pkg-config; do
+  for c in "${need[@]}"; do
     command -v "$c" >/dev/null 2>&1 || missing+=("$c")
   done
   if [[ ${#missing[@]} -gt 0 ]]; then
     log_warn "Dependências ausentes: ${missing[*]}"
-    if confirm "Instalar build-essential cmake git pkg-config libopenblas-dev?"; then
+    if confirm "Instalar build-essential cmake ${extra_pkg}pkg-config libopenblas-dev?"; then
       run "apt update" apt-get update
+      # shellcheck disable=SC2086
       run "Instalando dependências de build" apt-get install -y --no-install-recommends \
-        build-essential cmake git pkg-config libopenblas-dev
+        build-essential cmake ${extra_pkg}pkg-config libopenblas-dev
     else
       log_error "Dependências ausentes e instalação recusada. Abortando."
       exit 1
@@ -229,7 +252,16 @@ gpu_announce() {
 # ---------------------------------------------------------------------------
 # Fonte
 # ---------------------------------------------------------------------------
+# Duas origens possíveis, e a diferença não é cosmética:
+#   • GitHub (--ref)  → exige REDE. É o uso interativo normal.
+#   • local (--source)→ ZERO rede. É o que permite compilar no primeiro boot
+#                       de uma ISO air-gapped, com o fonte pinado na mídia.
 prepare_source() {
+  if [[ -n "$SRC_LOCAL" ]]; then
+    prepare_source_local
+    return 0
+  fi
+
   if [[ -d "${SRC_DIR}/.git" ]]; then
     log_info "Repositório já clonado em ${SRC_DIR}."
     if confirm "Atualizar para '${LLAMA_REF}' (git fetch + checkout)?"; then
@@ -242,6 +274,72 @@ prepare_source() {
     run "git clone" git clone --depth 1 --branch "$LLAMA_REF" \
       https://github.com/ggml-org/llama.cpp.git "$SRC_DIR"
   fi
+}
+
+# Materializa um fonte LOCAL em SRC_DIR. Sem rede, sem git, sem surpresa:
+# o que está na mídia é exatamente o que será compilado (auditável).
+prepare_source_local() {
+  [[ -e "$SRC_LOCAL" ]] \
+    || { log_error "--source '${SRC_LOCAL}': caminho não existe."; exit 1; }
+
+  if [[ -d "$SRC_LOCAL" ]]; then
+    [[ -f "${SRC_LOCAL}/CMakeLists.txt" ]] \
+      || { log_error "--source ${SRC_LOCAL}: não parece o llama.cpp (sem CMakeLists.txt)."; exit 1; }
+    SOURCE_DESC="diretório local ${SRC_LOCAL}"
+    if [[ $DRY_RUN -eq 1 ]]; then
+      log_info "[dry-run] fonte LOCAL (diretório): ${SRC_LOCAL} → ${SRC_DIR} (sem rede, sem git)"
+      return 0
+    fi
+    run "Preparando ${SRC_DIR}" mkdir -p "$SRC_DIR"
+    # Sem --delete: preservamos um build/ existente para recompilar mais rápido.
+    if command -v rsync >/dev/null 2>&1; then
+      run "Copiando fonte local" rsync -a --exclude build/ "${SRC_LOCAL}/" "${SRC_DIR}/"
+    else
+      run "Copiando fonte local" cp -a "${SRC_LOCAL}/." "$SRC_DIR/"
+    fi
+    return 0
+  fi
+
+  local base; base="$(basename "$SRC_LOCAL")"
+  case "$base" in
+    *.tar.gz|*.tgz|*.tar.xz|*.tar.bz2|*.tar) ;;
+    *) log_error "--source ${SRC_LOCAL}: formato não reconhecido (use um diretório ou .tar.gz/.tar.xz/.tar)."
+       exit 1 ;;
+  esac
+  SOURCE_DESC="tarball local ${base}"
+
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log_info "[dry-run] fonte LOCAL (tarball): ${SRC_LOCAL} → ${SRC_DIR} (sem rede, sem git)"
+    return 0
+  fi
+
+  run "Preparando ${SRC_DIR}" mkdir -p "$SRC_DIR"
+  local tmp; tmp="$(mktemp -d)"
+  if ! tar -xf "$SRC_LOCAL" -C "$tmp"; then
+    rm -rf "$tmp"
+    log_error "Falha ao extrair ${SRC_LOCAL}."
+    exit 1
+  fi
+
+  # Um tarball do GitHub tem um diretório de topo (llama.cpp-<ref>/). Se houver
+  # exatamente um diretório e nenhum CMakeLists.txt na raiz, entramos nele.
+  # (Glob em vez de `find | head`: com `pipefail`, um SIGPIPE do head reprovaria
+  #  a extração sem motivo — armadilha já registrada no JOURNAL.md § 6.)
+  local root="$tmp"
+  if [[ ! -f "${tmp}/CMakeLists.txt" ]]; then
+    local -a subdirs=("$tmp"/*/)
+    if [[ ${#subdirs[@]} -eq 1 && -d "${subdirs[0]}" ]]; then
+      root="${subdirs[0]}"
+    fi
+  fi
+  if [[ ! -f "${root}/CMakeLists.txt" ]]; then
+    rm -rf "$tmp"
+    log_error "--source ${SRC_LOCAL}: o tarball não contém CMakeLists.txt (não é o llama.cpp?)."
+    exit 1
+  fi
+
+  run "Copiando fonte para ${SRC_DIR}" cp -a "${root}/." "$SRC_DIR/"
+  rm -rf "$tmp"
 }
 
 # ---------------------------------------------------------------------------
@@ -320,7 +418,8 @@ ISA:       ${FAMILY_ISA_FINAL}
 GPU:       ${gpu_line}
 AVX-512:   ${AVX512_ENABLED}
 Native:    $( [[ $USE_NATIVE -eq 1 ]] && echo "sim (só roda nesta máquina)" || echo "não (portátil para a família)" )
-llama.cpp: ${LLAMA_REF}
+llama.cpp: ${SOURCE_DESC}
+Rede:      $( [[ -n "$SRC_LOCAL" ]] && echo "não usada (fonte local)" || echo "sim (clone do GitHub)" )
 Data:      $(_ts)
 Nota:      gerado por llama-build.sh — ver docs/FAMILIES.md
 EOF
@@ -341,7 +440,8 @@ main() {
       --yes)           ASSUME_YES=1; shift ;;
       --dir)           [[ $# -ge 2 ]] || { log_error "--dir exige valor"; exit 2; }; SRC_DIR="$2"; shift 2 ;;
       --jobs)          [[ $# -ge 2 ]] || { log_error "--jobs exige valor"; exit 2; }; JOBS="$2"; shift 2 ;;
-      --ref)           [[ $# -ge 2 ]] || { log_error "--ref exige valor"; exit 2; }; LLAMA_REF="$2"; shift 2 ;;
+      --ref)           [[ $# -ge 2 ]] || { log_error "--ref exige valor"; exit 2; }; LLAMA_REF="$2"; REF_SET=1; shift 2 ;;
+      --source)        [[ $# -ge 2 ]] || { log_error "--source exige valor"; exit 2; }; SRC_LOCAL="$2"; shift 2 ;;
       --family)        [[ $# -ge 2 ]] || { log_error "--family exige valor"; exit 2; }; FORCE_FAMILY="$2"; shift 2 ;;
       --allow-avx512)  export AI_ALLOW_AVX512=1; shift ;;
       --assume-family-isa) export AI_ASSUME_FAMILY_ISA=1; shift ;;
@@ -350,13 +450,20 @@ main() {
       --gpu-check)     GPU_CHECK=1; shift ;;
       --cmake-extra)   [[ $# -ge 2 ]] || { log_error "--cmake-extra exige valor"; exit 2; }; CMAKE_EXTRA="$2"; shift 2 ;;
       -h|--help)
-        sed -n '3,26p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '3,31p' "$0" | sed 's/^# \{0,1\}//'
         exit 0 ;;
       *) log_error "Argumento desconhecido: $1"; exit 2 ;;
     esac
   done
 
   log_info "=== llama-build.sh ==="
+
+  # --source e --ref são mutuamente exclusivos: o fonte local já É uma versão
+  # específica, então pedir as duas coisas é contradição.
+  if [[ -n "$SRC_LOCAL" && $REF_SET -eq 1 ]]; then
+    log_error "--ref e --source são mutuamente exclusivos (o fonte local já define a versão)."
+    exit 2
+  fi
 
   # --gpu-check é somente leitura: relata e sai, sem compilar nada.
   if [[ $GPU_CHECK -eq 1 ]]; then

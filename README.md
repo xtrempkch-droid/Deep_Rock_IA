@@ -413,7 +413,14 @@ Como funciona, em três linhas:
 3. No **primeiro boot**, o sistema detecta o **hardware de verdade** e aplica
    os ajustes certos para ele.
 
-> ⚠️ **A ISO APAGA o disco** indicado em `--disk`. Teste em máquina virtual
+> 🎯 **Objetivo firmado: a ISO deve funcionar SEM internet.** Se a sua máquina
+> está numa rede isolada, a ISO tem de bastar-se — nada de baixar coisa no meio
+> da instalação. E o llama.cpp é **compilado no primeiro boot** (mais demorado,
+> porém é o que garante que o binário saia com as instruções exatas da sua CPU).
+> ⚠️ **Isto ainda é objetivo, não fato:** hoje a ISO **precisa de rede** no
+> primeiro boot. O que falta está listado em [`docs/ISO.md`](docs/ISO.md) § 3.1.
+>
+> 💡 **A ISO APAGA o disco** indicado em `--disk`. Teste em máquina virtual
 > **primeiro**, sempre.
 >
 > ⚠️ **Estado atual:** a ISO está escrita e verificada por ferramentas do

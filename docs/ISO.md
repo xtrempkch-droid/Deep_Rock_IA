@@ -122,6 +122,57 @@ Aplicando no **primeiro boot**, ganhamos:
 
 ---
 
+### 3.1 Decisões firmadas: **air-gapped** e **compilar no 1º boot** (sessão #14)
+
+Duas decisões tomadas explicitamente, e elas estão **acopladas** — uma implica a
+outra. Ambas já estão registradas no `JOURNAL.md` § 5.3.
+
+**① A ISO deve funcionar SEM internet (air-gapped).**
+
+Motivo: a máquina alvo pode estar numa rede isolada — ou sem rede nenhuma. A
+ISO precisa estar pronta para isso. Não é "funciona se houver rede": é
+"**funciona porque não precisa**".
+
+**② O llama.cpp é COMPILADO no 1º boot — nunca um binário pré-compilado.**
+
+Mesmo sendo mais demorado. As razões não são estéticas:
+
+| Razão | Detalhe |
+|-------|---------|
+| **O binário nasce para a máquina certa** | Compilando **no alvo**, o `-march` vem da família realmente detectada. Desaparece o risco de `SIGILL` e a necessidade do compromisso de "portabilidade" (§ 4.1 do `README.technical.md`). |
+| **O fonte é pinado e auditável** | A ISO carrega um tarball de uma versão específica; o que será compilado é exatamente o que está na mídia. Nada muda no meio da instalação, e nada vem da rede sem aviso. |
+| **Uma ISO serve para TODAS as famílias** | Um binário pré-compilado exigiria **uma ISO por família** — e reintroduziria justamente o problema de portabilidade que o projeto combate. |
+| **Coerente com a decisão do § 3** | Se o tuning já é adiado para o 1º boot, compilar no mesmo momento é a mesma lógica: fazer cada coisa onde existe a informação. |
+
+**O que o air-gapped exige — e o estado de CADA item:**
+
+| # | Requisito | Como | Estado |
+|---|-----------|------|--------|
+| 1 | Fonte do llama.cpp **na mídia** | `llama-build.sh --source <tar.gz>` (não usa rede nem `git`) | ✅ **implementado** |
+| 2 | Nenhum `git clone` no 1º boot | `firstboot.sh` passa `--source` em vez de `--ref` | ⬜ a fazer |
+| 3 | Toolchain de build **na mídia** | Repositório apt local (`.deb` + `dpkg-scanpackages`) embutido na ISO | ⬜ a fazer |
+| 4 | Pacotes do instalador **na mídia** | O mesmo repositório local, com o espelho do Subiquity apontando para `file:///…` | ⬜ a fazer |
+| 5 | **Modelo** na mídia | Hoje `--auto-model` baixa da HuggingFace; offline exige o `.gguf` na ISO **ou** nenhum modelo | ⬜ **decisão pendente** (ver abaixo) |
+| 6 | O sistema saber que está offline | `late-command.sh` grava `OFFLINE=1` no `.iso-config` | ⬜ a fazer |
+
+**Custo estimado:** ~300–500 MB de `.deb` + ~30–50 MB do fonte. O modelo
+sugerido (Qwen2.5-Coder-1.5B Q4_K_M) acrescenta ~1,1 GB — ou seja, a ISO vai
+para ~3,1–3,3 GB **sem** modelo e ~4,2–4,4 GB **com** modelo (estimativas, não
+medições).
+
+> ⚠️ **Honestidade:** só o item **1** está pronto, e ele foi exercitado **fora do
+> alvo** (`--dry-run` + extração real de tarball com as ferramentas de build
+> simuladas). A compilação real de um fonte do llama.cpp por esse caminho ainda
+> **não** foi executada. Os itens 2–6 são **plano**, não fato: **hoje a ISO
+> exige rede no primeiro boot.** Ver § 6.
+
+> 💡 **A pergunta que falta decidir:** embutir o modelo na ISO (mídia maior, mas
+> liga e já funciona sozinha) ou deixá-lo de fora (mídia menor; o usuário copia o
+> `.gguf` por pendrive)? O meio-termo natural é embutir **um** modelo pequeno por
+> padrão, com `--iso-model CAMINHO` para trocar. Ver § 8.
+
+---
+
 ## 4. Como gerar a ISO
 
 > **Dependências:** veja a lista completa em § 4.7 (o que é obrigatório, o que só
@@ -298,7 +349,7 @@ root desabilitado); no Debian o root fica bloqueado por padrão.
 | Layout da ISO base | Ubuntu exige `casper/` (recusado com mensagem clara se não existir); Debian exige `isolinux/`. Outras ISOs falham de propósito em vez de gerar algo quebrado. |
 | Boot BIOS | Ubuntu: El Torito preservado do original. Debian: `isolinux` + `isohdpfx.bin`. **Não validado.** |
 | Boot UEFI | Ubuntu: imagem EFI preservada + patch do `grub.cfg` do UEFI. Debian: **best-effort** (tenta `EFI/*/grub.cfg`; se estiver dentro de `efi.img`, exige `mtools`). **Não validado.** |
-| Rede obrigatória no 1º boot | O papel `inference` clona o llama.cpp. Sem rede, a aplicação é adiada para o próximo boot. |
+| **Rede no 1º boot** | ⚠️ **Ainda é obrigatória.** O papel `inference` clona o llama.cpp do GitHub e pode baixar o modelo (`--auto-model`). **Decidido (sessão #14) que a ISO deve ser air-gapped** — o plano e o estado de cada requisito estão no § 3.1. Hoje, sem rede, a aplicação é adiada para o próximo boot (a sentinela é mantida). |
 | Tamanho | ~2,7 GB (Ubuntu) / ~700 MB (Debian) + espaço do projeto. |
 | Assinatura | A ISO gerada **não é assinada**. Verifique o SHA256 que o script imprime. |
 | `md5sum.txt` | Debian: regenerado. Ubuntu: **removido** (ficaria obsoleto; o Subiquity não o usa). |
@@ -331,10 +382,12 @@ tudo por script, idempotente, auditável.
 |-----------|------|
 | 🔴 Alta | **Construir e bootar a ISO numa VM** (Bloco M do `VALIDATION.md`) — é o maior risco não validado do projeto. Com as ferramentas de § 4.6 o caminho é `make iso` (com `ISO_ARGS=--serial-console`) → `make iso-verify` → `make iso-vm`. |
 | 🔴 Alta | **Rodar o caminho Ubuntu contra uma ISO real**, para achar erro de layout/`xorriso` antes do teste em VM. |
+| � Alta | **ISO air-gapped** (decisão da sessão #14 — ver § 3.1): (a) `firstboot.sh` passar `--source` em vez de `--ref`; (b) repositório apt local com o toolchain de build e os pacotes do instalador; (c) `OFFLINE=1` no `.iso-config`; (d) flag `--offline` no `build-iso.sh` que monta tudo isso. |
+| 🟡 Média | **Decidir a política do modelo** para a ISO offline (em § 3.1, item 5): embutir um `.gguf` pequeno por padrão, `--iso-model CAMINHO`, ou nenhum modelo. |
 | 🟡 Média | **Testar o boot UEFI** (`make iso-vm VM_ARGS="--boot-mode uefi"`). |
 | 🟢 Baixa | **Testar a ISO no CI:** `validate` pode rodar `verify-iso.sh --dir` sobre a árvore do stage (já roda, via `make iso-yaml`). Um teste de VM no CI exigiria KVM e 30+ min — fica para runner self-hosted. |
-| 🟡 Média | **Variante air-gapped:** embutir o fonte do llama.cpp e os `.deb` necessários, para instalar sem internet. |
-| 🟡 Média | **Variante com binário pré-compilado:** usar os `.tar.gz` da Release em vez de compilar no primeiro boot (instalação muito mais rápida, mas por família). |
+| ~~🟡 Média~~ | ~~Variante air-gapped~~ → **decidida e virou requisito** (linha 🔴 Alta acima). O que era "variante" agora é o caminho planejado. |
+| ❌ Descartado | **Variante com binário pré-compilado:** usar os `.tar.gz` da Release em vez de compilar no 1º boot. **Descartado na sessão #14** — seria mais rápido, mas exigiria uma ISO por família e reintroduziria o risco de portabilidade. Ver § 3.1. |
 | 💡 Ideia | **Assinatura da ISO** com `gpg` + publicação do SHA256 no release. |
 | 💡 Ideia | **Imagem de VM (qcow2)** via Packer, derivada da mesma lógica. |
 
@@ -347,3 +400,4 @@ tudo por script, idempotente, auditável.
 | 2026-10-07 | Criação: `iso/build-iso.sh` + preseed + serviço de primeiro boot + este documento. Nada executado em ambiente real ainda. |
 | 2026-10-12 | **Variante Ubuntu (autoinstall/Subiquity) adicionada como base padrão** (`--distro ubuntu`), com `iso/autoinstall/autoinstall.yaml`, remontagem por `-indev/-outdev -map` (setores de boot preservados), `late-command.sh` compartilhado entre os dois instaladores (`AI_CURTIN=1`), flags `--role`/`--family` no lugar de `--profile` e autoteste de templates (`--check-templates` / `make iso-yaml`) rodando no CI. **Continuamos sem ter construído nem bootado nenhuma ISO.** |
 | 2026-10-12 | **Ferramentas de validação:** `iso/verify-iso.sh` (conteúdo, com modo `--dir` sem xorriso) e `iso/test-vm.sh` (boot real em qemu, com marcadores no console serial). `--serial-console` torna a instalação e o 1º boot observáveis sem tela. O build agora **verifica a ISO ao final** e o `make iso-yaml` roda o verificador **incluindo um teste negativo** (verificador que nunca falha não vale nada). |
+| 2026-10-12 | **Decidido: ISO air-gapped + compilar no 1º boot (nunca binário pré-colado).** Ver § 3.1. Primeiro passo implementado: `llama-build.sh --source <dir|tar.gz>` compila de um fonte **local** sem rede e sem `git` (substitui o `git clone`), registrando a origem em `AI-CPU-OS-BUILD.txt`. O restante (repo apt local, `--offline` no `build-iso.sh`, política do modelo) segue como plano. **Nada disso foi exercitado numa ISO real.** |

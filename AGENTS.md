@@ -301,6 +301,21 @@ Estas regras são **obrigatórias**:
     o **comportamento** (boota, instala e aplica no 1º boot). Nenhuma delas
     substitui a outra.
     ⚠️ Nunca declare a ISO pronta sem tê-la **bootado e instalado** em VM.
+13-b. **A ISO deve ser AIR-GAPPED, e o llama.cpp é compilado no 1º boot**
+    (decisões firmadas; ver `docs/ISO.md` § 3.1). Consequências obrigatórias:
+    - **Nunca** embutir binário pré-compilado do llama.cpp como atalho: exigiria
+      uma ISO por família e reintroduziria o risco de portabilidade (`SIGILL`).
+      Compilar no alvo é o que garante o `-march` correto da família detectada.
+    - **Nenhum passo pode exigir rede** na instalação ou no 1º boot. Tudo que
+      fosse baixado tem de estar na mídia: fonte do llama.cpp (`--source`, já
+      pronto), toolchain de build + pacotes do instalador (repo apt local) e o
+      modelo (política pendente).
+    - O `llama-build.sh` **precisa** continuar aceitando `--source <dir|tar.gz>`
+      (caminho offline, sem rede e sem `git`) — há guarda no CI. Ao mexer nele,
+      rode `--source` num diretório **e** num tarball em `--dry-run`.
+    - Se você adicionar qualquer download (script, papel, template), ele é uma
+      **violação** desta regra: ou embuta na ISO, ou torne-o explicitamente
+      opcional com aviso. Registre em `docs/ISO.md` § 3.1 (tabela de requisitos).
 15. **Integridade da tríade `build.sh` → `detect-hardware.sh` → `families/`.**
     Ao adicionar família, papel ou mod, atualize **as três** superfícies que o CI
     cobra: a lista `required` de `.github/workflows/validate.yml`, a árvore do § 4
@@ -323,7 +338,18 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-12
-- **O que mudou:** **Documentação separada por público.** `README.md` foi
+- **O que mudou:** **Decisões firmadas sobre a ISO (Regra 13-b): air-gapped e
+  compilar no 1º boot.** A ISO **deve funcionar sem internet** e o llama.cpp é
+  **compilado no alvo** — nunca um binário pré-compilado (exigiria uma ISO por
+  família e reintroduziria o risco de `SIGILL`). Consequência prática: nenhum
+  download novo pode entrar em script/papel/template sem ser embutido na mídia
+  ou explicitamente opcional. Plano completo com o estado de cada um dos 6
+  requisitos em `docs/ISO.md` § 3.1. **Item 1 implementado:**
+  `llama-build.sh --source <dir|tar.gz>` — compila de um fonte **local**, sem
+  rede e sem `git`, registrando a origem (e `Rede: não usada`) no
+  `AI-CPU-OS-BUILD.txt`; guarda no CI. **A ISO ainda exige rede no 1º boot** —
+  os itens 2–5 são plano. Nova dúvida registrada: o modelo `.gguf` vai na mídia?
+- **Data anterior:** 2026-10-12 — **Documentação separada por público.** `README.md` foi
   reescrito para o **usuário final** (explicado do zero: serve para mim?, o que
   muda na minha máquina, instalação em 5 passos, uso diário, como medir, como
   desfazer, FAQ) e criado o **`README.technical.md`** — manual do **mantenedor**

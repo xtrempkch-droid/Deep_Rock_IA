@@ -1,7 +1,7 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-12 (documentação separada por público: usuário × mantenedor)
+> **Última atualização:** 2026-10-12 (decisões: ISO **air-gapped** + compilar no 1º boot; `llama-build.sh --source` offline)
 
 ---
 
@@ -227,6 +227,24 @@ config) e `aplicação concluída com sucesso` (o primeiro boot aplicou).
 Detalhes em `docs/ISO.md` § 4.6 e Bloco M de `docs/VALIDATION.md`.
 > ⚠️ Não declare a ISO pronta sem bootar e instalar em VM.
 
+**Passo 1.3 — tornar a ISO AIR-GAPPED (decidido na sessão #14).**
+
+👉 O plano completo, com o estado de cada requisito, está em
+**`docs/ISO.md` § 3.1**. As decisões são: **a ISO deve funcionar sem internet**
+e **o llama.cpp é compilado no 1º boot** (nunca um binário pré-compilado — uma
+ISO por família reintroduziria o risco de `SIGILL`).
+
+```bash
+# O item 1 já está pronto (fonte local, sem rede, sem git):
+bash llama-build.sh --source <llama.cpp.tar.gz> --dir /tmp/llama --dry-run
+# Restam: (a) firstboot.sh passar --source; (b) repo apt local com o
+# toolchain + pacotes do instalador; (c) OFFLINE=1 no .iso-config;
+# (d) flag --offline no build-iso.sh;  ⚠️ (e) DECIDIR a política do modelo.
+```
+
+> ❓ **Decisão pendente:** embutir o modelo `.gguf` na ISO (~1,1 GB a mais) ou
+> deixá-lo de fora (o usuário copia por pendrive)? Ver § 3.1, item 5.
+
 **Passo 2 — validar as camadas novas em hardware real.**
 
 Rodar `bash families/resolve.sh`, `./detect-hardware.sh` e
@@ -283,3 +301,4 @@ Ao terminar qualquer tarefa:
 | 2026-10-12 | **Ferramentas de validação da ISO:** `iso/verify-iso.sh` (conteúdo; modo `--dir` sem `xorriso`, o que o torna **testável no CI**) e `iso/test-vm.sh` (boot real em qemu, marcadores no console serial). Flag `--serial-console`; o build passa a **verificar a ISO ao final**; `make iso-yaml` roda o verificador **com teste negativo**; alvos `make iso-verify` e `make iso-vm`. `verify-iso.sh` já derrubou um bug real do próprio verificador. **`test-vm.sh` nunca executado (sem qemu no ambiente).** |
 | 2026-10-12 | **Zen 3/Zen 4 prontos para uso + GPU como opção.** Criado o corpus `tests/families-matrix.txt` (~60 modelos reais) + `tests/test-families.sh` → o casamento CPU → família passou a ser **testado no CI**, o que é o máximo possível sem o hardware. O teste **achou 10 modelos mal atribuídos**: nenhum EPYC casava (espaço a mais no regex) e a série Ryzen 8000 (Zen 4) caía em `generic` — corrigidos. `build-llama` agora compila também para zen3, zen4 e skylake-avx512. GPU: `llama-build.sh --gpu <backend>` + `--gpu-check` + `--cmake-extra`, **explícito e nunca automático**, com registro no `AI-CPU-OS-BUILD.txt`; `detect-hardware.sh` passou a detectar GPU (informativo, linha `GPU=`); novo `docs/GPU.md` e Bloco P de `VALIDATION.md`. **Nenhum backend de GPU foi compilado/testado.** |
 | 2026-10-12 | **Documentação separada por público.** `README.md` reescrito para o **usuário final** (o que é, serve para mim?, o que muda na máquina, instalação em 5 passos, uso diário, como medir, como desfazer, FAQ, tabela de tamanho de modelo) e criado **`README.technical.md`** — manual do **mantenedor** (três camadas, mapa do repo, **contratos/invariantes**, receitas de extensão, o que cada teste **prova e não prova**, CI por dentro, playbook de depuração com os bugs reais, status de validação e glossário). Regra derivada: **usuário → `README.md`; mantenedor → `README.technical.md`; regras → `AGENTS.md`; fato de hoje → `STATE.md`.** Novos guardas no CI: ambos os arquivos precisam existir e se referenciar. **De passagem, corrigido um bug real:** o `build-llama.yml` ainda usava `matrix.profile` (chave removida na refatoração) no nome do artefato — o upload falharia. |
+| 2026-10-12 | **Decisões firmadas sobre a ISO: air-gapped + compilar no 1º boot** (nunca binário pré-compilado). Ver `docs/ISO.md` § 3.1. **Item 1 dos 6 requisitos implementado:** `llama-build.sh --source <dir|tar.gz>` compila de um fonte **local** — sem rede e sem `git` (substitui o `git clone`), com a origem registrada no `AI-CPU-OS-BUILD.txt` (`Rede: não usada`). Guarda no CI + **Regra 13-b** no `AGENTS.md`. **A ISO continua exigindo rede no 1º boot**: os itens 2–5 (repo apt local, `--source` no `firstboot.sh`, `OFFLINE=1`, `--offline` no `build-iso.sh`) não foram escritos. **Nova dúvida aberta:** o modelo `.gguf` vai na mídia (~1,1 GB) ou fica de fora? |

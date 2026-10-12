@@ -9,7 +9,7 @@
 > [`docs/STATE.md`](STATE.md).
 > **Quando escrever:** **ao fim de TODA sessão de trabalho** (ver § 8).
 >
-> **Última entrada:** sessão **#13** (2026-10-12) — documentação separada por público (usuário × mantenedor).
+> **Última entrada:** sessão **#14** (2026-10-12) — decisões: ISO air-gapped + compilar no 1º boot (`--source` implementado).
 
 ---
 
@@ -603,6 +603,121 @@ detalhes"*.
 
 ---
 
+### Sessão #14 — 2026-10-12 · 🔒 ⚖️ ISO **air-gapped** + compilar no 1º boot (decisões)
+
+**Objetivo (pedido do usuário, verbatim):** *"estava lendo as perguntas em aberto.
+A ISO deve ser **air-gapped** — resposta sim. caso não ter internet já estará
+pronto. e a pergunta: Embutir o binário pré-compilado em vez de compilar no 1º
+boot? mesmo demorado é melhor compilar. assim teremos mais segurança no
+objetivo."*
+
+Ou seja: o usuário estava respondendo ativamente as dúvidas abertas do § 5.3.
+
+**Feito:**
+
+1. **Decisão ① — a ISO DEVE ser air-gapped.** Registrada como requisito (não
+   "variante"): a máquina alvo pode estar numa rede isolada, então a mídia tem
+   de bastar-se. Ver `docs/ISO.md` § 3.1.
+2. **Decisão ② — o llama.cpp é COMPILADO no 1º boot, nunca pré-compilado.**
+   Já era o design; agora está **firmado como decisão** e justificado: compilar
+   no alvo é o que garante o `-march` da família **realmente detectada** (some o
+   risco de `SIGILL`), o fonte fica **pinado e auditável na mídia**, e uma única
+   ISO serve para todas as famílias — um binário pré-colado exigiria **uma ISO
+   por família** e traria a portabilidade de volta pela porta dos fundos.
+3. **O trabalho real que as duas decisões juntas exigem foi mapeado por inspeção
+   do código** (não por suposição): os quatro pontos de rede do 1º boot são
+   `apt-get install`, `git clone` do llama.cpp, o `curl` do modelo e o próprio
+   espelho do instalador. Virou a tabela de requisitos do `docs/ISO.md` § 3.1
+   (6 itens, com estado de cada um).
+4. **Item 1 dos requisitos: IMPLEMENTADO.** `llama-build.sh --source <dir|tar.gz>`
+   compila de um fonte **local** — sem rede, sem `git`, sem clone. É o
+   substituto do `git clone` no 1º boot offline:
+   - `--source` e `--ref` são **mutuamente exclusivos** (o fonte local já É uma
+     versão); `--ref` sozinho continua funcionando igual.
+   - `check_deps` **não exige mais `git`** quando o fonte é local (exigir git
+     aqui impediria a ISO air-gapped — um exemplo de como a decisão toca o
+     código em lugares inesperados). Tarball exige `tar`.
+   - Tarball do GitHub tem **diretório de topo** (`llama.cpp-<ref>/`):
+     o código entra nele automaticamente.
+   - O `AI-CPU-OS-BUILD.txt` passou a registrar a origem do fonte **e** um campo
+     `Rede: não usada (fonte local)` — para que ninguém confunda um build
+     offline com um clonado.
+5. **Guarda no CI** (`project-rules`) para o caminho offline não desaparecer em
+   silêncio: `--source`, `prepare_source_local` e a mensagem `fonte LOCAL`
+   precisam continuar existindo no `llama-build.sh`.
+6. **Regra 13-b no `AGENTS.md`**: a ISO é air-gapped e compila no 1º boot;
+   **proibido** embutir binário pré-compilado; qualquer download novo num
+   script/papel/template é violação da regra (ou embuta na mídia, ou torne
+   explícito e opcional).
+7. Docs atualizados: `docs/ISO.md` (§ 3.1 novo, § 6, § 8 com o item descartado,
+   § 9), `docs/ROADMAP.md`, `docs/STATE.md` (Passo 1.3 novo), `README.md` § 10
+   e `README.technical.md` (§ 4.1, § 4.4, § 8.1, § 10, § 11, § 12).
+
+**Decisões (e por quê):**
+
+- **As duas respostas do usuário são interdependentes, e isso não é óbvio.**
+  "Air-gapped" sozinho sugeriria embutir um binário pronto (nada a compilar =
+  nada a baixar). Mas "compilar no 1º boot" **proíbe** essa saída: se o binário
+  não é pré-colado, então o **fonte** e o **toolchain** têm de estar na mídia.
+  Foi por isso que a análise de requisitos passou de "uma ideia" a **seis
+  itens concretos** — três deles nem eram mencionados na dúvida original.
+- **Air-gapped é requisito, não variante.** A dúvida original era "a ISO *deve*
+  ser air-gapped?". A resposta sim muda o **status**: sai do roadmap como opção
+  e entra como caminho planejado. A linha antiga ficou marcada como riscada no
+  § 8, em vez de apagada — rastro de decisão.
+- **O item descartado também fica escrito.** "Variante com binário
+  pré-compilado" agora aparece como ❌ **descartado, com o motivo**. Documentar
+  o que foi rejeitado evita que a ideia volte em 3 sessões como se fosse nova.
+- **Uma decisão nova apareceu, e ela é do usuário.** Air-gapped significa que o
+  **modelo** não pode ser baixado da HuggingFace. Ou ele vai na ISO (~1,1 GB a
+  mais), ou o usuário copia o `.gguf` por pendrive. Ficou registrada como
+  pergunta **aberta e explícita** (§ 5.3) em vez de escolhida por conta própria —
+  ela muda o tamanho da mídia e o fluxo de uso.
+- **Testar o que dá, sem mentir sobre o resto.** O `--source` foi exercitado em
+  `--dry-run` (dir e tarball) **e** de verdade: extração real dos dois formatos
+  de tarball, com as ferramentas de build **simuladas** por stubs para o fluxo
+  chegar até o fim. A **compilação real** de um fonte do llama.cpp por esse
+  caminho **não** foi executada (falta `cmake` nesta máquina e baixar o fonte
+  seria pesado) — isso está escrito no § 11 do `README.technical.md` e no § 3.1
+  do `ISO.md`, não escondido.
+
+**Problemas encontrados e resolvidos:**
+
+- 🐛 **A primeira "prova" do `--source` não provou nada.** Os testes de extração
+  falharam sem motivo aparente: o `check_deps` abortou antes de chegar à cópia,
+  porque **esta máquina não tem `cmake` nem `pkg-config`** e o `apt-get install`
+  não tem root. Diagnóstico: criar **stubs** de `cmake`/`pkg-config`/`cc`/`make`
+  num diretório à frente do `PATH` — aí o fluxo anda e a extração pode ser
+  verificada de verdade. Lição: quando um teste "falha sem motivo", duvide do
+  **ambiente de teste** antes de duvidar do código.
+- 🐛 **`find | head -1` é armadilha com `pipefail`.** A primeira versão de
+  `prepare_source_local` achava o diretório de topo do tarball com
+  `find ... | head -1`. Com `set -o pipefail`, o SIGPIPE do `head` faz o `find`
+  sair com 141 e **reprova uma extração que deu certo**. Trocado por glob
+  (`"$tmp"/*/`). Registrado no § 10 do `README.technical.md`.
+- 🐛 **Editei um bloco e grudei duas linhas — de novo.** Ao inserir os guardas no
+  `validate.yml`, a linha `grep -q 'fonte LOCAL' llama-build.sh` ficou colada ao
+  comentário seguinte. É exatamente a armadilha do § 6 ("editar bloco SEM
+  incluir a linha seguinte"), acontecendo **de novo**, 24h depois de ser
+  registrada. Corrigido, e a armadilha foi reforçada com um caso concreto.
+- `--ref` + `--source` juntos: antes seriam duas intenções contraditórias —
+  agora é erro explícito com mensagem clara (em vez de uma sobrescrever a outra
+  em silêncio).
+
+**NÃO feito / não testado (importante):**
+
+- **A ISO continua NÃO sendo air-gapped.** Só o item 1 de 6 está pronto. Os
+  itens 2–5 do § 3.1 (repo apt local, `--source` no `firstboot.sh`,
+  `OFFLINE=1`, flag `--offline` no `build-iso.sh`) **não** foram escritos.
+- **Nada foi compilado de verdade pelo caminho `--source`** (só a extração).
+- Nenhuma ISO gerada ou bootada; nenhum backend de GPU compilado; zero medição
+  em hardware real. A tabela do § 11 do `README.technical.md` segue sendo a
+  fonte da verdade — e ela agora diz "Build offline: ⚠️".
+
+**Commits desta sessão:** (a preencher após o push).
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,
@@ -631,9 +746,13 @@ detalhes"*.
 
 | Dúvida | Contexto |
 |--------|----------|
-| A ISO deve ser **air-gapped** (sem internet)? | Hoje o 1º boot precisa de rede para clonar o llama.cpp. Um variante pode embutir o fonte + `.deb`. Ver `docs/ISO.md` § 8. |
-| Embutir o **binário pré-compilado** em vez de compilar no 1º boot? | Muito mais rápido, mas exige uma ISO **por perfil**. |
+| **O modelo vai na ISO?** | Air-gapped (decisão da sessão #14) significa que o `--auto-model` **não** pode baixar da HuggingFace. Ou o `.gguf` vai na mídia (~1,1 GB a mais, ISO ~4,3 GB), ou fica de fora (ISO ~3,2 GB, o usuário copia por pendrive). Meio-termo: embutir **um** modelo pequeno por padrão + `--iso-model CAMINHO`. Ver `docs/ISO.md` § 3.1, item 5. |
 
+> ✅ **Resolvido na sessão #14:** as duas dúvidas que estavam aqui foram
+> respondidas pelo usuário — **a ISO DEVE ser air-gapped** (sim) e **compilar no
+> 1º boot é melhor que embutir binário pré-compilado** (mesmo sendo demorado:
+> dá mais segurança ao objetivo). Ver `docs/ISO.md` § 3.1 e a sessão #14.
+>
 > ✅ **Resolvido na sessão #10:** a dúvida "suportar Ubuntu também?" foi
 > encerrada — o **Ubuntu Server (autoinstall/Subiquity) passou a ser o padrão** e
 > o Debian (preseed) ficou como caminho legado, com o mesmo `late-command.sh`
@@ -672,6 +791,7 @@ detalhes"*.
 | Build **nativo** sem `pkg-config` | `Could NOT find PkgConfig` no CMake | Já instalado pelos scripts; se faltar, `apt install pkg-config` |
 | Passos de CI **condicionais** (ex.: só em PR) | Ficam **sem cobertura** até alguém exercitá-los | Só apareceu no PR do Dependabot — teste os dois caminhos |
 | Tokens `@@...@@` em **comentário** de template | O guarda "sobrou marcador" dava **falso positivo** e abortava o build | O guarda checa apenas os **nomes** de marcador reais |
+| `find \| head -1` no `prepare_source_local` | Com `set -o pipefail`, o SIGPIPE do `head` faz o `find` sair 141 e **reprova uma extração que funcionou** | Nunca use `find ... \| head` para "pegar um item": use glob (`"$dir"/*/`) ou `-print -quit` sem pipe |
 | `git push` rejeitado (`non-fast-forward`) | Alguém (você, pelo site) comitou no remoto | `git fetch` → inspecionar → `git rebase origin/main` → push (nunca force no `main`) |
 | `sed -i "s/.*texto.*/.../"` em `.md` | Pode quebrar linha sem intenção | Prefira edições por bloco com contexto |
 | Editar **bloco** de texto incluindo a quebra de linha final | O texto seguinte **gruda** na mesma linha (ex.: `perfil├── .github/`) e corrompe a árvore/lista | **Sempre confira o resultado** (`sed -n ...p`, `git diff`) e inclua a linha seguinte no contexto da edição |
@@ -743,6 +863,7 @@ Ao **fim de cada sessão**, faça nesta ordem:
 |------|---------|
 | 2026-10-07 | Criação — diário de continuidade (sessões #1–#8), inventário do ambiente, threads abertas e armadilhas. |
 | 2026-10-12 | Sessões #9–#13 (famílias → ISO Ubuntu → ferramentas de validação → Zen 3/4 + GPU → documentação por público). Corrigido o marcador "Última entrada" do topo (estava parado em #7) e a lista de marcadores do § 7 (era `@@PROFILE@@`, removido na refatoração). |
+| 2026-10-12 | Sessão #14 — fechadas as duas dúvidas de arquitetura da ISO (**air-gapped = sim**; **compilar no 1º boot > binário pré-colado**). Item 1 dos requisitos implementado (`--source`). Nova dúvida aberta: o modelo vai na mídia? |
 
 > **Ao criar uma sessão nova, atualize também a "Última entrada" no topo deste
 > arquivo** — é o primeiro número que uma sessão futura olha para saber se está

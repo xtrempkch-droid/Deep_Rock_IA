@@ -276,6 +276,12 @@ jobs:
           # é o único que exercita Zen 3/Zen 4 sem o hardware.
           grep -q 'families-matrix.txt' tests/test-families.sh
           grep -q 'families-test' Makefile
+          # O caminho OFFLINE (--source) é o que permite compilar no 1º boot de
+          # uma ISO air-gapped (Regra 13-b / docs/ISO.md § 3.1): se ele sumir,
+          # a ISO volta a exigir rede. Não pode depender de git nem de clone.
+          grep -q -- '--source' llama-build.sh
+          grep -q 'prepare_source_local' llama-build.sh
+          grep -q 'fonte LOCAL' llama-build.sh
           # O diário de continuidade é o que permite retomar sem perder nada
           # (Regra 14): precisa continuar existindo e com as seções-chave.
           grep -qi 'retomada em 5 minutos' docs/JOURNAL.md
