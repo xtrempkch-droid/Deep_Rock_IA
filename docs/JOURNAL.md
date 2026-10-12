@@ -353,7 +353,7 @@ ou seja, o passo registrado no `STATE.md` § 6 como "Passo 1": a ISO em base
 - `md5sum.txt` do Ubuntu é **removido** (não regenerado) — decisão registrada
   em `docs/ISO.md` § 6.
 
-**Commits desta sessão:** (a preencher após o push).
+**Commits desta sessão:** `a1ed101` — `feat(iso): variante Ubuntu Server (autoinstall)`.
 
 ---
 
@@ -425,7 +425,7 @@ verificação automática do autoinstall.yaml a partir da ISO gerada".
 - `--serial-console` nunca validado num boot real.
 - **Nenhuma ISO foi gerada** — continua valendo o de sempre: `xorriso` ausente.
 
-**Commits desta sessão:** (a preencher após o push).
+**Commits desta sessão:** `c874922` — `feat(iso): verify-iso.sh + test-vm.sh`.
 
 ---
 
@@ -506,7 +506,7 @@ seria de bom tom deixar em aberto uma opção. vai que alguém queira usar uma g
 - `--gpu-check` foi executado apenas nesta máquina (GPUs antigas, sem backend
   utilizável): ele *relata*, não valida um caminho feliz.
 
-**Commits desta sessão:** (a preencher após o push).
+**Commits desta sessão:** `77b188b` — `feat(families): Zen 3/4 provados no CI + GPU opcional`.
 
 ---
 
@@ -599,7 +599,7 @@ detalhes"*.
 - Os números de exemplo de `README.md` § 7 (medição) são **ilustrativos** —
   marcados como tal no texto. Não há `llama-bench` real no repositório.
 
-**Commits desta sessão:** (a preencher após o push).
+**Commits desta sessão:** `9961b2b` — `docs: README do usuário + README.technical.md`.
 
 ---
 
