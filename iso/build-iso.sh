@@ -85,6 +85,15 @@ readonly UBUNTU_ISO_PATTERN='live-server-amd64\.iso$'
 readonly SUGGESTED_MODEL_NAME="Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf"
 readonly SUGGESTED_MODEL_URL="https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
 
+# Fonte do llama.cpp embutida na midia (--iso-source).
+# POR QUE a FONTE tambem vai na midia: o llama.cpp e compilado no 1o boot (decisao
+# firmada -- garante o -march da familia REALMENTE detectada). Mas se o 1o boot
+# tivesse de clonar do GitHub, a ISO voltaria a exigir rede justamente no passo
+# mais demorado. Com o tarball na midia, o passo mais caro do 1o boot funciona
+# offline e o que sera compilado fica PINADO e auditavel.
+readonly ISO_SOURCE_FILENAME="llama-src.tar.gz"
+readonly SUGGESTED_SOURCE_URL="https://github.com/ggml-org/llama.cpp/archive/refs/heads/master.tar.gz"
+
 # Repositório apt local embutido na mídia (--iso-repo).
 # POR QUE: a ISO é air-gapped (docs/ISO.md § 3.1). O alvo não pode precisar de
 # rede NEM PARA INSTALAR PACOTE — senão o primeiro boot pediria internet para
@@ -166,6 +175,9 @@ MODEL_NAME=""     # nome do arquivo dentro da ISO (vazio = sem modelo)
 # auto  → baixa os .deb necessários NA MÁQUINA QUE GERA A ISO e embute.
 # none  → ISO sem repositório (o alvo precisará de rede para instalar pacotes).
 # DIR   → usa um diretório com .deb já baixados.
+ISO_SOURCE="auto"
+SOURCE_FILE=""    # caminho local do tarball a embutir (vazio = sem fonte)
+SOURCE_NAME=""    # nome do arquivo dentro da ISO (vazio = sem fonte)
 ISO_REPO="auto"
 ISO_REPO_PACKAGES=""        # vazio = DEFAULT_REPO_PACKAGES
 ISO_REPO_ALLOW_MISMATCH=0   # permite repo de outra release (sabe o que faz)
@@ -237,6 +249,11 @@ Opções principais:
                           none          — nenhum modelo na ISO
                           CAMINHO       — um arquivo .gguf seu
                         O late-command o copia para /opt/models no alvo.
+  --iso-source VALOR    Fonte do llama.cpp embutida na midia (o 1o boot compila
+                        SEM rede -- ver docs/ISO.md secao 3.1):
+                          auto (padrao) -- baixa o tarball do GitHub (master)
+                          none          -- nenhuma fonte na ISO (o 1o boot clona)
+                          CAMINHO       -- um .tar.gz seu (precisa ter CMakeLists.txt)
   --iso-repo VALOR      Repositório apt local embutido na mídia (para o alvo
                         instalar pacotes SEM internet):
                           auto (padrão) — baixa os .deb necessários aqui
@@ -302,6 +319,7 @@ parse_args() {
       --mirror-dir)      [[ $# -ge 2 ]] || { log_error "--mirror-dir exige valor"; exit 2; }; MIRROR_DIR="$2"; shift 2 ;;
       --extra-packages)  [[ $# -ge 2 ]] || { log_error "--extra-packages exige valor"; exit 2; }; EXTRA_PACKAGES="$2"; shift 2 ;;
       --iso-model)       [[ $# -ge 2 ]] || { log_error "--iso-model exige valor (auto|none|CAMINHO)"; exit 2; }; ISO_MODEL="$2"; shift 2 ;;
+      --iso-source)      [[ $# -ge 2 ]] || { log_error "--iso-source exige valor (auto|none|CAMINHO)"; exit 2; }; ISO_SOURCE="$2"; shift 2 ;;
       --iso-repo)        [[ $# -ge 2 ]] || { log_error "--iso-repo exige valor (auto|none|DIR)"; exit 2; }; ISO_REPO="$2"; shift 2 ;;
       --iso-repo-packages) [[ $# -ge 2 ]] || { log_error "--iso-repo-packages exige valor"; exit 2; }; ISO_REPO_PACKAGES="$2"; shift 2 ;;
       --iso-repo-allow-mismatch) ISO_REPO_ALLOW_MISMATCH=1; shift ;;
@@ -717,6 +735,97 @@ inject_model() {
 }
 
 # ---------------------------------------------------------------------------
+# Fonte do llama.cpp na midia (--iso-source)
+# ---------------------------------------------------------------------------
+# O llama.cpp e COMPILADO no 1o boot (decisao firmada: e o unico jeito de o
+# binario sair com o -march da familia realmente detectada). O tarball na midia
+# faz esse passo -- o mais demorado do 1o boot -- funcionar SEM rede, e pina a
+# versao: o que sera compilado e exatamente o que esta na midia.
+#
+# Nao extraimos o tarball aqui nem no late-command: o proprio `llama-build.sh
+# --source` ja sabe extrair um .tar.gz (inclusive tratando o diretorio de topo
+# do tarball do GitHub). Menos codigo, um caminho so.
+acquire_source() {
+  section "Fonte do llama.cpp (--iso-source ${ISO_SOURCE})"
+
+  SOURCE_FILE=""
+  SOURCE_NAME=""
+  case "$ISO_SOURCE" in
+    none|no|"")
+      log_info "Sem fonte na ISO: o 1o boot vai precisar de rede para clonar o llama.cpp."
+      return 0 ;;
+    auto)
+      SOURCE_NAME="$ISO_SOURCE_FILENAME"
+      local dir="${WORK_DIR}/llama-src"
+      SOURCE_FILE="${dir}/${SOURCE_NAME}"
+      if [[ -f "$SOURCE_FILE" ]]; then
+        log_info "Fonte ja baixada (idempotente): ${SOURCE_FILE} ($(du -h "$SOURCE_FILE" | cut -f1))"
+        return 0
+      fi
+      if [[ $DRY_RUN -eq 1 ]]; then
+        log_info "[dry-run] baixaria ${SUGGESTED_SOURCE_URL} para ${dir}"
+        return 0
+      fi
+      log_info "Baixando a fonte do llama.cpp (master): ${SUGGESTED_SOURCE_URL}"
+      run "Criando ${dir}" mkdir -p "$dir"
+      if ! curl -fL --retry 3 --create-dirs -o "${SOURCE_FILE}.part" "$SUGGESTED_SOURCE_URL"; then
+        rm -f "${SOURCE_FILE}.part"
+        SOURCE_FILE=""; SOURCE_NAME=""
+        log_warn "Falha ao baixar a fonte. A ISO sera gerada SEM ela (o 1o boot vai exigir rede)."
+        log_warn "Use '--iso-source CAMINHO' com um .tar.gz que voce ja tenha."
+        return 0
+      fi
+      mv "${SOURCE_FILE}.part" "$SOURCE_FILE"
+      log_ok "Fonte baixada: ${SOURCE_FILE} ($(du -h "$SOURCE_FILE" | cut -f1))"
+      ;;
+    *)
+      # Caminho fornecido pelo usuario: validamos ANTES de montar a ISO.
+      [[ -f "$ISO_SOURCE" ]] \
+        || { log_error "--iso-source ${ISO_SOURCE}: arquivo nao encontrado (use auto, none ou um .tar.gz)."; exit 1; }
+      [[ "$ISO_SOURCE" == *.tar.gz || "$ISO_SOURCE" == *.tgz || "$ISO_SOURCE" == *.tar.xz || "$ISO_SOURCE" == *.tar ]] \
+        || { log_error "--iso-source ${ISO_SOURCE}: precisa ser um .tar.gz/.tgz/.tar.xz/.tar."; exit 1; }
+      SOURCE_FILE="$ISO_SOURCE"
+      SOURCE_NAME="$ISO_SOURCE_FILENAME"
+      ;;
+  esac
+
+  [[ -n "$SOURCE_FILE" ]] || return 0
+
+  # Sanidade: um tarball do llama.cpp tem CMakeLists.txt na raiz (ou num
+  # diretorio de topo). Sem isso, o 1o boot descobriria o problema depois de
+  # instalar -- tarde e caro.
+  local listing
+  listing="$(tar -tf "$SOURCE_FILE" 2>/dev/null | head -200 || true)"
+  if [[ -z "$listing" ]]; then
+    log_error "--iso-source: ${SOURCE_FILE} nao e um tarball legivel."
+    exit 1
+  fi
+  if ! printf '%s
+' "$listing" | grep -qE '(^|/)CMakeLists\.txt$'; then
+    log_warn "${SOURCE_FILE}: nao achei CMakeLists.txt nas primeiras entradas do tarball."
+    log_warn "Se nao for o fonte do llama.cpp, o 1o boot vai falhar ao compilar."
+  fi
+  log_ok "Fonte do llama.cpp para a midia: ${SOURCE_FILE} ($(du -h "$SOURCE_FILE" | cut -f1))"
+}
+
+# Copia o tarball da fonte para dentro da ISO.
+inject_source() {
+  [[ -n "$SOURCE_FILE" && -n "$SOURCE_NAME" ]] || return 0
+
+  local base
+  if [[ "$DISTRO" == "ubuntu" ]]; then base="${UBUNTU_STAGE}"; else base="${ISO_ROOT}"; fi
+  local dest="${base}/${SOURCE_NAME}"
+
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log_info "[dry-run] copiaria ${SOURCE_FILE} -> ${dest}"
+    return 0
+  fi
+
+  run "Copiando a fonte para a ISO" cp -f "$SOURCE_FILE" "$dest"
+  log_ok "Fonte na midia: /${SOURCE_NAME} ($(du -h "$dest" | cut -f1))"
+}
+
+# ---------------------------------------------------------------------------
 # Repositório apt local (--iso-repo) — o que torna a instalação offline possível
 # ---------------------------------------------------------------------------
 # Codename do Ubuntu a partir do número da release. '' = não sei (não bloqueia,
@@ -878,8 +987,11 @@ acquire_repo() {
       log_warn "Não consegui ler /etc/os-release; não vou conferir a release."
     elif [[ "$have" != "$want" ]]; then
       log_error "Release incompatível: a ISO é Ubuntu ${ver} (${want}) e esta máquina é '${have}'."
-      log_error "Os .deb baixados aqui não casam com a base da ISO."
-      log_error "Rode numa ${want} (ou numa VM ${want}), ou use --iso-repo-allow-mismatch."
+      log_error "Os .deb baixados aqui não casam com a base da ISO. Três saídas:"
+      log_error "  1) rode o build numa ${want} (ou numa VM/container ${want});"
+      log_error "  2) use --iso-url para a ISO da SUA release (${have}), e aí os .deb casam;"
+      log_error "  3) baixe os .deb por fora e passe --iso-repo CAMINHO."
+      log_error "(--iso-repo-allow-mismatch existe, mas produz uma ISO que NÃO instala offline.)"
       exit 1
     else
       log_info "Release confere: ${have} (Ubuntu ${ver})."
@@ -1056,6 +1168,7 @@ subst_template() {
     -e "s|@@GRUB_WITH_OTHER_OS@@|${GRUB_WITH_OTHER_OS}|g" \
     -e "s|@@EXTRA_PACKAGES@@|${EXTRA_PACKAGES}|g" \
     -e "s|@@ISO_MODEL@@|${MODEL_NAME}|g" \
+    -e "s|@@LLAMA_SRC_NAME@@|${SOURCE_NAME}|g" \
     -e "s|@@APT_REPO_PATH@@|${APT_REPO_PATH}|g" \
     -e "s|@@APT_PRIMARY_URI@@|${APT_PRIMARY_URI}|g" \
     -e "s|@@STORAGE_LAYOUT@@|${store_esc}|g" \
@@ -1083,7 +1196,7 @@ check_no_leftover_tokens() {
   local -a required_tokens=(
     DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME PASSWORD_HASH
     LOCALE KEYMAP TIMEZONE EXTRA_PACKAGES PACKAGES_BLOCK STORAGE_LAYOUT ISO_MODEL
-    APT_REPO_PATH APT_LOCAL_SOURCES APT_LOCAL_PRESEED APT_PRIMARY_URI
+    APT_REPO_PATH APT_LOCAL_SOURCES APT_LOCAL_PRESEED APT_PRIMARY_URI LLAMA_SRC_NAME
   )
   local t leftover=0
   for t in "${required_tokens[@]}"; do
@@ -1690,6 +1803,8 @@ main() {
   # O modelo é obtido ANTES de montar a árvore: um erro (arquivo errado,
   # magic inválido) falha cedo, sem gastar extração/remontagem.
   acquire_model
+  # A fonte do llama.cpp e o que faz o 1o boot compilar sem rede.
+  acquire_source
   # Idem para o repositório: conferir a release e baixar os .deb é caro, e um
   # erro aqui precisa aparecer ANTES da remontagem da ISO.
   acquire_repo
@@ -1701,6 +1816,7 @@ main() {
     prepare_ubuntu
     inject_project
     inject_model
+    inject_source
     inject_repo
     inject_templates
     patch_boot_ubuntu
@@ -1708,6 +1824,7 @@ main() {
     extract_iso_debian
     inject_project
     inject_model
+    inject_source
     inject_repo
     inject_templates
     patch_isolinux
@@ -1731,6 +1848,11 @@ main() {
     log_info "Modelo embutido: /models/${MODEL_NAME} (o late-command copia para /opt/models)"
   else
     log_warn "ISO SEM modelo: o alvo sobe sem LLM. Instale um depois com --model-file (docs/ISO.md § 3.1)."
+  fi
+  if [[ -n "$SOURCE_NAME" ]]; then
+    log_info "Fonte do llama.cpp na midia: /${SOURCE_NAME} (o 1o boot compila SEM rede)"
+  else
+    log_warn "ISO SEM fonte do llama.cpp: o 1o boot vai exigir rede para clonar (unico passo online restante)."
   fi
   if [[ -n "$APT_REPO_PATH" ]]; then
     if [[ $DRY_RUN -eq 1 ]]; then

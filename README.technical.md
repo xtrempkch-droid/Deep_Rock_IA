@@ -231,6 +231,8 @@ Estes são os pontos que, se violados, quebram de forma silenciosa e cara.
 | **Air-gapped: nenhum passo pode exigir rede** | Decisão firmada (`docs/ISO.md` § 3.1). Se você introduzir um download num script, papel ou template, **embuta-o na mídia** ou torne-o explicitamente opcional com aviso. |
 | **Nunca embutir binário pré-compilado do llama.cpp** | Seria mais rápido, mas exigiria **uma ISO por família** e reintroduziria o risco de `SIGILL`. Compilar no 1º boot é o que garante o `-march` da família **realmente detectada**. Há guardas **negativos** no CI (`--prebuilt`, `COPY build/bin`). |
 | O `llama-build.sh` deve manter `--source <dir|tar.gz>` | É o único caminho de build **sem rede e sem git**. Se ele sumir, a ISO volta a depender de internet. Há guarda no CI. |
+| A corrente da **fonte** não pode quebrar | `--iso-source` → `/llama-src.tar.gz` → `LLAMA_SRC` (`.iso-config`) → `AI_LLAMA_SOURCE` (env) → `llama-build.sh --source`. Se um elo sumir, o 1º boot volta a **clonar** o llama.cpp — e o modo de falha é silencioso. Cada elo tem guarda no CI e checagem no `verify-iso.sh`. |
+| `build.sh` precisa de `--model-file`/`--llama-source` | `sudo` **limpa o ambiente**: sem as flags não haveria como usar os caminhos offline na mão. O `firstboot.sh` usa as variáveis (não há `sudo` no meio). |
 | A corrente do modelo na mídia não pode quebrar | `--iso-model` (build) → `/models/<arquivo>` (mídia) → `MODEL_FILE` (`.iso-config`) → `AI_MODEL_FILE` (env) → `--model-file` (papel). Se qualquer elo sumir, o modo de falha é **silencioso**: o sistema sobe sem LLM e ninguém percebe. Cada elo tem guarda no CI e checagem no `verify-iso.sh`. |
 | O repositório apt local entra como fonte **EXTRA**, nunca como `primary` | Como `primary`, o `sources.list` do **sistema instalado** apontaria para `file:///cdrom/...` (morto após a instalação) e um repositório incompleto **abortaria** a instalação. Como fonte extra, o alvo nasce com o espelho oficial e um repo incompleto **degrada** para a rede. |
 | Repositório de release diferente da ISO | Os `.deb` de outra release têm versões que não casam com a base e a instalação quebra **tarde**. O build compara o codename de `/etc/os-release` com o da URL da ISO e **recusa** (escape: `--iso-repo-allow-mismatch`). |
@@ -539,6 +541,7 @@ Leia isto **antes** de afirmar que algo funciona.
 | Build **offline** (`--source`) | ✅ | ⚠️ `--dry-run` (dir + tarball) e extração real com ferramentas de build **simuladas**; **compilação real de um fonte do llama.cpp não executada** | ❌ |
 | Modelo **embutido na ISO** (`--iso-model`) | ✅ | ⚠️ validações de magic/tamanho (positivas e negativas), dry-runs nas duas distros e verificação da corrente de ponta a ponta com o `verify-iso.sh`; **nunca copiado nem usado num boot real** | ❌ |
 | Repositório apt **na mídia** (`--iso-repo`) | ✅ | ✅ **`apt` real aceitou** um repo montado pelo código do projeto, com resolução de dependência; `verify-iso.sh` reprova 5 modos de falha; índice gerado com `dpkg-deb` de verdade | ❌ (e ⚠️ o **aceite do instalador** — seção `sources`/`apt-setup` — é suposição documentada) |
+| Fonte **na mídia** (`--iso-source`) | ✅ | ✅ corrente exercitada num **sandbox**: `late-command.sh` real copiando + `llama-build.sh` real compilando do tarball (manifesto `Rede: não usada`); `verify-iso.sh` reprova tarball truncado/sem `CMakeLists.txt`/sem `ggml/` | ❌ (nunca num boot real) |
 | Ajustes de kernel (mods) | ✅ | ⚠️ só `--dry-run`/sintaxe | ❌ |
 | Revert das mods | ✅ | ⚠️ não exercitado de ponta a ponta | ❌ |
 | Serviço de IA (`ai-server`) | ✅ | ❌ | ❌ |
@@ -569,6 +572,8 @@ em `docs/FAMILIES.md` § 9.3. Se você melhorar qualquer linha desta tabela,
 | **`--iso-model`** | `auto` (baixa o modelo sugerido **na máquina de build** e embute), `none` (ISO sem modelo) ou o caminho de um `.gguf`. Validado antes de montar a ISO. |
 | **`--iso-repo`** | `auto` (baixa os `.deb` do **fecho de dependências** e monta um repositório apt local na mídia, em `/apt-repo`), `none` ou um diretório com `.deb`. Recusa release diferente da ISO. |
 | **fecho de dependências** | Conjunto fechado de pacotes que satisfaz os pedidos (`apt-cache depends --recurse`, sem recomendados/sugeridos). É o que garante que o alvo não precise buscar mais nada. |
+| **`--iso-source`** | `auto` (baixa o tarball do llama.cpp e embute), `none` ou um `.tar.gz` seu. Sem ele, o 1º boot clonaria o GitHub. O `llama-build.sh` compila **do tarball** (extrai, trata o diretório de topo). |
+| **`AI_LLAMA_SOURCE`** | Variável de ambiente exportada pelo `firstboot.sh` com o caminho do tarball no alvo. É o padrão de `--source` no `llama-build.sh` (mesmo padrão do `AI_FAMILY`/`AI_MODEL_FILE`). |
 | **`--model-file` / `AI_MODEL_FILE`** | Instala um `.gguf` **local** (copiando para `/opt/models`), sem rede. É como o 1º boot da ISO usa o modelo que veio na mídia. |
 | **air-gapped** | Sem rede — nem na instalação, nem no 1º boot. Objetivo firmado da ISO (`docs/ISO.md` § 3.1): o **fonte** e o **modelo** já vão na mídia; o **toolchain** (repo apt local) ainda não. |
 | **`AI-CPU-OS-BUILD.txt`** | Registro ao lado dos binários: família, `-march`, ISA, AVX-512, GPU, ref. |

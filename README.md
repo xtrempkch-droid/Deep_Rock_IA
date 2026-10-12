@@ -416,10 +416,15 @@ para o primeiro boot não precisar baixar nada. Para trocar ou dispensar:
 bash iso/build-iso.sh --iso-model ~/modelos/meu.gguf   # usa um modelo seu
 bash iso/build-iso.sh --iso-model none                 # ISO sem modelo
 bash iso/build-iso.sh --iso-repo none                  # ISO sem repositório apt
+bash iso/build-iso.sh --iso-source none                # ISO sem a fonte do llama.cpp
 ```
 
-> 💡 A ISO fica em torno de **4,3–5 GB** com modelo e repositório. Com
-> `--iso-model none --iso-repo none`, uns 3,2 GB.
+> 💡 A ISO fica em torno de **4,3–5 GB** com tudo embutido (base ~2,6 GB +
+> modelo ~1,1 GB + pacotes ~0,5 GB + fonte). Com tudo em `none`, uns 2,7 GB.
+>
+> ⚠️ **Não precisa de internet na máquina de destino** — mas **precisa** na
+> máquina que **gera** a ISO (ou passe os arquivos já baixados com
+> `--iso`, `--iso-model`, `--iso-source` e `--iso-repo`).
 
 Como funciona, em três linhas:
 
@@ -428,15 +433,12 @@ Como funciona, em três linhas:
 3. No **primeiro boot**, o sistema detecta o **hardware de verdade** e aplica
    os ajustes certos para ele.
 
-> 🎯 **Objetivo firmado: a ISO deve funcionar SEM internet.** Se a sua máquina
-> está numa rede isolada, a ISO tem de bastar-se — nada de baixar coisa no meio
-> da instalação. Hoje o **modelo** e os **pacotes** já vão na mídia; falta apenas
-> a **fonte do llama.cpp** (o resto está listado em [`docs/ISO.md`](docs/ISO.md)
-> § 3.1). Ou seja: **o primeiro boot ainda precisa de rede** para baixar o
-> código do llama.cpp, e só para isso.
+> 🎯 **A ISO funciona SEM internet.** Se a sua máquina está numa rede isolada,
+> a ISO basta-se: o **modelo**, os **pacotes** e a **fonte do llama.cpp** vêm
+> todos na mídia, e o primeiro boot compila localmente. Nada é baixado no destino.
 >
-> 💡 A ISO com o modelo fica em torno de **4,3–5 GB**; com
-> `--iso-model none --iso-repo none`, por **3,2 GB**.
+> 💡 **Ainda assim, `docs/ISO.md` § 6 lista o que não foi validado** — e a ISO
+> **nunca foi bootada**. O checklist do § 9 tem o caminho completo para fechar.
 >
 > 💡 **A ISO APAGA o disco** indicado em `--disk`. Teste em máquina virtual
 > **primeiro**, sempre.

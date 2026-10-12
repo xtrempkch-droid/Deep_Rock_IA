@@ -47,6 +47,13 @@ UNIT="/etc/systemd/system/ai-cpu-os-firstboot.service"
 ISO_MODEL_NAME="@@ISO_MODEL@@"
 MODEL_DST_DIR="/opt/models"
 
+## Nome do tarball da fonte do llama.cpp embutido na midia (vazio = sem fonte).
+## O arquivo e copiado para o alvo e o 1o boot usa `--source` com ele: assim o
+## passo mais demorado do 1o boot (compilar o llama.cpp) roda SEM rede, e o que
+## sera compilado fica pinado no que veio na midia.
+ISO_SOURCE_NAME="@@LLAMA_SRC_NAME@@"
+SOURCE_DST="/opt/llama-src.tar.gz"
+
 ## ---------------------------------------------------------------------------
 ## Executar um comando DENTRO do sistema instalado.
 ##   d-i:       `in-target` já faz o chroot.
@@ -86,8 +93,15 @@ if [ -n "${ISO_MODEL_NAME}" ]; then
     MODEL_FILE="${MODEL_DST_DIR}/${ISO_MODEL_NAME}"
 fi
 
-printf 'ROLE=%s\nFAMILY=%s\nFIRSTBOOT_REBOOT=%s\nDISTRO=%s\nISO_BUILD=%s\nMODEL_FILE=%s\n' \
-    "@@ROLE@@" "@@FAMILY@@" "@@FIRSTBOOT_REBOOT@@" "@@DISTRO@@" "@@ISO_BUILD@@" "${MODEL_FILE}" \
+## LLAMA_SRC vazio significa "sem fonte na midia": o firstboot.sh entao nao passa
+## --source e o llama-build.sh cai no git clone (precisa de rede).
+LLAMA_SRC=""
+if [ -n "${ISO_SOURCE_NAME}" ]; then
+    LLAMA_SRC="${SOURCE_DST}"
+fi
+
+printf 'ROLE=%s\nFAMILY=%s\nFIRSTBOOT_REBOOT=%s\nDISTRO=%s\nISO_BUILD=%s\nMODEL_FILE=%s\nLLAMA_SRC=%s\n' \
+    "@@ROLE@@" "@@FAMILY@@" "@@FIRSTBOOT_REBOOT@@" "@@DISTRO@@" "@@ISO_BUILD@@" "${MODEL_FILE}" "${LLAMA_SRC}" \
     > "${DST}/.iso-config"
 
 ## ---------------------------------------------------------------------------
@@ -116,6 +130,30 @@ if [ -n "${ISO_MODEL_NAME}" ]; then
     fi
 else
     log "sem modelo embutido nesta ISO (--iso-model none)"
+fi
+
+## ---------------------------------------------------------------------------
+## 2-c. Fonte do llama.cpp (embutida) -> /opt/llama-src.tar.gz do alvo
+## ---------------------------------------------------------------------------
+## Copiamos o TARBALL, sem extrair: o `llama-build.sh --source` ja sabe extrair
+## um .tar.gz (inclusive tratando o diretorio de topo do tarball do GitHub). Um
+## caminho so, e nada de gastar tempo do instalador descompactando.
+if [ -n "${ISO_SOURCE_NAME}" ]; then
+    if [ -f "${SRC}/${ISO_SOURCE_NAME}" ]; then
+        log "copiando a fonte do llama.cpp para ${SOURCE_DST}"
+        if cp "${SRC}/${ISO_SOURCE_NAME}" "/target${SOURCE_DST}.part"; then
+            mv "/target${SOURCE_DST}.part" "/target${SOURCE_DST}"
+            log "fonte instalada: ${SOURCE_DST}"
+        else
+            log "AVISO: falha ao copiar a fonte; o 1o boot vai precisar de rede"
+            sed -i "s|^LLAMA_SRC=.*|LLAMA_SRC=|" "${DST}/.iso-config" 2>/dev/null || true
+        fi
+    else
+        log "AVISO: ${SRC}/${ISO_SOURCE_NAME} nao esta na midia; seguindo sem fonte"
+        sed -i "s|^LLAMA_SRC=.*|LLAMA_SRC=|" "${DST}/.iso-config" 2>/dev/null || true
+    fi
+else
+    log "sem fonte do llama.cpp embutida (--iso-source none)"
 fi
 
 ## ---------------------------------------------------------------------------

@@ -63,7 +63,9 @@ LLAMA_REF="master"
 REF_SET=0
 # --source: fonte LOCAL (diretório ou tarball). Vazio = clonar do GitHub.
 # Quando preenchido, NENHUM acesso à rede é feito — é o caminho OFFLINE.
-SRC_LOCAL=""
+# AI_LLAMA_SOURCE (exportada pelo firstboot.sh da ISO) é o padrão: é assim que o
+# 1º boot de uma ISO air-gapped compila sem tocar a rede.
+SRC_LOCAL="${AI_LLAMA_SOURCE:-}"
 SOURCE_DESC="ref ${LLAMA_REF} (git clone do GitHub)"
 # AI_FAMILY (exportada pelo build.sh) permite forçar a família de fora.
 FORCE_FAMILY="${AI_FAMILY:-auto}"

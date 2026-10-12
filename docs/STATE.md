@@ -1,7 +1,7 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-12 (repositório apt local na mídia — `--iso-repo`; falta só o item 2 do air-gapped)
+> **Última atualização:** 2026-10-12 (ISO air-gapped COMPLETA: fonte + modelo + repo na mídia; falta só bootar em VM)
 
 ---
 
@@ -235,12 +235,19 @@ e **o llama.cpp é compilado no 1º boot** (nunca um binário pré-compilado —
 ISO por família reintroduziria o risco de `SIGILL`).
 
 ```bash
-# Itens 1, 3, 4 e 5 já prontos (fonte local, repositório apt, modelo):
-bash llama-build.sh --source <llama.cpp.tar.gz> --dir /tmp/llama --dry-run
-bash iso/build-iso.sh --disk /dev/vda --iso-model auto --iso-repo auto --dry-run
-# Falta só o item 2: firstboot.sh passar --source em vez de --ref, para o 1º
-# boot não precisar clonar o llama.cpp do GitHub.
+# Os 5 requisitos estão implementados. NÃO há pendência de código conhecida no
+# caminho da ISO — o que falta é EXECUTAR:
+make iso-dry-run ISO_ARGS="--iso-source auto --iso-model auto --iso-repo auto"
+make iso DISK=/dev/nvme0n1 ISO_ARGS="--serial-console"   # precisa de xorriso
+make iso-vm ISO=iso/out/ai-cpu-os-ubuntu-<data>.iso      # precisa de qemu
 ```
+
+⚠️ **Limites práticos:** (a) `--iso-repo auto` exige a **mesma release** da ISO
+(esta máquina é 25.10, a ISO é 24.04) — buildar numa noble, usar `--iso-url` da
+sua release, ou `--iso-repo CAMINHO`; (b) o GitHub **recusa arquivo de Release
+acima de 2 GiB**, e a ISO air-gapped tem ~4,3–5 GB — por isso o CI gera a ISO
+leve por padrão e a air-gapped é para a sua máquina. Checklist completo em
+`docs/ISO.md` § 9.
 
 **Passo 2 — validar as camadas novas em hardware real.**
 
@@ -298,4 +305,5 @@ Ao terminar qualquer tarefa:
 | 2026-10-12 | **Ferramentas de validação da ISO:** `iso/verify-iso.sh` (conteúdo; modo `--dir` sem `xorriso`, o que o torna **testável no CI**) e `iso/test-vm.sh` (boot real em qemu, marcadores no console serial). Flag `--serial-console`; o build passa a **verificar a ISO ao final**; `make iso-yaml` roda o verificador **com teste negativo**; alvos `make iso-verify` e `make iso-vm`. `verify-iso.sh` já derrubou um bug real do próprio verificador. **`test-vm.sh` nunca executado (sem qemu no ambiente).** |
 | 2026-10-12 | **Zen 3/Zen 4 prontos para uso + GPU como opção.** Criado o corpus `tests/families-matrix.txt` (~60 modelos reais) + `tests/test-families.sh` → o casamento CPU → família passou a ser **testado no CI**, o que é o máximo possível sem o hardware. O teste **achou 10 modelos mal atribuídos**: nenhum EPYC casava (espaço a mais no regex) e a série Ryzen 8000 (Zen 4) caía em `generic` — corrigidos. `build-llama` agora compila também para zen3, zen4 e skylake-avx512. GPU: `llama-build.sh --gpu <backend>` + `--gpu-check` + `--cmake-extra`, **explícito e nunca automático**, com registro no `AI-CPU-OS-BUILD.txt`; `detect-hardware.sh` passou a detectar GPU (informativo, linha `GPU=`); novo `docs/GPU.md` e Bloco P de `VALIDATION.md`. **Nenhum backend de GPU foi compilado/testado.** |
 | 2026-10-12 | **Documentação separada por público.** `README.md` reescrito para o **usuário final** (o que é, serve para mim?, o que muda na máquina, instalação em 5 passos, uso diário, como medir, como desfazer, FAQ, tabela de tamanho de modelo) e criado **`README.technical.md`** — manual do **mantenedor** (três camadas, mapa do repo, **contratos/invariantes**, receitas de extensão, o que cada teste **prova e não prova**, CI por dentro, playbook de depuração com os bugs reais, status de validação e glossário). Regra derivada: **usuário → `README.md`; mantenedor → `README.technical.md`; regras → `AGENTS.md`; fato de hoje → `STATE.md`.** Novos guardas no CI: ambos os arquivos precisam existir e se referenciar. **De passagem, corrigido um bug real:** o `build-llama.yml` ainda usava `matrix.profile` (chave removida na refatoração) no nome do artefato — o upload falharia. |
+| 2026-10-12 | **ISO air-gapped COMPLETA: a fonte do llama.cpp também vai na mídia** (`--iso-source auto\|tarball\|none`). Era o **último** passo que exigia rede no 1º boot — e o mais demorado (compilar 20+ min). `late-command.sh` leva o tarball a `/opt/llama-src.tar.gz` e grava `LLAMA_SRC`; `firstboot.sh` exporta `AI_LLAMA_SOURCE`; `llama-build.sh` usa isso como padrão de `--source` e compila **sem `git` e sem rede**. Novo `build.sh --model-file/--llama-source` (porque `sudo` limpa o ambiente). O `verify-iso.sh` confere a corrente e reprova tarball truncado/sem `CMakeLists.txt`/sem `ggml/`. **Provas:** a corrente inteira exercitada num sandbox (late-command real + llama-build real, manifesto `Rede: não usada`) e o guarda de release recusando build cruzado. Docs: `docs/ISO.md` § 3.1 (todos os 5 itens ✅) e **novo § 9 com o checklist de fechamento**; `iso.yml` ganhou `air_gapped` + **guarda de tamanho pelo limite de 2 GiB por arquivo de Release** do GitHub. **Nenhuma ISO gerada; nenhum boot real** — não há mais pendência de código conhecida no caminho da ISO. |
 | 2026-10-12 | **Repositório apt local na mídia** (`--iso-repo auto\|DIR\|none`), completando o toolchain offline (orçamento de 8 GB). Resolve o **fecho de dependências** dos pacotes que o 1º boot precisa, baixa os `.deb`, gera o índice com `dpkg-deb` (**sem `dpkg-dev`**) e os embute em `/apt-repo`. A fonte entra como **extra** (seção `sources` do curtin no Ubuntu; `apt-setup/local0/*` no Debian), preservando o `primary` oficial — o alvo nasce com `apt` normal e um repo incompleto **degrada** em vez de abortar. O build **recusa** release diferente da ISO. `late-command.sh` remove a fonte `file:///cdrom/...` do alvo. `verify-iso.sh` ganhou a seção do repositório (índice legível, todo `.deb` do índice presente, magic `!<arch>`, coerência mídia×config). **Prova real:** o `apt` do sistema aceitou um repo montado pelo código do projeto e resolveu dependência. **Falha só o item 2 do § 3.1** (`firstboot.sh` usar `--source`) para o 1º boot ficar 100% offline. Nenhuma ISO gerada; nenhum boot real. |

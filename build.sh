@@ -38,6 +38,10 @@ DRY_RUN=0
 ASSUME_YES=0
 SKIP_TESTS=0
 SKIP_MODS=0
+# Modelo e fonte locais: repassados por AMBIENTE aos scripts de papel, porque
+# `sudo` limpa o ambiente — sem estas flags não haveria como usá-los na mão.
+AI_MODEL_FILE_SRC=""
+AI_LLAMA_SOURCE_SRC=
 
 # Cores (desativadas se não for TTY)
 if [[ -t 1 ]]; then
@@ -164,6 +168,8 @@ parse_args() {
       --skip-mods)   SKIP_MODS=1; shift ;;
       --skip-common) SKIP_MODS=1; shift ;;
       --skip-tests)  SKIP_TESTS=1; shift ;;
+      --model-file)  [[ $# -ge 2 ]] || { log_error "--model-file exige caminho"; exit 2; }; AI_MODEL_FILE_SRC="$2"; shift 2 ;;
+      --llama-source) [[ $# -ge 2 ]] || { log_error "--llama-source exige caminho"; exit 2; }; AI_LLAMA_SOURCE_SRC="$2"; shift 2 ;;
       --list-families) list_families; exit 0 ;;
       -h|--help)     usage; exit 0 ;;
       *) log_error "Argumento desconhecido: $1"; usage; exit 2 ;;
@@ -336,6 +342,17 @@ run_role_install() {
   # A família é repassada por ambiente; os scripts de papel usam o
   # llama-build.sh, que resolve a ISA sozinho (ou respeita AI_FAMILY).
   export AI_FAMILY="$FAMILY"
+  # Modelo e fonte locais (caminho offline). Exportados porque os scripts de
+  # papel/llama-build.sh os leem do ambiente — ver roles/inference/install.sh
+  # (AI_MODEL_FILE) e llama-build.sh (AI_LLAMA_SOURCE).
+  if [[ -n "$AI_MODEL_FILE_SRC" ]]; then
+    export AI_MODEL_FILE="$AI_MODEL_FILE_SRC"
+    log_info "Modelo local (sem rede): ${AI_MODEL_FILE_SRC}"
+  fi
+  if [[ -n "$AI_LLAMA_SOURCE_SRC" ]]; then
+    export AI_LLAMA_SOURCE="$AI_LLAMA_SOURCE_SRC"
+    log_info "Fonte local do llama.cpp (sem rede): ${AI_LLAMA_SOURCE_SRC}"
+  fi
   run "Executando ${installer}" bash "$installer" "${flags[@]}"
 }
 

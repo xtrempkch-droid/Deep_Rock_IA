@@ -61,6 +61,10 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | **Documentação separada por público:** `README.md` reescrito para o **usuário final** e criado o **`README.technical.md`** (manual do mantenedor: contratos, receitas de extensão, o que cada teste prova, CI por dentro, playbook de depuração, glossário) | 2026-10-12 | 2026-10-12 |
 | Guardas no CI para a dupla de READMEs (ambos precisam existir e se referenciar) | 2026-10-12 | 2026-10-12 |
 | Correção do nome de artefato do `build-llama` (`matrix.profile` → `matrix.family`; o upload falharia) | 2026-10-12 | 2026-10-12 |
+| **Fonte do llama.cpp na mídia** (`--iso-source`) + a corrente `LLAMA_SRC` → `AI_LLAMA_SOURCE` → `llama-build.sh --source`: **fecha o air-gapped** (o 1º boot não precisa mais de rede) | 2026-10-12 | 2026-10-12 |
+| `build.sh --model-file` / `--llama-source` (o `sudo` limpa o ambiente, então as flags são o caminho manual) | 2026-10-12 | 2026-10-12 |
+| `iso.yml`: input `air_gapped`, guarda de tamanho (limite de 2 GiB por arquivo de Release) e dry-run exercitando o payload | 2026-10-12 | 2026-10-12 |
+| `docs/ISO.md` § 9 — **checklist de fechamento** da ISO, com o que cada passo prova e onde roda | 2026-10-12 | 2026-10-12 |
 | **`llama-build.sh --source <dir|tar.gz>`** — compila de um fonte **local**, sem rede e sem `git`; registra a origem em `AI-CPU-OS-BUILD.txt`. É o primeiro passo da ISO air-gapped | 2026-10-12 | 2026-10-12 |
 | **O modelo `.gguf` vai na mídia** (`--iso-model auto|<caminho>|none`) + `late-command` copiando para `/opt/models` + `AI_MODEL_FILE` no `firstboot` + **`--model-file`** no papel `inference` (instala modelo local sem rede) | 2026-10-12 | 2026-10-12 |
 | **Repositório apt local na mídia** (`--iso-repo auto|DIR|none`): fecho de dependências, índice gerado com `dpkg-deb`, embutido em `/apt-repo` e usado como fonte EXTRA (Ubuntu: seção `sources` do curtin; Debian: `apt-setup/local0/*`); build recusa release diferente | 2026-10-12 | 2026-10-12 |
@@ -83,7 +87,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | **🎯 Construir e bootar a ISO de instalação numa VM** (Bloco M) | 2026-10-07 | Entregável final; maior risco não validado do projeto |
 | **ISO em base Ubuntu Server** (`--distro ubuntu` + autoinstall/Subiquity) | 2026-10-12 | Implementada e validada no autoteste de templates; **nunca executada** contra uma ISO real |
 | **Validar a resolução de famílias em hardware real** (blocos N/O do `VALIDATION.md`) | 2026-10-12 | Testado só com nomes de CPU simulados |
-| **🎯 ISO AIR-GAPPED** (decisão da sessão #14) | 2026-10-12 | **Quase pronto:** feitos o fonte local (`--source`), o **repositório apt** (`--iso-repo`) e o **modelo** (`--iso-model`). **Falta o item 2:** `firstboot.sh` passar `--source` em vez de `--ref` — é o que ainda faz o 1º boot clonar o llama.cpp. Ver `docs/ISO.md` § 3.1 |
+| ~~ISO air-gapped~~ | 2026-10-12 | ✅ **Concluída no código** (sessão #17): fonte, modelo e repositório na mídia. O 1º boot não precisa de rede. **Nada mais a implementar** — o que falta é executar (boot em VM). |
 
 ---
 

@@ -64,6 +64,9 @@ if [[ -r "$CONFIG" ]]; then
   # Modelo já copiado para /opt/models pelo late-command (ISO air-gapped).
   # Vazio = a ISO não trouxe modelo; ninguém baixa nada daqui.
   MODEL_FILE="${MODEL_FILE:-}"
+  # Fonte do llama.cpp já copiada para /opt/llama-src.tar.gz pelo late-command.
+  # Vazio = a ISO não trouxe fonte; nesse caso o build vai precisar de rede.
+  LLAMA_SRC="${LLAMA_SRC:-}"
 fi
 
 case "$ROLE" in
@@ -94,6 +97,25 @@ if [[ -n "$MODEL_FILE" ]]; then
   fi
 else
   log "nenhum modelo embutido nesta ISO (o alvo subirá sem LLM)."
+fi
+
+# ---------------------------------------------------------------------------
+# Fonte do llama.cpp embutida na mídia (opcional)
+# ---------------------------------------------------------------------------
+# Exportamos AI_LLAMA_SOURCE (mesmo padrão do AI_FAMILY/AI_MODEL_FILE) e o
+# `llama-build.sh` a usa como padrão de `--source`. Isto é o que fecha o
+# air-gapped: o passo mais demorado do primeiro boot (compilar o llama.cpp)
+# deixa de precisar de internet, e compila EXATAMENTE o que veio na mídia.
+if [[ -n "$LLAMA_SRC" ]]; then
+  if [[ -f "$LLAMA_SRC" ]]; then
+    export AI_LLAMA_SOURCE="$LLAMA_SRC"
+    log "fonte local do llama.cpp: ${LLAMA_SRC} (compilação sem rede)"
+  else
+    log "AVISO: LLAMA_SRC=${LLAMA_SRC} não existe; o build vai clonar do GitHub."
+    LLAMA_SRC=""
+  fi
+else
+  log "nenhuma fonte embutida nesta ISO: o build vai clonar o llama.cpp (precisa de rede)."
 fi
 
 # ---------------------------------------------------------------------------

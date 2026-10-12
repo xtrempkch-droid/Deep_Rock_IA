@@ -302,6 +302,18 @@ jobs:
           grep -q '@@APT_LOCAL_PRESEED@@' iso/preseed/ai-cpu-os.cfg
           grep -q 'APT_REPO_PATH' iso/preseed/late-command.sh
           grep -q 'apt-repo' iso/verify-iso.sh
+          # A FONTE do llama.cpp na midia e o que torna o 1o boot offline: e o
+          # passo mais demorado e o unico que ainda clonaria do GitHub. Guardamos
+          # a flag, a corrente (late-command -> firstboot -> llama-build) e o
+          # caminho manual (build.sh --llama-source, porque sudo limpa o env).
+          grep -q -- '--iso-source' iso/build-iso.sh
+          grep -q 'llama-src' iso/preseed/late-command.sh
+          grep -q 'LLAMA_SRC' iso/preseed/late-command.sh
+          grep -q 'AI_LLAMA_SOURCE' iso/preseed/firstboot.sh
+          grep -q 'AI_LLAMA_SOURCE' llama-build.sh
+          grep -q -- '--llama-source' build.sh
+          grep -q -- '--model-file' build.sh
+          grep -q 'llama-src' iso/verify-iso.sh
           # E o atalho proibido continua proibido: nunca embutir binário
           # pré-compilado do llama.cpp (exigiria 1 ISO por família).
           ! grep -q -- '--prebuilt' iso/build-iso.sh

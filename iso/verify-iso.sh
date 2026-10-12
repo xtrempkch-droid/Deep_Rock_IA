@@ -298,6 +298,77 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 4-b-bis. Fonte do llama.cpp (/llama-src.tar.gz)
+# ---------------------------------------------------------------------------
+# O llama.cpp e compilado no 1o boot; se o tarball estiver na midia, esse
+# passo nao precisa de rede. Verificamos a CORRENTE (o late-command copia e o
+# firstboot usa via --source/AI_LLAMA_SOURCE) e o CONTEUDO (e mesmo um tarball
+# com o fonte?).
+section "Fonte do llama.cpp na midia (/llama-src.tar.gz)"
+
+SRC_LATE="$(fetch "/preseed/late-command.sh" 2>/dev/null || true)"
+SRC_FIRST="$(fetch "/preseed/firstboot.sh" 2>/dev/null || true)"
+
+# Elos da corrente (o firstboot foi substituido: deve conter a variavel LLAMA_SRC).
+if [[ -n "$SRC_LATE" ]] && grep -q 'llama-src' "$SRC_LATE"; then
+  pass "late-command copia a fonte do llama.cpp da midia para o alvo"
+else
+  fail "late-command NAO menciona llama-src: a fonte (se houver) nao chegaria ao alvo"
+fi
+if [[ -n "$SRC_LATE" ]] && grep -q 'LLAMA_SRC' "$SRC_LATE"; then
+  pass "late-command registra LLAMA_SRC para o primeiro boot"
+else
+  fail "late-command nao registra LLAMA_SRC no .iso-config"
+fi
+if [[ -n "$SRC_FIRST" ]] && grep -q 'AI_LLAMA_SOURCE' "$SRC_FIRST"; then
+  pass "firstboot usa a fonte local (AI_LLAMA_SOURCE) -- compila sem rede"
+else
+  fail "firstboot nao usa AI_LLAMA_SOURCE: a fonte da midia seria ignorada (e o build exigiria rede)"
+fi
+
+# Conteudo: procura o tarball na midia (pode legitimamente nao existir).
+SRC_TARBALL=""
+if [[ "$MODE" == "dir" ]]; then
+  for f in "${INPUT}/llama-src.tar.gz" "${INPUT}/llama-src.tgz"; do
+    [[ -f "$f" ]] && SRC_TARBALL="$f" && break
+  done
+else
+  for f in /llama-src.tar.gz /llama-src.tgz; do
+    if existe "$f"; then SRC_TARBALL="$(fetch "$f" 2>/dev/null || true)"; break; fi
+  done
+fi
+
+if [[ -z "$SRC_TARBALL" || ! -f "$SRC_TARBALL" ]]; then
+  skip "nenhuma fonte do llama.cpp na midia (--iso-source none) -- o 1o boot exige rede"
+else
+  # tar -tf lista o conteudo; falha se o arquivo estiver corrompido/truncado.
+  if TAR_LIST="$(tar -tf "$SRC_TARBALL" 2>/dev/null)"; then
+    N_FILES="$(printf '%s
+' "$TAR_LIST" | wc -l)"
+    SRC_MB=$(( $(stat -c %s "$SRC_TARBALL" 2>/dev/null || echo 0) / 1024 / 1024 ))
+    if (( N_FILES > 100 )); then
+      pass "fonte do llama.cpp: tarball valido, ${N_FILES} arquivos, ${SRC_MB} MB"
+    else
+      fail "fonte do llama.cpp: tarball com apenas ${N_FILES} arquivos -- nao parece o llama.cpp"
+    fi
+    if printf '%s
+' "$TAR_LIST" | grep -qE '(^|/)CMakeLists\.txt$'; then
+      pass "a fonte tem CMakeLists.txt (e compilavel)"
+    else
+      fail "a fonte nao tem CMakeLists.txt -- o 1o boot falharia ao compilar"
+    fi
+    if printf '%s
+' "$TAR_LIST" | grep -qE '(^|/)ggml/' ; then
+      pass "a fonte contem ggml/ (arvore do llama.cpp)"
+    else
+      fail "a fonte nao contem ggml/ -- nao parece o llama.cpp"
+    fi
+  else
+    fail "fonte do llama.cpp: /llama-src.tar.gz nao e um tarball legivel (truncado?)"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # 4-c. Repositório apt local (/apt-repo) — o que torna a instalação offline
 # ---------------------------------------------------------------------------
 # Invariantes que valem a pena vigiar (o modo de falha é silencioso ou tardio):

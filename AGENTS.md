@@ -308,19 +308,24 @@ Estas regras são **obrigatórias**:
       Compilar no alvo é o que garante o `-march` correto da família detectada.
       (Há guardas no CI contra `--prebuilt` e contra `COPY build/bin`.)
     - **Nenhum passo pode exigir rede** na instalação ou no 1º boot. Tudo que
-      fosse baixado tem de estar na mídia: fonte do llama.cpp (`--source`), o
-      **modelo** (`--iso-model`, que embute o `.gguf` e o leva a `/opt/models`)
-      e o **toolchain + pacotes** (`--iso-repo`, que monta um repositório apt
-      local com os `.deb` e o embute em `/apt-repo`).
+      fosse baixado tem de estar na mídia, e as três peças já estão:
+      **fonte do llama.cpp** (`--iso-source`, o passo mais demorado do 1º boot),
+      **modelo** (`--iso-model`, que leva o `.gguf` a `/opt/models`) e
+      **toolchain + pacotes** (`--iso-repo`, repositório apt local em `/apt-repo`).
+      A rede é usada **só na máquina que GERA a ISO**.
     - O repositório local entra como fonte **EXTRA**, nunca como `primary`: o
       sistema instalado tem de nascer apontando para o arquivo oficial, e um
       repositório incompleto deve **degradar** (usar rede, se houver) em vez de
       abortar a instalação. A linha `file:///cdrom/...` é removida do alvo no
       `late-command.sh`.
+    - A corrente `--iso-source` → `/llama-src.tar.gz` → `LLAMA_SRC`
+      (`.iso-config`) → `AI_LLAMA_SOURCE` → `llama-build.sh --source` **não pode
+      quebrar em nenhum elo**: se quebrar, o 1º boot volta a clonar o llama.cpp e
+      o modo de falha é silencioso. Cada elo tem guarda no CI.
     - O `llama-build.sh` **precisa** continuar aceitando `--source <dir|tar.gz>`
-      (offline, sem rede e sem `git`) e o papel `inference` **precisa** manter
-      `--model-file`/`AI_MODEL_FILE` (modelo local, sem download) — há guarda no
-      CI para ambos.
+      (offline, sem rede e sem `git`); o papel `inference`, `--model-file`/
+      `AI_MODEL_FILE`; e o `build.sh`, `--model-file`/`--llama-source` (porque
+      `sudo` limpa o ambiente). Há guarda no CI para todos.
     - Se você adicionar qualquer download (script, papel, template), ele é uma
       **violação** desta regra: ou embuta na ISO, ou torne-o explicitamente
       opcional com aviso. Registre em `docs/ISO.md` § 3.1 (tabela de requisitos).

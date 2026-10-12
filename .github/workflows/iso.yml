@@ -38,6 +38,11 @@ on:
         required: false
         default: /dev/vda
         type: string
+      air_gapped:
+        description: "Embutir fonte + modelo + repo (ISO que se basta; MUITO mais lenta)"
+        required: false
+        default: false
+        type: boolean
   push:
     tags: ["v*"]
 
@@ -57,6 +62,15 @@ jobs:
       ISO_ROLE: ${{ inputs.role || 'auto' }}
       ISO_FAMILY: ${{ inputs.family || 'auto' }}
       ISO_DISK: ${{ inputs.disk || '/dev/vda' }}
+      # 'auto' embute o payload (fonte do llama.cpp + modelo + repo apt);
+      # 'none' gera a ISO leve, que e o padrao do CI.
+      #
+      # POR QUE O PADRAO DO CI E LEVE: o GitHub limita **2 GiB por arquivo
+      # de Release** e a cota de artefatos e pequena. Uma ISO air-gapped
+      # (~4-5 GB) nao cabe nesses dois canais -- ela e para ser gerada na
+      # maquina do usuario. Com air_gapped=true o CI ainda prova o caminho
+      # completo: o build roda o verify-iso.sh no fim e confere a corrente.
+      ISO_PAYLOAD: ${{ inputs.air_gapped && 'auto' || 'none' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -78,8 +92,12 @@ jobs:
 
       - name: Simulação (dry-run)
         run: |
+          # O dry-run também recebe as flags do payload para EXERCITAR os
+          # caminhos novos (validação de release, checagem dos pacotes, etc.)
+          # sem baixar nada -- é o que pega regressão cedo.
           make iso-dry-run DISK="$ISO_DISK" DISTRO="$ISO_DISTRO" \
-            ROLE="$ISO_ROLE" FAMILY="$ISO_FAMILY"
+            ROLE="$ISO_ROLE" FAMILY="$ISO_FAMILY" \
+            ISO_ARGS="--iso-source $ISO_PAYLOAD --iso-model $ISO_PAYLOAD --iso-repo $ISO_PAYLOAD"
 
       - name: Gerar a ISO
         run: |
@@ -89,6 +107,9 @@ jobs:
             --disk "$ISO_DISK" \
             --role "$ISO_ROLE" \
             --family "$ISO_FAMILY" \
+            --iso-source "$ISO_PAYLOAD" \
+            --iso-model "$ISO_PAYLOAD" \
+            --iso-repo "$ISO_PAYLOAD" \
             --yes \
             --out "$GITHUB_WORKSPACE/iso/out/ai-cpu-os-${ISO_DISTRO}.iso" \
           2>&1 | tee /tmp/iso-build.log
@@ -97,6 +118,29 @@ jobs:
           test -f "$iso" || { echo "::error::ISO não foi gerada"; exit 1; }
           ls -la "$iso"
           sha256sum "$iso" | tee "$iso.sha256"
+
+      - name: Tamanho da ISO (limite de 2 GiB para Release)
+        id: size
+        if: always()
+        run: |
+          set -euo pipefail
+          iso="iso/out/ai-cpu-os-${ISO_DISTRO}.iso"
+          if [ ! -f "$iso" ]; then
+            echo "too_big=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          bytes=$(stat -c %s "$iso")
+          mb=$(( bytes / 1024 / 1024 ))
+          # 2 GiB = 2147483648 bytes. O GitHub recusa arquivo de Release
+          # acima disso, e o upload falharia DEPOIS de 10+ minutos de build.
+          if [ "$bytes" -ge 2147483648 ]; then
+            echo "too_big=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::ISO com ${mb} MB: acima do limite de 2 GiB por "
+              "arquivo de Release. Upload pulado -- gere esta ISO na sua maquina."
+          else
+            echo "too_big=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ISO com ${mb} MB: dentro do limite de 2 GiB."
+          fi
 
       - name: Relatório no resumo da execução
         if: always()
@@ -108,6 +152,10 @@ jobs:
             echo "- Papel gravado: \`$ISO_ROLE\` (\`auto\` = detecta o hardware no 1º boot)"
             echo "- Família gravada: \`$ISO_FAMILY\` (\`auto\` = detecta o hardware no 1º boot)"
             echo "- Disco do autoinstall: \`$ISO_DISK\`"
+            echo "- Payload embutido (fonte/modelo/repo): \`$ISO_PAYLOAD\`"
+            iso_file="iso/out/ai-cpu-os-${ISO_DISTRO}.iso"
+            size="$( [ -f "$iso_file" ] && du -h "$iso_file" | cut -f1 || echo n/a )"
+            echo "- Tamanho: \`$size\`"
             echo
             if [ -f "iso/out/ai-cpu-os-${ISO_DISTRO}.iso" ]; then
               echo "### Artefato"
@@ -126,6 +174,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
+        # Artefato de varios GB consome a cota da conta, e o canal certo
+        # para distribuicao (Release) tem limite de 2 GiB por arquivo.
+        if: steps.size.outputs.too_big != 'true'
         with:
           name: ai-cpu-os-iso-${{ env.ISO_DISTRO }}
           path: |
@@ -135,7 +186,7 @@ jobs:
           compression-level: 0   # já é uma ISO comprimida
 
       - name: Anexar à Release (apenas em tags)
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && steps.size.outputs.too_big != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

@@ -9,7 +9,7 @@
 > [`docs/STATE.md`](STATE.md).
 > **Quando escrever:** **ao fim de TODA sessão de trabalho** (ver § 8).
 >
-> **Última entrada:** sessão **#16** (2026-10-12) — repositório apt local na mídia (`--iso-repo`); o air-gapped depende só do item 2.
+> **Última entrada:** sessão **#17** (2026-10-12) — ISO fechada no código: a **fonte do llama.cpp** também vai na mídia; checklist de fechamento no `ISO.md` § 9.
 
 ---
 
@@ -941,6 +941,126 @@ Orçamento liberado: o item mais pesado que restava no § 3.1 do `docs/ISO.md`
 
 ---
 
+### Sessão #17 — 2026-10-12 · 🔒 A ISO está fechada no código (fonte na mídia) + checklist
+
+**Objetivo (pedido do usuário, verbatim):** *"precisamos fechar essa ISO, se
+houver recomendações eu aceito"*.
+
+**Feito:**
+
+1. **Descobri que faltava uma peça no item 2** — e ela não estava na lista. O
+   plano dizia "`firstboot.sh` passa `--source` em vez de `--ref`", mas isso
+   supõe que **o tarball esteja na mídia**, e nada o embutia. Sem resolver
+   isso, implementar o item 2 daria erro: o `--source` apontaria para um
+   arquivo inexistente. Criado **`--iso-source auto|<tarball>|none`**.
+2. **A corrente completa, elo por elo** (nenhum pode faltar — se faltar, o 1º
+   boot volta a clonar e a falha é silenciosa):
+   `--iso-source` → `/llama-src.tar.gz` na mídia → `late-command.sh` copia
+   para `/opt/llama-src.tar.gz` e grava **`LLAMA_SRC`** no `.iso-config` →
+   `firstboot.sh` exporta **`AI_LLAMA_SOURCE`** → `llama-build.sh` a usa como
+   padrão de **`--source`** → compila **do tarball**, sem `git` e sem rede.
+3. **Não extraímos o tarball** em lugar nenhum: o `llama-build.sh --source`
+   já sabe extrair um `.tar.gz` e tratar o diretório de topo do tarball do
+   GitHub. Menos código, um caminho só, e a extração acontece no sistema já
+   instalado (onde `tar` com certeza existe).
+4. **`build.sh --model-file` / `--llama-source`.** `sudo` **limpa o
+   ambiente**, então exportar variável não é um caminho utilizável na mão.
+   As flags repassam por ambiente para o papel. É o mesmo padrão do
+   `--model-file` do papel — que também ganhou um caminho usável.
+5. **`verify-iso.sh`**: nova seção conferindo a corrente (late-command usa
+   `llama-src`/`LLAMA_SRC`; firstboot usa `AI_LLAMA_SOURCE`) e o conteúdo
+   (tarball legível, com `CMakeLists.txt` e com `ggml/`). Sem fonte é
+   `[SKIP]`, nunca `PASS` falso.
+6. **`iso.yml`**: input `air_gapped` (padrão `false`), o passo de geração
+   passa as três flags, o **dry-run exercita os caminhos novos** e há um
+   **guarda de tamanho** que pula o upload acima de 2 GiB com aviso.
+7. **`docs/ISO.md` § 9 — checklist de fechamento** (novo): a ordem dos passos,
+   o que **cada um prova**, onde roda, a tabela de sintomas para o teste em
+   VM e o checklist final. Esta era a recomendação mais útil a fazer.
+
+**Achado que muda o plano (recomendação aceita):**
+
+- 🔴 **O GitHub recusa arquivo de Release acima de 2 GiB** (está na doc de
+  Releases: *"Each file included in a release must be under 2 GiB"*). A ISO
+  air-gapped tem ~4,3–5 GB — ou seja, **não pode ser distribuída por
+  Release**. Consequências implementadas: o padrão do CI é a ISO leve, o
+  workflow **pula o upload** avisando quando passa do limite, e a ISO
+  air-gapped é explicitamente "para gerar na sua máquina". Sem esse guarda, o
+  workflow falharia **depois** de 10+ minutos de build, num passo de upload.
+- ⚠️ **`--iso-repo auto` exige a mesma release da ISO.** Nesta máquina
+  (25.10) e a ISO padrão (24.04 LTS) o build **recusa** — e faz certo. A
+  mensagem virou acionável com três saídas (buildar numa noble, `--iso-url`
+  da sua release, ou `--iso-repo CAMINHO`), e `--iso-repo-allow-mismatch`
+  ficou marcado como produtor de ISO que não instala offline.
+
+**Decisões (e por quê):**
+
+- **O CI continua provando o caminho completo.** Com `air_gapped: true` o
+  workflow gera a ISO **com** payload e o `verify-iso.sh` roda sobre a ISO
+  real (via `xorriso`) — é a prova mais forte possível sem hardware. O que não
+  se pode é *baixar* essa ISO; isso ficou explícito em vez de silencioso.
+- **`none` existe em todos os três.** Quem está sem rede na máquina de build
+  (ou não quer 5 GB) não fica travado.
+- **O tarball fica inteiro na mídia**, não extraído. Custa ~40 MB e mantém o
+  artefato auditável: o que será compilado é literalmente o arquivo da mídia.
+- **Guardar o tamanho e o SHA256 no `STATE.md` é parte do checklist.** Sem
+  isso, a próxima sessão não sabe o que foi de fato produzido.
+
+**Problemas encontrados e resolvidos:**
+
+- 🐛 **A peça que faltava no plano do item 2** (descrita acima). O plano do
+  § 3.1 dizia "usar `--source`" sem nunca ter previsto *como o arquivo chega
+  ao alvo*. Ler o plano com olhos de executor pegou isso.
+- 🐛 **`multi_replace` inserindo o mesmo bloco duas vezes** (de novo): a linha
+  do resumo apareceu duplicada. Foi a **quarta** ocorrência do padrão no
+  projeto — e a defesa registrada na #15 (`assert` da contagem antes de
+  escrever) foi o que detectou, não o lint.
+- 🐛 **Ancora com acento escrita sem acento** num patch Python (`Repositorio`
+  vs `Repositório`): o `sub` não casou e abortou. Barato, porque o `assert`
+  falha antes de escrever qualquer coisa.
+- 🐛 **`SyntaxWarning: invalid escape sequence`** ao gerar crases escapadas no
+  patch do `iso.yml`. Arquivo reescrito com `chr(92)` em vez de literal.
+- **Erro de âncora que parecia bug de produto:** `payload=auto` "falhou" nos
+  meus testes — era o **guarda de release funcionando** (máquina 25.10 × ISO
+  24.04). Antes de "consertar", confirmei que era o comportamento desenhado e
+  que `--iso-url` da release certa faz passar (`rc=0`).
+
+**Provas desta sessão (sem ISO, mas de verdade):**
+
+1. **`late-command.sh` REAL executado** num sandbox (caminhos `/target` e
+   `/cdrom` redirecionados, `in-target` stubado): copiou o tarball para
+   `/opt/llama-src.tar.gz` e gravou `LLAMA_SRC=/opt/llama-src.tar.gz` no
+   `.iso-config`.
+2. **`llama-build.sh` REAL**, com `AI_LLAMA_SOURCE` no ambiente: compilou do
+   tarball e registrou no manifesto `llama.cpp: tarball local llama-src.tar.gz`
+   / **`Rede: não usada (fonte local)`**. **Sem** a variável, voltou a clonar —
+   provando que o comportamento offline é **causado** por ela.
+3. **Interação de degradação:** rodei o late-command com o tarball no nome
+   errado e ele **avisou e seguiu sem fonte** (limpando `LLAMA_SRC`), em vez de
+   quebrar a instalação. Comportamento desenhado, verificado por acidente.
+4. **`verify-iso.sh`** reprovou tarball truncado, sem `CMakeLists.txt` e sem
+   `ggml/` — e aprovou o correto (6 PASS na seção).
+5. **`--iso-source`** recusou: arquivo inexistente, formato errado e arquivo
+   que não é tarball; e **avisou** (sem bloquear) num tarball sem
+   `CMakeLists.txt`.
+
+**NÃO feito / não testado (importante):**
+
+- **Nenhuma ISO foi gerada nem bootada.** Nada desta sessão tocou uma ISO real.
+- **O sandbox não é o alvo:** os scripts rodaram com o sistema de arquivos
+  redirecionado. Que o `late-command` funcione **dentro** do Subiquity/d-i, e
+  que a fonte extra de apt seja **aceita** pelo instalador, continuam sendo
+  **suposições documentadas** (sintomas anotados no § 9.3 do `docs/ISO.md`).
+- **`--iso-repo auto` nunca rodou de ponta a ponta** (exige a mesma release).
+- **Não há mais pendência de código conhecida no caminho da ISO.** O que falta
+  é **executar**: gerar (passo 3) e bootar em VM (passo 4) — e o passo 3 não
+  roda nesta máquina (sem `xorriso`), então o caminho prático é o workflow
+  `iso` no GitHub. O passo 4 precisa de uma máquina com `qemu`+KVM.
+
+**Commits desta sessão:** (a preencher após o push).
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,
@@ -959,7 +1079,10 @@ Orçamento liberado: o item mais pesado que restava no § 3.1 do `docs/ISO.md`
 
 | Thread | Nota |
 |--------|------|
-| **Item 2 do air-gapped** (`firstboot.sh` passar `--source` em vez de `--ref`) | **É o único que falta** para o 1º boot não precisar de rede. Os itens 1, 3, 4 e 5 do § 3.1 do `docs/ISO.md` estão implementados. |
+| **Nada de código no caminho da ISO** | ✅ Os 5 requisitos do § 3.1 do `docs/ISO.md` estão implementados. **Não há pendência de implementação conhecida** — falta EXECUTAR (ver abaixo). |
+| **Gerar a ISO (passo 3 do checklist)** | Não roda nesta máquina (sem `xorriso`). Caminho prático: workflow `iso` no GitHub com `air_gapped: true`. Ver `docs/ISO.md` § 9.1. |
+| **Bootar em VM (passo 4 — o critério de conclusão)** | Precisa de `qemu`+KVM. Gere a ISO com `--serial-console` ou o `test-vm.sh` não vê o 1º boot. Ver `docs/ISO.md` § 9.2. |
+| ⚠️ **Limite de 2 GiB por arquivo de Release** | A ISO air-gapped (~4,3–5 GB) **não pode** ser anexada a uma Release. O CI pula o upload e avisa. Distribuição: pendrive/`scp`, runner self-hosted, ou outro host + SHA256 na Release. |
 | **Aceite do instalador para o repo local** | A seção `sources` (Subiquity) e `apt-setup/local0/*` (debian-installer) são **suposições documentadas** — não foram vistos funcionando. Sintoma a procurar: erro de assinatura; ou instalar mas pedir rede (repo incompleto). |
 | **PR #1 do Dependabot** | ✅ verde, rebaseado sobre `main`, **não mesclado**. Basta clicar em *Merge*. Bumps verificados com `git ls-remote`. |
 | **Bloco M** (`VALIDATION.md`) | Roteiro da ISO pronto; nenhuma execução ainda. |
@@ -1027,6 +1150,7 @@ Orçamento liberado: o item mais pesado que restava no § 3.1 do `docs/ISO.md`
 | Editar um **trecho grande** (uma função inteira) por substituição de bloco | O match pode cair em outro ponto, duplicar trechos e destruir código vizinho — 3 ocorrências em `build-iso.sh` de uma vez, e o `bash -n` acusou erro **longe da causa** | Para edição estrutural, extraia o original com `git show HEAD:arquivo` e reaplique as mudanças por **âncoras exatas** (linha inteira) em script |
 | Editar trecho grande / `main()` com `multi_replace` | Casou em **2 pontos**, inseriu o mesmo texto **duas vezes** e o arquivo ficou inválido (3ª vez que a armadilha aparece) | Extraia o original com `git show HEAD:arquivo`, reaplique por **âncoras exatas** e **asssine a contagem** (`assert`) ANTES de escrever |
 | Teste que só cobre o caso feliz do próprio código | Bug real passou batido: a função devolvia `file:///apt-repo` (sem `/cdrom`) e, sem repo, ainda devolvia linha com caminho vazio | Exercite as **funções reais** num harness (extraia com `sed`) e teste os caminhos **negativos**; o `--dry-run` também tem de validar |
+| Planejar um passo sem prever o **insumo** dele | O item 2 dizia "usar `--source`" e ninguém tinha previsto como o tarball chegaria ao alvo — implementar direto daria erro de arquivo inexistente | Leia o plano com olhos de **executor**: para cada passo, pergunte "de onde vem a entrada?" |
 | Guarda negativo com `grep` de texto que aparece em **comentário** | O guarda reprova o repositório correto (ex.: o Dockerfile **cita** `COPY build/bin` para explicar por que NÃO usá-lo) | Ancore na forma do comando (`^COPY[[:space:]]+.*build/bin`) e teste o guarda com um caso positivo |
 | `sed -i` na 1ª linha de um script com `#!` | Pode trocar o **shebang** (`#!/usr/bin/env bash` vs `#!/bin/sh`) e mudar o interpretador | Nunca use `sed -i '1s/…'`; confirme o shebang depois (o CI verifica o modo estrito por shebang) |
 | Renomear/remover uma **chave de matriz** do CI e esquecer quem a consome | Ficou `${{ matrix.profile }}` no `build-llama.yml` depois de a matriz virar `family` → o **nome do artefato ia vazio** e o `upload-artifact` falharia (só num run de tag, longe do PR) | Ao renomear uma chave de matriz, `grep -n 'matrix\.'` no workflow inteiro; prefira `matrix.family` a nomes genéricos |
@@ -1098,6 +1222,7 @@ Ao **fim de cada sessão**, faça nesta ordem:
 | 2026-10-12 | Sessões #9–#13 (famílias → ISO Ubuntu → ferramentas de validação → Zen 3/4 + GPU → documentação por público). Corrigido o marcador "Última entrada" do topo (estava parado em #7) e a lista de marcadores do § 7 (era `@@PROFILE@@`, removido na refatoração). |
 | 2026-10-12 | Sessão #14 — fechadas as duas dúvidas de arquitetura da ISO (**air-gapped = sim**; **compilar no 1º boot > binário pré-colado**). Item 1 dos requisitos implementado (`--source`). Nova dúvida aberta: o modelo vai na mídia? |
 | 2026-10-12 | Sessão #15 — o **modelo `.gguf` vai na mídia** (`--iso-model`): implementada a corrente completa `--iso-model` → `/models` → `MODEL_FILE` → `AI_MODEL_FILE` → `--model-file`, com validação de magic/tamanho em 4 pontos e guardas (inclusive negativos) no CI. **Nenhuma dúvida de arquitetura em aberto**: as pendências agora são de execução. |
+| 2026-10-12 | Sessão #17 — **a fonte do llama.cpp vai na mídia** (`--iso-source`): fecha o air-gapped no código (o 1º boot não precisa mais de rede). Corrente exercitada ponta a ponta num sandbox. Novo `ISO.md` § 9 (**checklist de fechamento**) e o achado do **limite de 2 GiB por arquivo de Release** do GitHub. |
 | 2026-10-12 | Sessão #16 — **repositório apt local na mídia** (`--iso-repo`, orçamento de 8 GB): fecho de dependências, índice com `dpkg-deb` (sem `dpkg-dev`), fonte **extra** (seção `sources`/`apt-setup/local0`), recusa de release diferente, limpeza da fonte morta no alvo e verificação no `verify-iso.sh`. **O `apt` real aceitou o repositório** montado pelo projeto. Falta só o item 2 para o 1º boot ser offline. |
 
 > **Ao criar uma sessão nova, atualize também a "Última entrada" no topo deste
