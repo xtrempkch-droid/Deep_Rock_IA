@@ -30,7 +30,7 @@
 # =============================================================================
 # Estágio 1 — builder
 # =============================================================================
-FROM debian:12 AS builder
+FROM debian:13 AS builder
 
 ARG LLAMA_REF=master
 ARG GGML_NATIVE=OFF
@@ -104,7 +104,7 @@ RUN set -eux; \
 # =============================================================================
 # Estágio 2 — runtime (mínimo)
 # =============================================================================
-FROM debian:12-slim AS runtime
+FROM debian:13-slim AS runtime
 
 ARG TARGETARCH
 
