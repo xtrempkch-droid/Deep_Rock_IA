@@ -1,0 +1,105 @@
+# iso/autoinstall/autoinstall.yaml — instalação automática do ai-cpu-os em
+# **Ubuntu Server** (Subiquity / autoinstall).
+# -----------------------------------------------------------------------------
+# Este arquivo é um TEMPLATE: `iso/build-iso.sh` substitui os marcadores
+# (nomes entre arrobas duplas) antes de gravá-lo na ISO.
+#
+# Onde ele é gravado: na RAIZ da ISO, ao lado de `casper/`, com o nome
+# `autoinstall.yaml`. Essa é a forma documentada de fornecer autoinstall pela
+# própria mídia ("Autoinstall on the installation media"): o Subiquity procura
+# `autoinstall.yaml` no diretório que contém `casper/` e o lê diretamente.
+#
+# Por que NÃO usamos o datasource nocloud?
+#   A alternativa (cloud-config via `ds=nocloud;s=/cdrom/...`) exigiria
+#   `#cloud-config` + a chave de topo `autoinstall:` + escape do `;` na cmdline
+#   do GRUB. O arquivo na mídia dispensa tudo isso: é mais simples, não depende
+#   de datasource e não tem pegadinha de escaping.
+#
+# Por que SEM a chave de topo `autoinstall:`?
+#   O Subiquity aceita as duas formas, mas só a forma "sem chave de topo" é
+#   válida em 22.04 **e** 24.04 (a chave passou a ser permitida em 24.04).
+#   Usar a forma comum aos dois LTS é escolha deliberada de compatibilidade.
+#
+# O que este arquivo NÃO faz, de propósito:
+#   * nada de `network:` — o padrão do Subiquity (DHCP em eth*/en*) é mais
+#     robusto que uma lista fixa de interfaces para um hardware desconhecido;
+#   * nada de particionamento manual — usamos o layout `direct` e deixamos o
+#     Subiquity criar a tabela GPT + partições de boot/EFI corretamente;
+#   * nenhum ajuste de kernel/tuning — isso acontece no PRIMEIRO BOOT, onde o
+#     hardware real é conhecido (ver docs/ISO.md § "Por que primeiro boot").
+#
+# ⚠️ AVISO PARA QUEM EDITA: este arquivo NÃO é YAML válido como está. O `@` é
+# um indicador reservado do YAML, então linhas como `@@STORAGE_LAYOUT@@` não
+# podem ser interpretadas — o yamllint falha nelas, e está certo. Só o arquivo
+# DEPOIS da substituição é YAML de verdade. Para validar uma edição:
+#
+#     bash iso/build-iso.sh --check-templates      # (ou: make iso-yaml)
+#
+# É esse autoteste, e não um lint direto, que o CI roda.
+# -----------------------------------------------------------------------------
+
+version: 1
+
+# --- Localização -------------------------------------------------------------
+locale: "@@LOCALE@@"
+keyboard:
+  layout: "@@KEYMAP@@"
+timezone: "@@TIMEZONE@@"
+
+# --- Usuário administrativo --------------------------------------------------
+# A senha vai como hash crypt (sha-512) gerado no build da ISO; nunca em claro.
+identity:
+  realname: "@@USER_FULLNAME@@"
+  username: "@@USERNAME@@"
+  hostname: "@@HOSTNAME@@"
+  password: "@@PASSWORD_HASH@@"
+
+# Servidor SSH já instalado (o projeto é operado remotamente). allow-pw true
+# porque a senha do usuário administrativo é definida na criação da ISO.
+ssh:
+  install-server: true
+  allow-pw: true
+
+# --- Armazenamento -----------------------------------------------------------
+# O disco alvo vem de --disk e é APAGADO. Sem --disk, cai no maior disco.
+# Layout `direct`: GPT + partição de boot + raiz no restante (sem LVM, para não
+# adicionar camadas de I/O numa máquina cujo gargalo é a memória).
+storage:
+  @@STORAGE_LAYOUT@@
+
+# --- Repositório determinístico ----------------------------------------------
+# geoip desligado + espelho explícito = mesma fonte em qualquer lugar.
+# Formato legado do curtin (amplamente usado e aceito em 20.04–24.04).
+apt:
+  preserve_sources_list: false
+  geoip: false
+  primary:
+    - arches: [default]
+      uri: "http://archive.ubuntu.com/ubuntu"
+
+# --- Instalação previsível ----------------------------------------------------
+# Nada de atualizar o instalador no meio do caminho, nada de drivers de
+# terceiros, nada de meta-pacotes OEM, nenhum snap extra: queremos que a ISO se
+# comporte igual toda vez que for gerada.
+refresh-installer:
+  update: false
+drivers:
+  install: false
+oem:
+  install: false
+snaps: []
+
+# --- Pacotes extras -----------------------------------------------------------
+# Vira uma sequência em bloco do YAML (uma entrada por linha) — ver
+# `expand_packages_block` no build-iso.sh.
+packages: @@PACKAGES_BLOCK@@
+
+# --- Primeiro boot ------------------------------------------------------------
+# Copia o projeto para /opt/ai-cpu-os, grava papel/família e habilita o serviço
+# ai-cpu-os-firstboot (que aplica as mods do conjunto 'system' e instala o
+# papel no hardware real). AI_CURTIN=1 faz o script usar `curtin in-target`.
+late-commands:
+  - AI_CURTIN=1 sh /cdrom/preseed/late-command.sh
+
+# Reinicia ao fim da instalação — é o que faz o primeiro boot acontecer.
+shutdown: reboot

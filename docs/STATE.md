@@ -21,10 +21,10 @@
 
 ## 2. Hardware: o que foi testado e o que não
 
-| Sistema | Hardware                        | Perfil   | Testado em hardware real? |
-|---------|---------------------------------|----------|---------------------------|
-| A       | Intel Xeon E5-2680 v4, 16 GB    | `intel-broadwell` / `inference` | ❌ **NÃO**                |
-| B       | AMD Ryzen 5 3500X, 64 GB        | `ryzen`  | ❌ **NÃO**                |
+| Sistema | Hardware                        | Família / papel | Testado em hardware real? |
+|---------|---------------------------------|-----------------|---------------------------|
+| A       | Intel Xeon E5-2680 v4, 16 GB    | `intel-broadwell` / `inference` | ❌ **NÃO** |
+| B       | AMD Ryzen 5 3500X, 64 GB        | `amd-zen2` / `builder` | ❌ **NÃO** |
 
 > **Nada foi executado em hardware físico ainda.** Todos os scripts foram
 > escritos e revisados estaticamente (sintaxe `bash -n`, revisão de lógica),
@@ -39,22 +39,22 @@
 |---------------------------------------|:-------:|:------------------:|:-------------------:|
 | `build.sh`                            | ✅      | ✅                 | ❌                  |
 | `detect-hardware.sh`                  | ✅      | ✅                 | ❌                  |
-| `common/kernel-tuning.sh`             | ✅      | ✅                 | ❌                  |
-| `common/hugepages.sh`                 | ✅      | ✅                 | ❌                  |
-| `common/governor.sh`                  | ✅      | ✅                 | ❌                  |
-| `profiles/xeon/install.sh`            | ✅      | ✅                 | ❌                  |
-| `profiles/xeon/llama-build.sh`        | ✅      | ✅                 | ❌                  |
-| `profiles/xeon/shell-ia.py`           | ✅      | ⚠️ py_compile     | ❌                  |
-| `profiles/xeon/ai-server.service`     | ✅      | ✅                 | ❌                  |
-| `profiles/ryzen/install.sh`           | ✅      | ✅                 | ❌                  |
-| `profiles/ryzen/docker-setup.sh`      | ✅      | ✅                 | ❌                  |
-| `profiles/ryzen/registry-setup.sh`    | ✅      | ✅                 | ❌                  |
-| `profiles/ryzen/gitea-compose.yml`    | ✅      | ⚠️ (YAML)          | ❌                  |
-| `profiles/ryzen/build-runner.sh`      | ✅      | ✅                 | ❌                  |
+| `mods/kernel-tuning/kernel-tuning.sh`             | ✅      | ✅                 | ❌                  |
+| `mods/hugepages/hugepages.sh`                 | ✅      | ✅                 | ❌                  |
+| `mods/governor/governor.sh`                  | ✅      | ✅                 | ❌                  |
+| `roles/inference/install.sh`            | ✅      | ✅                 | ❌                  |
+| `llama-build.sh`        | ✅      | ✅                 | ❌                  |
+| `roles/inference/shell-ia.py`           | ✅      | ⚠️ py_compile     | ❌                  |
+| `roles/inference/ai-server.service`     | ✅      | ✅                 | ❌                  |
+| `roles/builder/install.sh`           | ✅      | ✅                 | ❌                  |
+| `roles/builder/docker-setup.sh`      | ✅      | ✅                 | ❌                  |
+| `roles/builder/registry-setup.sh`    | ✅      | ✅                 | ❌                  |
+| `roles/builder/gitea-compose.yml`    | ✅      | ⚠️ (YAML)          | ❌                  |
+| `roles/builder/build-runner.sh`      | ✅      | ✅                 | ❌                  |
 | `tests/smoke-test.sh`                 | ✅      | ✅                 | ❌                  |
 | `docs/TUTORIAL.md`                    | ✅      | ⚠️ (revisão manual)| ❌                  |
 | `docs/VALIDATION.md` (protocolo)      | ✅      | ⚠️ (revisão manual)| ☐ **a executar**    |
-| `profiles/ryzen/llama-build.sh`       | ✅      | ✅                 | ❌                  |
+| `llama-build.sh`       | ✅      | ✅                 | ❌                  |
 | `docker/Dockerfile`                   | ✅      | ⚠️ (buildx --check)| ❌                  |
 | `.github/workflows/*.yml`             | ✅      | ⚠️ (yamllint)      | ❌ (1º run pendente)|
 | `Makefile`                            | ✅      | ⚠️ (make -n/test)  | ❌                  |
@@ -86,7 +86,7 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 
 | Momento | O que aconteceu |
 |---------|-----------------|
-| Commit `6da0c35` | `validate` ✅ verde. `container` ❌ **revelou um bug real**: o builder não tinha `pkg-config`, exigido pelo backend BLAS do ggml (`find_package(PkgConfig)`). **O mesmo bug existia no build nativo** (`profiles/xeon/llama-build.sh` e `install.sh`) — o primeiro build real no host também teria falhado. Corrigido em 4 lugares (commit `4cde4bb`). |
+| Commit `6da0c35` | `validate` ✅ verde. `container` ❌ **revelou um bug real**: o builder não tinha `pkg-config`, exigido pelo backend BLAS do ggml (`find_package(PkgConfig)`). **O mesmo bug existia no build nativo** (`llama-build.sh` e `install.sh`) — o primeiro build real no host também teria falhado. Corrigido em 4 lugares (commit `4cde4bb`). |
 | Tag `v0.2.0` (`4cde4bb`) | `build-llama` ✅ **6m04s** (compilou `xeon` e `ryzen`, executou os binários e rodou inferência real com o modelo minúsculo) · `container` ✅ **8m48s** · **Release `ai-cpu-os v0.2.0` publicada com os `.tar.gz` dos dois perfis**. |
 | `main` (`4cde4bb`) | `validate` ✅ · `container` ✅ 9m14s (imagem `:latest` publicada no GHCR). |
 | PR #1 do Dependabot (`afe6ab4`) | 2º ciclo: o passo **"Smoke da imagem (PR)"** falhou com **`exit code 127`**. Causa: os binários do llama.cpp carregam **RPATH absoluto `/src/build/bin`** (libs compartilhadas) e o `COPY build/bin` os movia sem corrigir o RPATH → o loader não achava `libllama.so`. Corrigido com `cmake --install` + `CMAKE_INSTALL_RPATH` + `ldconfig` + auto-verificação na imagem (commit `b5d86bc`, `docs/CI.md` § 8.2). Função não exercida antes porque o smoke só roda em `pull_request`. |
@@ -180,24 +180,40 @@ publicada com os binários `.tar.gz` dos dois perfis. Ver § 3.1.
 > **Basta executar os blocos e trazer os resultados preenchidos** — depois eles
 > são consolidados aqui (§ 2/§ 3/§ 5/§ 6) e no `docs/TUTORIAL.md`.
 
-**Passo 1 (AGORA) — ISO em base Ubuntu Server (`--distro ubuntu` + autoinstall).**
+**Passo 1 — ✅ CONCLUÍDO (implementado; não executado).** A variante **Ubuntu
+Server + autoinstall** está escrita: `iso/autoinstall/autoinstall.yaml`
+(config na raiz da ISO, ao lado de `casper/`), `--distro ubuntu|debian` com
+**ubuntu como padrão**, remontagem por `xorriso -indev/-outdev -map` (setores
+de boot preservados) e autoteste de templates (`--check-templates` / `make
+iso-yaml`) rodando no CI. Ver `docs/ISO.md` § 4.5.
 
-O usuário definiu que o SO de referência passa a ser **Ubuntu Server** ("a ideia
-é ter uma imagem do Ubuntu Server-MOD com essas otimizações"). A remasterização
-Debian atual continua funcional (legado), mas precisa nascer a variante Ubuntu:
+> ⚠️ **Implementado ≠ executado.** Nenhuma ISO foi gerada, instalada ou
+> bootada — em nenhuma das duas distros. Isso continua sendo o **Bloco M** de
+> [`docs/VALIDATION.md`](VALIDATION.md) e o maior risco em aberto.
 
-1. Criar `iso/autoinstall/{user-data,meta-data}` (Subiquity/cloud-init nocloud)
-   com late-command equivalente ao preseed atual (copia o projeto para
-   `/opt/ai-cpu-os` e habilita o serviço de primeiro boot).
-2. Adicionar `--distro ubuntu|debian` ao `iso/build-iso.sh`, com **ubuntu como
-   padrão** e `debian` preservado.
-3. Atualizar `docs/ISO.md` (§ base do SO, decisões) e o **Bloco M** de
-   `docs/VALIDATION.md`.
-4. `make iso-lint` → `make iso-dry-run` → bootar a ISO numa **VM**.
-   > ⚠️ **Nada disso foi executado ainda.** Não declare a ISO pronta sem
-   > bootar e instalar em VM.
+**Passo 1.1 (AGORA) — rodar os dois caminhos da ISO contra as ISOs reais.**
 
-**Passo 2 — validar a camada de famílias em hardware real.**
+Antes de qualquer VM: gerar de verdade, em uma máquina com `xorriso` e rede
+(o ambiente de desenvolvimento não tem `xorriso`). É barato e pega erro de
+layout/`xorriso` cedo.
+
+```bash
+sudo apt install -y xorriso curl coreutils
+make iso-lint && make iso-yaml
+
+# 1) Ubuntu (padrão) — o caminho menos exercitado
+sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/vda --keep-work
+
+# 2) Debian (legado)
+sudo bash iso/build-iso.sh --distro debian --disk /dev/vda --keep-work
+
+# 3) Conferir o conteúdo sem instalar (comandos no Bloco M.3)
+```
+
+Depois: bootar em **VM** (Bloco M.4) e acompanhar o primeiro boot (M.5).
+> ⚠️ Não declare a ISO pronta sem bootar e instalar em VM.
+
+**Passo 2 — validar as camadas novas em hardware real.**
 
 Rodar `bash families/resolve.sh`, `./detect-hardware.sh` e
 `sudo ./build.sh --dry-run` em **cada** máquina alvo (Xeon E5-2680 v4 e Ryzen 5
@@ -249,4 +265,4 @@ Ao terminar qualquer tarefa:
 | 2026-10-07 | Criado **`docs/VALIDATION.md`**: protocolo preenchível de testes em hardware (blocos A–L). É o caminho para trazer os resultados e fechar a validação real. Ver § 6. |
 | 2026-10-07 | Registrado o **entregável final = ISO de instalação**; criado `iso/` (`build-iso.sh` + preseed + serviço de 1º boot) e `docs/ISO.md`. Nenhuma ISO gerada/bootada ainda. |
 | 2026-10-07 | Criado **`docs/JOURNAL.md`** (diário de continuidade) + "Retomada rápida" no `AGENTS.md` + **Regra 14**. Unificado o Xeon como **quad channel** e corrigido `detect-hardware.sh` (agora conta os canais reais via `Bank Locator`). |
-| 2026-10-12 | **Refatoração: FAMÍLIAS de CPU + PAPÉIS + MODS.** Criadas as camadas `families/` (8 famílias com herança + `resolve.sh` + política de AVX-512), `roles/` (papel `inference` e `builder`, substituindo `profiles/xeon` e `profiles/ryzen`) e `mods/` (motor `list/info/check/apply/revert/test` + 4 mods com `revert`). O build do llama.cpp virou um **script único** dirigido pela família (`llama-build.sh`), com padrão **portátil** (`GGML_NATIVE=OFF`) e `--assume-family-isa` para cross-build. SO de referência passou a **Ubuntu Server**. CPU do Sistema A: **E5-2680 v4**. Comentários do README aplicados e removidos. Novos docs: `docs/FAMILIES.md`, `docs/MODS.md`, `mods/README.md`, `roles/README.md`. `make validate` verde (25 scripts). |
+| 2026-10-12 | **Refatoração: FAMÍLIAS de CPU + PAPÉIS + MODS.** Criadas as camadas `families/` (8 famílias com herança + `resolve.sh` + política de AVX-512), `roles/` (papel `inference` e `builder`, substituindo `roles/inference` e `roles/builder`) e `mods/` (motor `list/info/check/apply/revert/test` + 4 mods com `revert`). O build do llama.cpp virou um **script único** dirigido pela família (`llama-build.sh`), com padrão **portátil** (`GGML_NATIVE=OFF`) e `--assume-family-isa` para cross-build. SO de referência passou a **Ubuntu Server**. CPU do Sistema A: **E5-2680 v4**. Comentários do README aplicados e removidos. Novos docs: `docs/FAMILIES.md`, `docs/MODS.md`, `mods/README.md`, `roles/README.md`. `make validate` verde (25 scripts). || 2026-10-12 | **ISO em base Ubuntu Server (autoinstall/Subiquity).** `--distro ubuntu` (padrão) com `iso/autoinstall/autoinstall.yaml` na raiz da ISO; remontagem por `xorriso -indev/-outdev -map` (setores de boot da ISO oficial preservados, sem `mtools`/`isohdpfx.bin`); `late-command.sh` compartilhado pelos dois instaladores (`AI_CURTIN=1`); flags `--role`/`--family` também na ISO; autoteste de templates (`--check-templates`/`make iso-yaml`) no CI, validando o `autoinstall.yaml` **substituído** com `yamllint`. `docs/ISO.md` reescrito (§ 4.5), Bloco M virou distro-aware. **Nenhuma ISO gerada/bootada.** |

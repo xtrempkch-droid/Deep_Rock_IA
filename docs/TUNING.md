@@ -14,7 +14,7 @@ responsável.
 
 ## 1. Governor de CPU: `performance`
 
-- **Script:** `common/governor.sh`
+- **Script:** `mods/governor/governor.sh`
 - **Valor:** `performance` em `/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor`.
 - **O que faz:** trava cada núcleo na maior frequência permitida, sem
   escalonamento dinâmico.
@@ -30,7 +30,7 @@ responsável.
 
 ## 2. Desativação de C-states profundos
 
-- **Script:** `common/governor.sh` (orienta) + edição do GRUB.
+- **Script:** `mods/governor/governor.sh` (orienta) + edição do GRUB.
 - **Valor:** `intel_idle.max_cstate=1` (Intel/Xeon) — limita a C1.
 - **O que faz:** impede a CPU de entrar em estados de baixo consumo (C3+),
   que têm latência de retorno alta.
@@ -46,7 +46,7 @@ responsável.
 
 ## 3. Transparent Huge Pages (THP)
 
-- **Script:** `common/hugepages.sh`
+- **Script:** `mods/hugepages/hugepages.sh`
 - **Valor:** `always` (configurável; fallback para `madvise`).
 - **O que faz:** permite que o kernel use páginas de 2 MiB em vez de 4 KiB
   de forma automática.
@@ -66,7 +66,7 @@ responsável.
 
 ## 4. Huge pages estáticas (opcional)
 
-- **Script:** `common/hugepages.sh`
+- **Script:** `mods/hugepages/hugepages.sh`
 - **O que faz:** reserva um pool de páginas de 2 MiB (`nr_hugepages`) que só
   pode ser usado via `mmap(MAP_HUGETLB)`.
 - **Por que importa:** garante que o buffer de pesos tenha páginas grandes
@@ -82,7 +82,7 @@ responsável.
 
 ## 5. `vm.swappiness=10`
 
-- **Script:** `common/kernel-tuning.sh` → `/etc/sysctl.d/99-ai-tuning.conf`
+- **Script:** `mods/kernel-tuning/kernel-tuning.sh` → `/etc/sysctl.d/99-ai-tuning.conf`
 - **O que faz:** torna o kernel muito menos propenso a mover páginas anônimas
   para swap.
 - **Por que importa:** durante a inferência, o modelo (GB) deve permanecer
@@ -119,7 +119,7 @@ responsável.
 
 ## 8. `kernel.numa_balancing=0` (apenas single-socket)
 
-- **Script:** `common/kernel-tuning.sh` (condicional!)
+- **Script:** `mods/kernel-tuning/kernel-tuning.sh` (condicional!)
 - **O que faz:** desliga o *automatic NUMA balancing*.
 - **Por que importa:** em máquinas com **um único socket NUMA**, o
   balanceamento automático gasta tempo reagindo a page faults e **migrando
@@ -145,7 +145,7 @@ responsável.
 
 ## 10. `io_uring` (verificação)
 
-- **Script:** `common/kernel-tuning.sh`
+- **Script:** `mods/kernel-tuning/kernel-tuning.sh`
 - **O que faz:** verifica se o kernel tem suporte a `io_uring` (kernel ≥ 5.1)
   e informa.
 - **Por que importa:** `io_uring` é o mecanismo moderno de I/O assíncrono de
@@ -163,7 +163,7 @@ responsável.
 
 ## 11. Flags de compilação do llama.cpp
 
-- **Script:** `profiles/<perfil>/llama-build.sh`
+- **Script:** `llama-build.sh`
 
 ### Perfil Xeon (Haswell-EP, AVX2 apenas)
 

@@ -149,9 +149,9 @@ git clone https://github.com/<seu-usuario>/ai-cpu-os.git
 cd ai-cpu-os
 
 # Torna os scripts executáveis (o git preserva o bit, mas por segurança:)
-chmod +x build.sh detect-hardware.sh common/*.sh \
-         profiles/xeon/*.sh profiles/xeon/shell-ia.py \
-         profiles/ryzen/*.sh tests/*.sh
+chmod +x build.sh detect-hardware.sh mods/*/*.sh \
+         roles/inference/*.sh roles/inference/shell-ia.py \
+         roles/builder/*.sh tests/*.sh
 ```
 
 ### 2.2 Tour guiado (o que é cada peça)
@@ -162,12 +162,14 @@ chmod +x build.sh detect-hardware.sh common/*.sh \
 ```text
 ai-cpu-os/
 ├── build.sh            ← ORQUESTRADOR: você vai rodar este no fim das contas
-├── detect-hardware.sh  ← LÊ o hardware e escolhe o perfil (não altera nada)
+├── detect-hardware.sh  ← LÊ o hardware, escolhe a FAMÍLIA e o PAPEL (não altera nada)
+├── llama-build.sh      ← compila o llama.cpp para a família detectada
 ├── docs/               ← documentação viva (leia STATE.md SEMPRE)
-├── profiles/
-│   ├── xeon/           ← servidor de inferência (llama.cpp + shell-IA)
-│   └── ryzen/          ← build + registry + Gitea
-├── common/             ← tuning de kernel compartilhado
+├── families/           ← quem é o hardware (ISA/march, herança entre gerações)
+├── roles/
+│   ├── inference/       ← servidor de inferência (llama.cpp + shell-IA)
+│   └── builder/         ← build + registry + Gitea
+├── mods/               ← modificações portáveis (aplicar/reverter/testar)
 └── tests/              ← smoke-test.sh (verificação rápida)
 ```
 
@@ -214,7 +216,8 @@ root, cai num fallback por heurística).
 
 == Resultado ==
 [ok] Perfil escolhido: xeon
-PROFILE=xeon                       ← linha consumida pelo build.sh
+FAMILY=intel-broadwell            ← linha consumida pelo build.sh
+ROLE=inference                    ← papel sugerido (inference | builder)
 ```
 
 ### 3.3 Como interpretar cada bloco
@@ -236,10 +239,10 @@ PROFILE=xeon                       ← linha consumida pelo build.sh
 ### 3.4 Forçar um perfil (quando a detecção "erra")
 
 ```bash
-./build.sh --profile xeon      # força xeon
-./build.sh --profile ryzen     # força ryzen
+./build.sh --role inference      # força xeon
+./build.sh --role builder     # força ryzen
 # ou via variável de ambiente:
-AI_PROFILE=xeon ./build.sh
+AI_ROLE=inference ./build.sh
 ```
 
 ---
@@ -251,18 +254,18 @@ AI_PROFILE=xeon ./build.sh
 > parâmetros de kernel — **sem aplicar nada**.
 
 ```bash
-sudo ./build.sh --profile auto --dry-run
+sudo ./build.sh --role auto --dry-run
 ```
 
 Você verá as 4 etapas, mas tudo prefixado com `[dry-run]`:
 
 ```text
 === Etapa 1/4: Tuning de kernel comum ===
-[INFO ] [dry-run] Aplicando common/kernel-tuning.sh: bash .../kernel-tuning.sh --dry-run
-[INFO ] [dry-run] Aplicando common/hugepages.sh: bash .../hugepages.sh --dry-run
-[INFO ] [dry-run] Aplicando common/governor.sh: bash .../governor.sh --dry-run
+[INFO ] [dry-run] Aplicando mods/kernel-tuning/kernel-tuning.sh: bash .../kernel-tuning.sh --dry-run
+[INFO ] [dry-run] Aplicando mods/hugepages/hugepages.sh: bash .../hugepages.sh --dry-run
+[INFO ] [dry-run] Aplicando mods/governor/governor.sh: bash .../governor.sh --dry-run
 === Etapa 2/4: Instalação do perfil 'xeon' ===
-[INFO ] [dry-run] Executando .../profiles/xeon/install.sh: bash .../install.sh --dry-run
+[INFO ] [dry-run] Executando .../roles/inference/install.sh: bash .../install.sh --dry-run
 ...
 ```
 
@@ -281,17 +284,17 @@ Você verá as 4 etapas, mas tudo prefixado com `[dry-run]`:
 ### 5.1 Rodar de verdade
 
 ```bash
-sudo ./build.sh --profile auto
+sudo ./build.sh --role auto
 # em automação (sem perguntas):
-sudo ./build.sh --profile auto --yes
+sudo ./build.sh --role auto --yes
 ```
 
 ### 5.2 O que acontece em cada etapa
 
 | Etapa | O que roda | Resultado |
 |-------|-----------|-----------|
-| **1/4** | `common/kernel-tuning.sh`, `hugepages.sh`, `governor.sh` | `/etc/sysctl.d/99-ai-tuning.conf`, THP, governor `performance` |
-| **2/4** | `profiles/<perfil>/install.sh` | xeon: llama.cpp + serviço. ryzen: Docker + registry + Gitea |
+| **1/4** | `mods/kernel-tuning/kernel-tuning.sh`, `hugepages.sh`, `governor.sh` | `/etc/sysctl.d/99-ai-tuning.conf`, THP, governor `performance` |
+| **2/4** | `roles/<papel>/install.sh` | inference: llama.cpp + serviço. builder: Docker + registry + Gitea |
 | **3/4** | Verificação embutida | Imprime sysctl/governor/THP efetivos |
 | **4/4** | `tests/smoke-test.sh` | PASS/FAIL/SKIP por item |
 
@@ -375,7 +378,7 @@ O script **valida** as flags em `/proc/cpuinfo` **antes** de compilar e faz
 ### 7.2 Compilar
 
 ```bash
-sudo bash profiles/xeon/llama-build.sh --yes
+sudo bash llama-build.sh --yes
 ```
 
 Saída esperada (resumo):
@@ -389,17 +392,17 @@ Saída esperada (resumo):
 > **Dica:** se o Xeon tem 16 GB, use `--jobs 6` para não estourar a RAM
 > durante o build:
 > ```bash
-> sudo bash profiles/xeon/llama-build.sh --jobs 6 --yes
+> sudo bash llama-build.sh --jobs 6 --yes
 > ```
 
 ### 7.3 Instalar serviço, usuário e (opcional) modelo
 
 ```bash
 # Só instala o serviço/usuário e aplica o sysctl:
-sudo bash profiles/xeon/install.sh --yes
+sudo bash roles/inference/install.sh --yes
 
 # Com download do modelo sugerido (Qwen2.5-Coder-1.5B, ~1.1 GB):
-sudo bash profiles/xeon/install.sh --auto-model --yes
+sudo bash roles/inference/install.sh --auto-model --yes
 ```
 
 O `install.sh` do Xeon:
@@ -436,14 +439,14 @@ free -h                                          # confirme que o modelo cabe
 Modo interativo:
 
 ```bash
-python3 profiles/xeon/shell-ia.py
+python3 roles/inference/shell-ia.py
 # você> quanta RAM livre tem nesta máquina?
 ```
 
 Prompt único (não-interativo):
 
 ```bash
-python3 profiles/xeon/shell-ia.py -p "liste os arquivos em /opt/models"
+python3 roles/inference/shell-ia.py -p "liste os arquivos em /opt/models"
 ```
 
 > **Como funciona por dentro:** o `shell-ia.py` envia sua pergunta ao
@@ -486,7 +489,7 @@ argumentos perigosos, caminhos fora das raízes permitidas
 ```bash
 # 1. Meça ANTES (com governor powersave e THP madvise, num sistema cru):
 #    rode o bench e anote os números.
-# 2. Aplique o build:  sudo ./build.sh --profile xeon
+# 2. Aplique o build:  sudo ./build.sh --role inference
 # 3. Meça DEPOIS e compare.
 ```
 
@@ -519,13 +522,13 @@ banda perdida) e **pede confirmação**. Isso é intencional — é o problema d
 hardware mais caro deste perfil.
 
 ```bash
-sudo bash profiles/ryzen/install.sh
+sudo bash roles/builder/install.sh
 ```
 
 ### 8.1 Docker Engine + Compose
 
 ```bash
-sudo bash profiles/ryzen/docker-setup.sh --yes
+sudo bash roles/builder/docker-setup.sh --yes
 ```
 
 O script:
@@ -548,7 +551,7 @@ docker --version && docker compose version
 ### 8.2 Registry privado
 
 ```bash
-sudo bash profiles/ryzen/registry-setup.sh --yes
+sudo bash roles/builder/registry-setup.sh --yes
 curl -s http://localhost:5000/v2/          # deve responder {} ou catálogo
 ```
 
@@ -559,7 +562,7 @@ curl -s http://localhost:5000/v2/          # deve responder {} ou catálogo
 ### 8.3 Gitea
 
 ```bash
-cd profiles/ryzen
+cd roles/builder
 docker compose -f gitea-compose.yml up -d
 ```
 
@@ -575,7 +578,7 @@ docker compose -f gitea-compose.yml up -d
 Crie um repositório de teste com um `Dockerfile` e rode:
 
 ```bash
-bash profiles/ryzen/build-runner.sh \
+bash roles/builder/build-runner.sh \
     --context /caminho/do/repo \
     --tag localhost:5000/meu/app:1.0 \
     --push
@@ -622,9 +625,9 @@ Registry (:5000)  →  imagens prontas
 ### 9.1 Rodar o smoke-test
 
 ```bash
-bash tests/smoke-test.sh --profile auto
+bash tests/smoke-test.sh --role auto
 # em CI/strict (falha = exit 1):
-bash tests/smoke-test.sh --profile auto --strict
+bash tests/smoke-test.sh --role auto --strict
 ```
 
 Itens verificados (exemplos):
@@ -645,12 +648,12 @@ Itens verificados (exemplos):
 ### 9.2 Checklist final
 
 - [ ] `./detect-hardware.sh` rodou e o perfil faz sentido.
-- [ ] `sudo ./build.sh --profile auto --dry-run` foi revisado.
-- [ ] `sudo ./build.sh --profile auto` concluiu sem `[ERROR]`.
+- [ ] `sudo ./build.sh --role auto --dry-run` foi revisado.
+- [ ] `sudo ./build.sh --role auto` concluiu sem `[ERROR]`.
 - [ ] `sysctl`/governor/THP conferidos manualmente.
 - [ ] *(se alterou C-states)* **reboot** feito e `cat /proc/cmdline` confere.
 - [ ] *(xeon)* `curl http://127.0.0.1:8080/health` responde.
-- [ ] *(xeon)* `python3 profiles/xeon/shell-ia.py -p "quanta RAM livre?"` responde.
+- [ ] *(xeon)* `python3 roles/inference/shell-ia.py -p "quanta RAM livre?"` responde.
 - [ ] *(xeon)* `llama-bench` rodou e os números foram anotados em `docs/STATE.md`.
 - [ ] *(ryzen)* `docker`, registry (:5000) e Gitea (:3000) ativos.
 - [ ] *(ryzen)* um build+push de teste funcionou.
@@ -664,7 +667,7 @@ Itens verificados (exemplos):
 ### 10.1 Atualizar o llama.cpp
 
 ```bash
-sudo bash profiles/xeon/llama-build.sh --ref master --yes
+sudo bash llama-build.sh --ref master --yes
 ```
 
 O script faz `git fetch` + `checkout` e recompila. Se mudou de versão, reinicie

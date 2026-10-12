@@ -106,8 +106,8 @@ Isto evita perder tempo (re)descobrindo o que já se sabe sobre **esta** máquin
 - **Objetivo:** criar o repositório `ai-cpu-os` completo a partir da
   especificação (SO para LLM em CPU, dois perfis).
 - **Feito:** 24 arquivos — `README`, `AGENTS`, `LICENSE`, `build.sh`,
-  `detect-hardware.sh`, `common/` (3), `profiles/xeon/` (5),
-  `profiles/ryzen/` (5), `tests/smoke-test.sh` e 6 docs.
+  `detect-hardware.sh`, `common/` (3), `roles/inference/` (5),
+  `roles/builder/` (5), `tests/smoke-test.sh` e 6 docs.
 - **Decisões:** Bash puro (sem Ansible) para zero dependências no alvo;
   perfis separados por hardware (não "config média"); `--dry-run` em tudo.
 - **Verificado:** `bash -n` em 12 scripts, `py_compile`, YAML, `--dry-run`.
@@ -220,9 +220,9 @@ em seu sistema operacional"*.
    `zen4`; `generic` como fallback), `_base/family.conf`, `resolve.sh`
    (`pick_family`/`load_family`/`compute_isa`) e política de AVX-512
    (`never`/`optin`/`auto`).
-2. **`roles/`** — `profiles/xeon` → `roles/inference`, `profiles/ryzen` →
+2. **`roles/`** — `roles/inference` → `roles/inference`, `roles/builder` →
    `roles/builder` (via `git mv`, preservando histórico).
-3. **`mods/`** — `common/*.sh` → `mods/{kernel-tuning,hugepages,governor}/`,
+3. **`mods/`** — `mods/*/*.sh` → `mods/{kernel-tuning,hugepages,governor}/`,
    cada uma com `mod.conf` + `apply.sh` + `revert.sh`, mais a mod nova
    `openblas-threads`. Motor `mods/apply.sh` com
    `list/info/check/apply/revert/test` e conjuntos `system`/`portable`.
@@ -271,6 +271,88 @@ em seu sistema operacional"*.
 
 **Commits desta sessão:** `8b6d57e` — `refactor!: suporte por FAMÍLIAS de CPU + papéis + mods portáveis`
   (e um commit de acompanhamento propagando o modelo de CPU E5-2680 v4 nos docs).
+
+---
+
+### Sessão #10 — 2026-10-12 · 🎯 ISO em base Ubuntu Server (autoinstall)
+
+**Objetivo (pedido do usuário, verbatim):** *"vamos para o proximo passo"* —
+ou seja, o passo registrado no `STATE.md` § 6 como "Passo 1": a ISO em base
+**Ubuntu Server** com autoinstall.
+
+**Feito:**
+
+1. **`iso/autoinstall/autoinstall.yaml`** — nova config de instalação para o
+   Subiquity, com locale/teclado/timezone, `identity` (usuário + hash),
+   `ssh`, `storage` (layout `direct`, com `match.path` quando há `--disk`),
+   `apt` determinístico, instalador congelado (`refresh-installer.update:
+   false`, sem drivers/OEM/snaps) e `late-commands:` chamando o
+   `late-command.sh` compartilhado.
+2. **`iso/build-iso.sh` distro-aware** — `--distro ubuntu|debian` (**ubuntu
+   como padrão**), `--role`/`--family` no lugar de `--profile` (que segue como
+   alias obsoleto), `--hostname`, `--check-templates`.
+3. **Caminho Ubuntu** — valida `casper/`, extrai apenas os `grub.cfg` (BIOS e
+   UEFI), injeta uma entrada `ai-cpu-os-auto` com o parâmetro `autoinstall` e
+   remonta por **`xorriso -indev/-outdev -map`**, preservando os setores de
+   boot da ISO oficial (não precisa de `mtools` nem `isohdpfx.bin`).
+4. **`late-command.sh` e `firstboot.sh` compartilhados** pelos dois
+   instaladores: `in_target()` usa `in-target` (d-i) ou `curtin in-target --`
+   (Subiquity, via `AI_CURTIN=1`); agora gravam `ROLE=`/`FAMILY=`/`DISTRO=` no
+   `.iso-config` e chamam `build.sh --role … --family …`.
+5. **Autoteste dos templates** (`--check-templates` / `make iso-yaml`) ligado
+   ao `iso-lint` e, portanto, ao CI.
+6. Docs: `docs/ISO.md` reescrito (§ 4.5 explica as 4 decisões do caminho
+   Ubuntu), Bloco M de `VALIDATION.md` distro-aware, e uma passada mecânica
+   corrigindo **caminhos quebrados** em toda a documentação
+   (`profiles/xeon/…` → `roles/inference/…`, `common/*.sh` → `mods/*/*.sh`,
+   `--profile xeon` → `--role inference`, etc.).
+
+**Decisões (e por quê):**
+
+- **`autoinstall.yaml` na mídia, não `nocloud`.** A doc do Subiquity permite
+  os dois; o arquivo na raiz dispensa `#cloud-config`, a chave de topo
+  `autoinstall:` (que só vale em 24.04) e o **escape do `;`** na cmdline do
+  GRUB. Menos peças, menos modos de falha silenciosa.
+- **Remontar com `-indev/-outdev -map`** em vez de extrair + `mkisofs`: os
+  setores de boot (El Torito BIOS, imagem EFI, MBR híbrido) ficam idênticos
+  aos do Ubuntu. Era o principal risco do caminho Ubuntu.
+- **Um `late-command.sh` para os dois instaladores**, com o wrapper de
+  `in-target` parametrizado — em vez de duplicar a lógica.
+- **Tuning continua no primeiro boot.** O `autoinstall.yaml` só instala; quem
+  detecta família/papel e aplica as mods é o `firstboot.sh`, onde o hardware é
+  real.
+
+**Problemas encontrados e resolvidos:**
+
+- 🐛 **`HOSTNAME` colide com a variável interna do bash.** O script definia
+  `HOSTNAME=""` no topo; renomeada para `SYS_HOSTNAME` (o token `@@HOSTNAME@@`
+  do template ficou igual).
+- 🐛 **O template do autoinstall não é YAML válido** enquanto tem
+  `@@STORAGE_LAYOUT@@`: o `@` é indicador reservado do YAML, e o `yamllint`
+  falhava (com razão). Solução: o autoteste `--check-templates` valida o
+  arquivo **depois** da substituição — e isso ficou documentado no cabeçalho do
+  template para não pegar o próximo desavisado.
+- 🐛 **Lista de pacotes numa linha estourava 120 colunas** (133 com a lista
+  padrão) e o `yamllint` reprovava. Trocada a sequência *flow* por uma
+  sequência em **bloco** (`expand_packages_block`), que não tem limite de
+  tamanho. **Foi o autoteste que pegou** — antes de qualquer ISO existir.
+- `resolve.sh` é carregado por `source`; a variável `FAMILIES_DIR` já tinha sido
+  renomeada para `RESOLVE_FAMILIES_DIR` na sessão #9 pelo mesmo motivo.
+- **Ordem de execução no `main`**: `inject_project` precisa vir DEPOIS de
+  `prepare_ubuntu`/`extract_iso_debian` (o destino depende do layout).
+
+**NÃO feito / não testado (importante):**
+
+- **Nenhuma ISO foi gerada, instalada ou bootada** — nem Ubuntu nem Debian.
+  O ambiente de desenvolvimento não tem `xorriso`.
+- O `grub.cfg` do Ubuntu **não foi inspecionado de verdade**: o patch é
+  "appenda no fim", que funciona para o menu, mas só um boot real confirma
+  (especialmente se o `EFI/boot/grub.cfg` só delegar ao `boot/grub/grub.cfg`).
+- Nada validado em hardware real (blocos N e O de `VALIDATION.md`).
+- `md5sum.txt` do Ubuntu é **removido** (não regenerado) — decisão registrada
+  em `docs/ISO.md` § 6.
+
+**Commits desta sessão:** (a preencher após o push).
 
 ---
 

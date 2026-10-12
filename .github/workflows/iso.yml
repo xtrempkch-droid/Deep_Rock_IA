@@ -1,26 +1,40 @@
 name: iso
 
-# Gera a ISO de instalação do ai-cpu-os a partir da ISO oficial Debian netinst.
+# Gera a ISO de instalação do ai-cpu-os a partir da ISO oficial do SO base.
+#
+# Base padrão: **Ubuntu Server live** + autoinstall (Subiquity). A remasterização
+# Debian (netinst + preseed) continua disponível em `--distro debian`.
 #
 # Disparo: manual (workflow_dispatch) e em tags (v*) — igual ao build-llama,
-# porque baixar ~700 MB + remasterizar leva alguns minutos e queimaria
-# minutos de CI a cada push.
+# porque baixar a ISO base (~2,6 GB no Ubuntu) + remasterizar leva minutos e
+# queimaria a cota de CI a cada push.
 #
-# O artefato servido aqui é uma **prova de que o caminho da ISO funciona** e
-# uma ISO genérica para uso em VM (o disco do preseed é /dev/vda, que existe
-# em VMs com virtio). Para instalar em hardware real, regenere localmente com
+# O artefato servido aqui é uma **prova de que o caminho da ISO funciona** e uma
+# ISO genérica para uso em VM (o disco do autoinstall é /dev/vda, que existe em
+# VMs com virtio). Para instalar em hardware real, regenere localmente com
 # `--disk` apontando para o SEU disco — ver docs/ISO.md.
 on:
   workflow_dispatch:
     inputs:
-      profile:
-        description: "Perfil gravado na ISO (auto = detecta no hardware real)"
+      distro:
+        description: "Base do SO"
+        required: false
+        default: ubuntu
+        type: choice
+        options: [ubuntu, debian]
+      role:
+        description: "Papel gravado na ISO (auto = detecta no hardware real)"
         required: false
         default: auto
         type: choice
-        options: [auto, xeon, ryzen]
+        options: [auto, inference, builder]
+      family:
+        description: "Família gravada na ISO (auto = detecta no hardware real)"
+        required: false
+        default: auto
+        type: string
       disk:
-        description: "Disco do preseed (APENAS gravado na ISO; em VM virtio é /dev/vda)"
+        description: "Disco do autoinstall (APENAS gravado na ISO; em VM virtio é /dev/vda)"
         required: false
         default: /dev/vda
         type: string
@@ -36,10 +50,12 @@ concurrency:
 
 jobs:
   build-iso:
-    name: Gerar ISO (${{ inputs.profile || 'auto' }})
+    name: Gerar ISO (${{ inputs.distro || 'ubuntu' }} · ${{ inputs.role || 'auto' }})
     runs-on: ubuntu-latest
     env:
-      ISO_PROFILE: ${{ inputs.profile || 'auto' }}
+      ISO_DISTRO: ${{ inputs.distro || 'ubuntu' }}
+      ISO_ROLE: ${{ inputs.role || 'auto' }}
+      ISO_FAMILY: ${{ inputs.family || 'auto' }}
       ISO_DISK: ${{ inputs.disk || '/dev/vda' }}
     steps:
       - uses: actions/checkout@v4
@@ -47,29 +63,37 @@ jobs:
       - name: Instalar ferramentas de remasterização
         run: |
           sudo apt-get update -qq
-          # isolinux -> isohdpfx.bin (boot híbrido BIOS+EFI)
-          # mtools   -> patch do grub.cfg dentro da efi.img (boot UEFI)
+          # xorriso -> remasterização (as duas distros)
+          # No caminho ubuntu  NÃO são precisos: os setores de boot da ISO
+          #   oficial são preservados via `xorriso -indev/-outdev -map`.
+          # No caminho debian precisamos de:
+          #   isolinux -> isohdpfx.bin (boot híbrido BIOS+EFI)
+          #   mtools   -> patch do grub.cfg dentro da efi.img (boot UEFI)
           sudo apt-get install -y --no-install-recommends \
-            xorriso isolinux mtools curl coreutils
+            xorriso isolinux mtools curl coreutils yamllint
           xorriso --version | head -1
 
-      - name: Lint dos scripts da ISO
+      - name: Lint e autoteste dos templates da ISO
         run: make iso-lint
 
       - name: Simulação (dry-run)
-        run: make iso-dry-run DISK="$ISO_DISK" PROFILE="$ISO_PROFILE"
+        run: |
+          make iso-dry-run DISK="$ISO_DISK" DISTRO="$ISO_DISTRO" \
+            ROLE="$ISO_ROLE" FAMILY="$ISO_FAMILY"
 
       - name: Gerar a ISO
         run: |
           set -euo pipefail
           sudo bash iso/build-iso.sh \
+            --distro "$ISO_DISTRO" \
             --disk "$ISO_DISK" \
-            --profile "$ISO_PROFILE" \
+            --role "$ISO_ROLE" \
+            --family "$ISO_FAMILY" \
             --yes \
-            --out "$GITHUB_WORKSPACE/iso/out/ai-cpu-os-${ISO_PROFILE}.iso" \
+            --out "$GITHUB_WORKSPACE/iso/out/ai-cpu-os-${ISO_DISTRO}.iso" \
           2>&1 | tee /tmp/iso-build.log
 
-          iso="iso/out/ai-cpu-os-${ISO_PROFILE}.iso"
+          iso="iso/out/ai-cpu-os-${ISO_DISTRO}.iso"
           test -f "$iso" || { echo "::error::ISO não foi gerada"; exit 1; }
           ls -la "$iso"
           sha256sum "$iso" | tee "$iso.sha256"
@@ -80,14 +104,16 @@ jobs:
           {
             echo "## ISO de instalação (ai-cpu-os)"
             echo
-            echo "- Perfil gravado: \`$ISO_PROFILE\` (\`auto\` = detecta o hardware no 1º boot)"
-            echo "- Disco do preseed: \`$ISO_DISK\`"
+            echo "- Base do SO: \`$ISO_DISTRO\`"
+            echo "- Papel gravado: \`$ISO_ROLE\` (\`auto\` = detecta o hardware no 1º boot)"
+            echo "- Família gravada: \`$ISO_FAMILY\` (\`auto\` = detecta o hardware no 1º boot)"
+            echo "- Disco do autoinstall: \`$ISO_DISK\`"
             echo
-            if [ -f "iso/out/ai-cpu-os-${ISO_PROFILE}.iso" ]; then
+            if [ -f "iso/out/ai-cpu-os-${ISO_DISTRO}.iso" ]; then
               echo "### Artefato"
               echo '```'
-              ls -lh "iso/out/ai-cpu-os-${ISO_PROFILE}.iso"
-              cat "iso/out/ai-cpu-os-${ISO_PROFILE}.iso.sha256"
+              ls -lh "iso/out/ai-cpu-os-${ISO_DISTRO}.iso"
+              cat "iso/out/ai-cpu-os-${ISO_DISTRO}.iso.sha256"
               echo '```'
             fi
             echo "### Avisos do build (WARN)"
@@ -101,7 +127,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ai-cpu-os-iso-${{ env.ISO_PROFILE }}
+          name: ai-cpu-os-iso-${{ env.ISO_DISTRO }}
           path: |
             iso/out/*.iso
             iso/out/*.iso.sha256

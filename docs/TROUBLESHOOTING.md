@@ -123,7 +123,7 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
   ```bash
   echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
   ```
-  Para persistir, adicione ao `common/hugepages.sh` (já faz isso) ou use
+  Para persistir, adicione ao `mods/hugepages/hugepages.sh` (já faz isso) ou use
   `systemd-tmpfiles`/unit própria. Se `always` causar problemas, use
   `madvise` + `MADV_HUGEPAGE` explícito.
 
@@ -224,7 +224,7 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 ### Comando bloqueado pela whitelist
 
 - **Causa:** sandbox funcionando como esperado.
-- **Solução:** edite a `WHITELIST` no topo de `profiles/xeon/shell-ia.py`
+- **Solução:** edite a `WHITELIST` no topo de `roles/inference/shell-ia.py`
   conscientemente. Evite adicionar comandos destrutivos.
 
 ---
@@ -234,7 +234,7 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 ### `build.sh` falha dizendo que não está como root
 
 - **Solução:** use `sudo ./build.sh ...`. Para simular sem aplicar:
-  `./build.sh --profile auto --dry-run` (dry-run não precisa de root para
+  `./build.sh --role auto --dry-run` (dry-run não precisa de root para
   inspecionar, mas a detecção de RAM pode precisar).
 
 ### Rodar duas vezes quebrou algo (esperado idempotente)

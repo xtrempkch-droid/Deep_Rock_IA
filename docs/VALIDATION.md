@@ -91,8 +91,8 @@ mkdir -p ~/ai-cpu-os-resultados && cd ~/ai-cpu-os-resultados
 git clone https://github.com/xtrempkch-droid/Deep_Rock_IA.git ai-cpu-os
 cd ai-cpu-os
 git log --oneline -1                      # anote o commit
-chmod +x build.sh detect-hardware.sh common/*.sh \
-         profiles/*/*.sh profiles/xeon/shell-ia.py tests/*.sh
+chmod +x build.sh detect-hardware.sh mods/*/*.sh \
+         roles/*/*.sh roles/inference/shell-ia.py tests/*.sh
 ```
 
 | Campo | Valor |
@@ -125,10 +125,10 @@ chmod +x build.sh detect-hardware.sh common/*.sh \
 
 ```bash
 bash -n build.sh detect-hardware.sh
-for f in common/*.sh profiles/xeon/*.sh profiles/ryzen/*.sh tests/*.sh; do
+for f in mods/*/*.sh roles/inference/*.sh roles/builder/*.sh tests/*.sh; do
   bash -n "$f" || echo "FALHOU: $f"
 done
-python3 -m compileall -q profiles/ && echo "python OK"
+python3 -m compileall -q roles/ && echo "python OK"
 make lint          # se shellcheck/yamllint estiverem instalados
 ```
 
@@ -141,21 +141,21 @@ make lint          # se shellcheck/yamllint estiverem instalados
 
 ```bash
 ./detect-hardware.sh
-./detect-hardware.sh --quiet     # deve imprimir apenas "PROFILE=..."
+./detect-hardware.sh --quiet     # deve imprimir FAMILY=... e ROLE=...
 ```
 
 | Campo | Valor |
 |-------|-------|
 | Perfil detectado na VM | _(preencher)_ |
-| `--quiet` imprimiu `PROFILE=`? | _(preencher)_ |
+| `--quiet` imprimiu `FAMILY=` e `ROLE=`? | _(preencher)_ |
 
 ### A.3 Simulação (dry-run) dos dois perfis
 
 ```bash
-sudo ./build.sh --profile xeon  --dry-run --yes --skip-tests
-sudo ./build.sh --profile ryzen --dry-run --yes --skip-tests
-sudo ./build.sh --profile auto  --dry-run --yes --skip-tests
-bash tests/smoke-test.sh --dry-run --profile xeon
+sudo ./build.sh --role inference  --dry-run --yes --skip-tests
+sudo ./build.sh --role builder --dry-run --yes --skip-tests
+sudo ./build.sh --role auto  --dry-run --yes --skip-tests
+bash tests/smoke-test.sh --dry-run --role inference
 ```
 
 | Campo | Valor |
@@ -166,9 +166,9 @@ bash tests/smoke-test.sh --dry-run --profile xeon
 ### A.4 (Opcional) Aplicar de verdade na VM
 
 ```bash
-sudo ./build.sh --profile auto --yes
+sudo ./build.sh --role auto --yes
 sudo reboot        # se o C-states foi alterado
-bash tests/smoke-test.sh --profile auto
+bash tests/smoke-test.sh --role auto
 ```
 
 | Campo | Valor |
@@ -238,7 +238,7 @@ tar -xzf ~/Downloads/ai-cpu-os-llama-xeon-*.tar.gz --strip-components=1
 ### C.2 Caminho completo — compilar no Xeon
 
 ```bash
-sudo bash profiles/xeon/llama-build.sh --jobs 6 --yes | tee ~/ai-cpu-os-resultados/build-xeon.log
+sudo bash llama-build.sh --jobs 6 --yes | tee ~/ai-cpu-os-resultados/build-xeon.log
 ```
 
 > **Atenção:** o script **instala `pkg-config`** se estiver faltando (bug
@@ -295,7 +295,7 @@ sudo ./detect-hardware.sh > /dev/null   # sanity
 ### D.2 Aplicar
 
 ```bash
-sudo ./build.sh --profile xeon --yes | tee ~/ai-cpu-os-resultados/build-xeon-total.log
+sudo ./build.sh --role inference --yes | tee ~/ai-cpu-os-resultados/build-xeon-total.log
 ```
 
 Responda **sim** à pergunta sobre a cmdline do kernel (C-states).
@@ -349,11 +349,11 @@ ls /sys/devices/system/cpu/cpu0/cpuidle/state*/name | xargs -I{} sh -c 'echo -n 
 
 ```bash
 # Com download do modelo sugerido (~1.1 GB):
-sudo bash profiles/xeon/install.sh --auto-model --yes \
+sudo bash roles/inference/install.sh --auto-model --yes \
   | tee ~/ai-cpu-os-resultados/install-xeon.log
 
 # OU com um modelo seu (caminho local, sem download):
-sudo bash profiles/xeon/install.sh --model-path /opt/models/SEU-MODELO.gguf --yes
+sudo bash roles/inference/install.sh --model-path /opt/models/SEU-MODELO.gguf --yes
 ```
 
 | Campo | Valor |
@@ -383,10 +383,10 @@ sudo journalctl -u ai-server -n 30 --no-pager
 
 ```bash
 # Prompt único
-python3 profiles/xeon/shell-ia.py -p "quanta RAM livre tem nesta máquina?"
+python3 roles/inference/shell-ia.py -p "quanta RAM livre tem nesta máquina?"
 
 # Interativo
-python3 profiles/xeon/shell-ia.py
+python3 roles/inference/shell-ia.py
 #  você> liste os arquivos em /opt/models
 #  você> procure por "swappiness" em /etc/sysctl.d
 ```
@@ -395,11 +395,11 @@ python3 profiles/xeon/shell-ia.py
 
 ```bash
 # Deve FUNCIONAR (está na whitelist):
-python3 profiles/xeon/shell-ia.py -p "rode o comando: uptime"
+python3 roles/inference/shell-ia.py -p "rode o comando: uptime"
 
 # Deve ser BLOQUEADO pelo sandbox (fora da whitelist / caminho proibido):
-python3 profiles/xeon/shell-ia.py -p "leia o arquivo /etc/shadow"
-python3 profiles/xeon/shell-ia.py -p "rode o comando: rm -rf /tmp/x"
+python3 roles/inference/shell-ia.py -p "leia o arquivo /etc/shadow"
+python3 roles/inference/shell-ia.py -p "rode o comando: rm -rf /tmp/x"
 ```
 
 | Teste | Resultado esperado | Medido |
@@ -474,7 +474,7 @@ done
 
 ```bash
 cd ~/ai-cpu-os     # no Ryzen
-sudo bash profiles/ryzen/install.sh        # leia o ALERTA e confirme
+sudo bash roles/builder/install.sh        # leia o ALERTA e confirme
 sudo dmidecode -t memory | grep -E 'Locator|Size|Speed'
 ```
 
@@ -500,7 +500,7 @@ sudo dmidecode -t memory | grep -E 'Locator|Size|Speed'
 ## Bloco H — Ryzen: Docker + registry + Gitea
 
 ```bash
-sudo bash profiles/ryzen/install.sh --yes | tee ~/ai-cpu-os-resultados/install-ryzen.log
+sudo bash roles/builder/install.sh --yes | tee ~/ai-cpu-os-resultados/install-ryzen.log
 ```
 
 ### H.1 Docker
@@ -535,7 +535,7 @@ docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}'
 ### H.3 Gitea
 
 ```bash
-cd profiles/ryzen && docker compose -f gitea-compose.yml up -d
+cd roles/builder && docker compose -f gitea-compose.yml up -d
 docker logs --tail 20 gitea
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/
 ```
@@ -561,13 +561,13 @@ mkdir -p /tmp/app-teste && cd /tmp/app-teste
 printf 'FROM debian:12-slim\nCMD ["echo","oi do ai-cpu-os"]\n' > Dockerfile
 
 # 2. Build + push para o registry local
-bash ~/ai-cpu-os/profiles/ryzen/build-runner.sh \
+bash ~/ai-cpu-os/roles/builder/build-runner.sh \
   --context /tmp/app-teste \
   --tag localhost:5000/teste/app:1.0 \
   --push
 
 # 3. (2º build = testa o cache)
-bash ~/ai-cpu-os/profiles/ryzen/build-runner.sh \
+bash ~/ai-cpu-os/roles/builder/build-runner.sh \
   --context /tmp/app-teste \
   --tag localhost:5000/teste/app:1.0 \
   --push
@@ -637,7 +637,7 @@ curl -s http://127.0.0.1:8081/health; echo
 > Requisito do projeto: rodar de novo **não pode** quebrar nada.
 
 ```bash
-sudo ./build.sh --profile auto --yes   # 2ª execução
+sudo ./build.sh --role auto --yes   # 2ª execução
 ```
 
 **Procurar na saída:** mensagens tipo
@@ -690,53 +690,82 @@ sudo systemctl disable --now ai-server
 ### M.1 Preparar a máquina de build (Debian/Ubuntu com xorriso)
 
 ```bash
-sudo apt install -y xorriso curl coreutils isolinux mtools
-make iso-lint        # bash -n + shellcheck dos scripts da ISO
+# Obrigatórias
+sudo apt install -y xorriso curl coreutils
+# Só para --distro debian (boot UEFI dentro de efi.img + boot híbrido)
+sudo apt install -y isolinux mtools
+
+make iso-lint        # bash -n + shellcheck + autoteste dos templates
+make iso-yaml        # só o autoteste (valida o autoinstall.yaml já substituído)
 make iso-dry-run     # simulação completa, não baixa nem altera nada
 ```
 
 | Campo | Valor |
 |-------|-------|
 | `make iso-lint` passou? | _(preencher)_ |
+| Autoteste dos templates (`autoinstall.yaml` YAML válido) OK? | _(preencher)_ |
 | `make iso-dry-run` sem erros? | _(preencher)_ |
+
+> **Registre as duas distros.** O caminho `ubuntu` é o padrão e o menos
+> exercitado; o `debian` é o legado. Ambos precisam do mesmo bloco abaixo.
 
 ### M.2 Gerar a ISO
 
 ```bash
 # --disk é o disco que será apagado NA MÁQUINA QUE INSTALAR a ISO.
 # Para testar em VM, use o disco virtual dela (ex.: /dev/vda).
-sudo bash iso/build-iso.sh --disk /dev/vda --profile auto --keep-work
+
+# 1) Ubuntu (padrão) — autoinstall/Subiquity
+sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/vda --keep-work
+
+# 2) Debian (legado) — preseed/d-i
+sudo bash iso/build-iso.sh --distro debian --disk /dev/vda --keep-work
 ```
 
 O script imprime, no fim: caminho da ISO, **SHA256**, o Volume ID, e a
 **senha gerada** (se você não passou `--password-hash`). **Anote a senha.**
 
-| Campo | Valor |
-|-------|-------|
-| Download da ISO oficial funcionou? | _(preencher)_ |
-| SHA256 da ISO oficial conferiu? | _(preencher — esperado: sim)_ |
-| Tempo total do build | _(preencher)_ |
-| Caminho da ISO gerada | _(preencher)_ |
-| SHA256 da ISO gerada | _(preencher)_ |
-| Mensagens de WARN (ex.: isohdpfx, mtools) | _(preencher)_ |
+| Campo | Ubuntu | Debian |
+|-------|--------|--------|
+| Download da ISO oficial funcionou? | _(preencher)_ | _(preencher)_ |
+| SHA256 da ISO oficial conferiu? | _(preencher — esperado: sim)_ | _(preencher — esperado: sim)_ |
+| Tempo total do build | _(preencher)_ | _(preencher)_ |
+| Caminho da ISO gerada | _(preencher)_ | _(preencher)_ |
+| SHA256 da ISO gerada | _(preencher)_ | _(preencher)_ |
+| Mensagens de WARN | _(preencher)_ | _(preencher)_ |
+
+> Se o `xorriso -indev/-outdev -map` reclamar de algum caminho, cole a mensagem
+> — é o ponto mais provável de ajuste no caminho Ubuntu (§ 4.5 de `docs/ISO.md`).
 
 ### M.3 Verificar o conteúdo da ISO (sem instalar)
 
 ```bash
-# Deve listar: ai-cpu-os.cfg, late-command.sh, firstboot.sh, o .service
+# Os 3 primeiros valem para as DUAS distros:
 xorriso -indev iso/out/ai-cpu-os-*.iso -find /preseed -type f -exec echo
-# Deve confirmar que o projeto foi embutido
 xorriso -indev iso/out/ai-cpu-os-*.iso -find /ai-cpu-os -maxdepth 1 -exec echo
-# Deve mostrar a entrada de boot automática
-xorriso -indev iso/out/ai-cpu-os-*.iso -extract /isolinux/isolinux.cfg /tmp/ && \
+
+# Ubuntu: a config automática é o autoinstall.yaml NA RAIZ (ao lado de casper/)
+xorriso -indev iso/out/ai-cpu-os-ubuntu*.iso -find /autoinstall.yaml -type f -exec echo
+xorriso -indev iso/out/ai-cpu-os-ubuntu*.iso -extract /autoinstall.yaml /tmp/ && \
+  grep -E 'layout:|late-commands:' -A2 /tmp/autoinstall.yaml
+xorriso -indev iso/out/ai-cpu-os-ubuntu*.iso -extract /boot/grub/grub.cfg /tmp/ && \
+  grep -A4 'ai-cpu-os-auto' /tmp/grub.cfg
+
+# Debian: a config é o preseed, e o menu é o do isolinux
+xorriso -indev iso/out/ai-cpu-os-debian*.iso -extract /isolinux/isolinux.cfg /tmp/ && \
   grep -A3 'ai-cpu-os-auto' /tmp/isolinux.cfg
 ```
 
-| Campo | Valor |
-|-------|-------|
-| `/preseed` contém os 4 arquivos? | _(preencher)_ |
-| `/ai-cpu-os` presente? | _(preencher)_ |
-| Entrada `ai-cpu-os-auto` no `isolinux.cfg`? | _(preencher)_ |
+| Campo | Ubuntu | Debian |
+|-------|--------|--------|
+| `/preseed` contém os 4 arquivos? | _(preencher)_ | _(preencher)_ |
+| `/ai-cpu-os` presente? | _(preencher)_ | _(preencher)_ |
+| Menu de boot com `ai-cpu-os-auto`? | _(preencher)_ | _(preencher)_ |
+| Config automática no lugar certo? | `/autoinstall.yaml` na raiz | `/preseed/ai-cpu-os.cfg` |
+
+> No Ubuntu, confira também que o `storage:` gerado tem **um** dos dois formatos:
+> `layout: {name: direct}` (sem `--disk`) ou
+> `layout: {name: direct, match: {path: /dev/vda}}` (com `--disk`).
 
 ### M.4 Boot e instalação em VM (o teste que importa)
 
@@ -754,17 +783,17 @@ qemu-system-x86_64 -m 4096 -enable-kvm \
 
 1. Aparece o menu com **"Instalar ai-cpu-os (automatico)"** e ele é o
    **padrão** (10 s)?
-2. O instalador roda **sem perguntar nada** (preseed)?
+2. O instalador roda **sem perguntar nada**?
 3. A instalação termina e a VM reinicia?
 4. No primeiro boot, o serviço `ai-cpu-os-firstboot` roda?
 
-| Campo | Valor |
-|-------|-------|
-| Boot BIOS (isolinux) | _(preencher)_ |
-| Boot UEFI | _(preencher — se falhar, ver docs/ISO.md § 6)_ |
-| Entrada automática foi o padrão? | _(preencher)_ |
-| Instalou sem perguntas? | _(preencher)_ |
-| Erros do instalador | _(preencher)_ |
+| Campo | Ubuntu | Debian |
+|-------|--------|--------|
+| Boot BIOS | _(preencher)_ | _(preencher)_ |
+| Boot UEFI | _(preencher)_ | _(preencher — se falhar, ver docs/ISO.md § 6)_ |
+| Entrada automática foi o padrão? | _(preencher)_ | _(preencher)_ |
+| Instalou sem perguntas? | _(preencher)_ | _(preencher)_ |
+| Erros do instalador | _(preencher)_ | _(preencher)_ |
 
 ### M.5 Pós-instalação: primeiro boot (dentro do sistema instalado)
 

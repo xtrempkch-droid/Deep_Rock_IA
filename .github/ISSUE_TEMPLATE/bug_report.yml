@@ -43,7 +43,7 @@ body:
       description: Comandos exatos (inclua `--dry-run` se aplicável).
       render: bash
       placeholder: |
-        sudo ./build.sh --profile xeon --dry-run
+        sudo ./build.sh --role inference --dry-run
     validations:
       required: true
   - type: textarea

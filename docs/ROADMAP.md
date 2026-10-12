@@ -18,11 +18,11 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | `AGENTS.md` (memória para IAs)                                        | 2026-10-07 | 2026-10-07 |
 | `docs/ROADMAP.md`, `ARCHITECTURE.md`, `STATE.md`                      | 2026-10-07 | 2026-10-07 |
 | `docs/HARDWARE.md`, `TUNING.md`, `TROUBLESHOOTING.md`                 | 2026-10-07 | 2026-10-07 |
-| `build.sh` — orquestrador com `--profile`, `--dry-run`, `--yes`       | 2026-10-07 | 2026-10-07 |
+| `build.sh` — orquestrador com `--role`/`--family`, `--dry-run`, `--yes` | 2026-10-07 | 2026-10-07 |
 | `detect-hardware.sh` — detecção de CPU/RAM/canal/disco                | 2026-10-07 | 2026-10-07 |
-| `common/kernel-tuning.sh`, `hugepages.sh`, `governor.sh`              | 2026-10-07 | 2026-10-07 |
-| `profiles/xeon/*` (install, llama-build, sysctl, shell-ia, service)   | 2026-10-07 | 2026-10-07 |
-| `profiles/ryzen/*` (install, docker, registry, gitea, build-runner)   | 2026-10-07 | 2026-10-07 |
+| `mods/kernel-tuning/kernel-tuning.sh`, `hugepages.sh`, `governor.sh`              | 2026-10-07 | 2026-10-07 |
+| `roles/inference/*` (install, llama-build, sysctl, shell-ia, service)   | 2026-10-07 | 2026-10-07 |
+| `roles/builder/*` (install, docker, registry, gitea, build-runner)   | 2026-10-07 | 2026-10-07 |
 | `tests/smoke-test.sh`                                                 | 2026-10-07 | 2026-10-07 |
 | `docs/TUTORIAL.md` — tutorial explicado do zero + diretriz de `AGENTS.md` | 2026-10-07 | 2026-10-07 |
 | CI/CD: `validate.yml` (lint + dry-run + guarda-corpo das regras)        | 2026-10-07 | 2026-10-07 |
@@ -40,13 +40,16 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | `docs/JOURNAL.md` — diário de sessões e continuidade (Regra 14) + "Retomada rápida" | 2026-10-07 | 2026-10-07 |
 | Unificação do hardware: Xeon = **quad channel** (era "dual" em alguns docs) | 2026-10-07 | 2026-10-07 |
 | **`families/` — suporte por FAMÍLIA de CPU com herança** (8 famílias + `resolve.sh` + política de AVX-512 `never`/`optin`/`auto`) | 2026-10-12 | 2026-10-12 |
-| **`roles/` — papéis separados do hardware** (`inference`, `builder`) substituindo `profiles/xeon` e `profiles/ryzen` | 2026-10-12 | 2026-10-12 |
+| **`roles/` — papéis separados do hardware** (`inference`, `builder`) substituindo `roles/inference` e `roles/builder` | 2026-10-12 | 2026-10-12 |
 | **`mods/` — modificações portáveis** (motor `list/info/check/apply/revert/test`, conjuntos `system`/`portable`, 4 mods com `revert`) | 2026-10-12 | 2026-10-12 |
 | `llama-build.sh` único, dirigido pela família, com padrão **portátil** (`GGML_NATIVE=OFF`) e `--assume-family-isa` para cross-build | 2026-10-12 | 2026-10-12 |
 | Correção do **bug latente de portabilidade do CI** (`GGML_NATIVE=ON` no runner → risco de `SIGILL` no alvo) | 2026-10-12 | 2026-10-12 |
 | `docs/FAMILIES.md` + `docs/MODS.md` + `mods/README.md` + `roles/README.md` | 2026-10-12 | 2026-10-12 |
 | Sistema operacional de referência passou a **Ubuntu Server** | 2026-10-12 | 2026-10-12 |
 | Comentários de instrução do usuário no README **aplicados e removidos** | 2026-10-12 | 2026-10-12 |
+| **ISO em base Ubuntu Server** — `--distro ubuntu` (padrão) + `iso/autoinstall/autoinstall.yaml` + remontagem por `-indev/-outdev -map` (setores de boot preservados) | 2026-10-12 | 2026-10-12 |
+| `late-command.sh` **compartilhado** entre debian-installer e Subiquity (`AI_CURTIN=1`); flags `--role`/`--family` também na ISO | 2026-10-12 | 2026-10-12 |
+| **Autoteste dos templates da ISO** (`--check-templates` / `make iso-yaml`): valida tokens, sintaxe e o `autoinstall.yaml` **substituído** com `yamllint` — rodando no CI | 2026-10-12 | 2026-10-12 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em
@@ -64,7 +67,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | Validar a Release `v0.2.0` (binários) e a imagem do GHCR no hardware alvo | 2026-10-07 | Primeiro uso real dos artefatos do CI |
 | Executar o protocolo `docs/VALIDATION.md` (blocos A–L) | 2026-10-07 | Roteiro preenchível pronto; **resultados pendentes** |
 | **🎯 Construir e bootar a ISO de instalação numa VM** (Bloco M) | 2026-10-07 | Entregável final; maior risco não validado do projeto |
-| **ISO em base Ubuntu Server** (`--distro ubuntu` + autoinstall/Subiquity) | 2026-10-12 | Pedido explícito do usuário; **escrito ainda não — a ISO atual é Debian** |
+| **ISO em base Ubuntu Server** (`--distro ubuntu` + autoinstall/Subiquity) | 2026-10-12 | Implementada e validada no autoteste de templates; **nunca executada** contra uma ISO real |
 | **Validar a resolução de famílias em hardware real** (blocos N/O do `VALIDATION.md`) | 2026-10-12 | Testado só com nomes de CPU simulados |
 
 ---
@@ -72,12 +75,13 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 ## ⏳ Planejado
 
 ### Prioridade Alta
-- [ ] **🎯 ISO em base Ubuntu Server** — `iso/autoinstall/{user-data,meta-data}`
-      + `--distro ubuntu|debian` no `build-iso.sh` (ubuntu como padrão).
-      É o pedido do usuário e a próxima ação imediata (`STATE.md` § 6).
+- [ ] **🎯 Gerar as duas ISOs de verdade** (Ubuntu e Debian) numa máquina com
+      `xorriso` + rede. É o passo que falta para sair de "escrito" para
+      "existe" — e o mais provável de revelar ajustes.
 - [ ] **🎯 Gerar a ISO e instalar numa VM** (Bloco M do `VALIDATION.md`) —
       é o critério de conclusão do projeto e o maior risco não validado.
-- [ ] **Validar o boot UEFI da ISO** (com e sem `mtools`) e o `md5sum.txt`.
+- [ ] **Validar o boot UEFI da ISO** (Debian com e sem `mtools`; Ubuntu com os
+      setores preservados) e o `md5sum.txt` regenerado (Debian).
 - [ ] **Validar os blocos N e O do `VALIDATION.md`** — famílias em hardware
       real e ciclo `apply`/`revert` das mods.
 - [ ] **Atualizar o tutorial ao validar cada família em hardware** — ao fechar

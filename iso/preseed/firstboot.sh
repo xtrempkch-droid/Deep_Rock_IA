@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # iso/preseed/firstboot.sh — aplica o ai-cpu-os no primeiro boot do sistema
-# instalado a partir da ISO.
+# instalado a partir da ISO (Debian **ou** Ubuntu).
 # -----------------------------------------------------------------------------
 # Este arquivo é um TEMPLATE: `iso/build-iso.sh` substitui os marcadores
 # (nomes entre arrobas duplas) antes de gravá-lo na ISO.
@@ -12,7 +12,7 @@
 #   * Não deixa o sistema "meio configurado" em silêncio: registra tudo em
 #     .firstboot-status e no log, e mantém a sentinela se falhar com erro
 #     recuperável (rede), para tentar de novo no próximo boot.
-#   * Respeita o `--profile` gravado na ISO (padrão: auto).
+#   * Respeita o papel/família gravados na ISO (padrão: auto/auto).
 #
 # Ver docs/ISO.md § "Por que primeiro boot".
 # -----------------------------------------------------------------------------
@@ -26,7 +26,8 @@ readonly STATUS="${ROOT}/.firstboot-status"
 readonly LOG="/var/log/ai-cpu-os-firstboot.log"
 
 # Valores definidos no momento da criação da ISO.
-PROFILE="@@PROFILE@@"
+ROLE="@@ROLE@@"
+FAMILY="@@FAMILY@@"
 FIRSTBOOT_REBOOT="@@FIRSTBOOT_REBOOT@@"
 
 _ts() { date '+%Y-%m-%d %H:%M:%S'; }
@@ -57,26 +58,32 @@ fi
 if [[ -r "$CONFIG" ]]; then
   # shellcheck disable=SC1090
   . "$CONFIG"
-  PROFILE="${PROFILE:-auto}"
+  ROLE="${ROLE:-auto}"
+  FAMILY="${FAMILY:-auto}"
   FIRSTBOOT_REBOOT="${FIRSTBOOT_REBOOT:-no}"
 fi
 
-case "$PROFILE" in
-  auto|xeon|ryzen) ;;
-  *) log "AVISO: perfil '${PROFILE}' inválido; usando 'auto'."; PROFILE="auto" ;;
+case "$ROLE" in
+  auto|inference|builder) ;;
+  # Compatibilidade com ISOs geradas antes da refatoração (perfil xeon/ryzen).
+  xeon)  ROLE="inference" ;;
+  ryzen) ROLE="builder" ;;
+  *) log "AVISO: papel '${ROLE}' inválido; usando 'auto'."; ROLE="auto" ;;
 esac
 
-log "perfil configurado na ISO: ${PROFILE}"
+log "papel configurado na ISO: ${ROLE}"
+log "família configurada na ISO: ${FAMILY}"
 log "reboot automático após aplicar: ${FIRSTBOOT_REBOOT}"
 
 # ---------------------------------------------------------------------------
-# Esperar pela rede (best-effort): o perfil xeon clona o llama.cpp.
+# Esperar pela rede (best-effort): o papel 'inference' clona o llama.cpp.
 # ---------------------------------------------------------------------------
 wait_for_network() {
   local i
   log "aguardando conectividade com a internet (até ~2 min)..."
   for i in $(seq 1 24); do
-    if getent hosts deb.debian.org >/dev/null 2>&1 \
+    if getent hosts archive.ubuntu.com >/dev/null 2>&1 \
+       || getent hosts deb.debian.org >/dev/null 2>&1 \
        || curl -fsS --max-time 5 -o /dev/null https://github.com 2>/dev/null; then
       log "rede disponível (tentativa ${i})."
       return 0
@@ -91,9 +98,9 @@ wait_for_network
 # ---------------------------------------------------------------------------
 # Aplicar
 # ---------------------------------------------------------------------------
-log "executando: build.sh --profile ${PROFILE} --yes"
+log "executando: build.sh --role ${ROLE} --family ${FAMILY} --yes"
 set +e
-( cd "$ROOT" && ./build.sh --profile "$PROFILE" --yes )
+( cd "$ROOT" && ./build.sh --role "$ROLE" --family "$FAMILY" --yes )
 rc=$?
 set -e
 
@@ -103,7 +110,8 @@ if [[ $rc -ne 0 ]]; then
   cat > "$STATUS" <<EOF
 status=failed
 rc=${rc}
-profile=${PROFILE}
+role=${ROLE}
+family=${FAMILY}
 data=$(_ts)
 acao=Veja /var/log/ai-cpu-os-firstboot.log e /var/log/ai-cpu-os-build.log.
 EOF
@@ -115,11 +123,12 @@ fi
 # ---------------------------------------------------------------------------
 # Sucesso: registrar, desarmar o serviço e (opcional) reiniciar.
 # ---------------------------------------------------------------------------
-log "aplicação concluída com sucesso (perfil ${PROFILE})."
+log "aplicação concluída com sucesso (papel ${ROLE}, família ${FAMILY})."
 
 cat > "$STATUS" <<EOF
 status=ok
-profile=${PROFILE}
+role=${ROLE}
+family=${FAMILY}
 data=$(_ts)
 nota=Se o C-states foi alterado, reinicie para o tuning valer plenamente.
 EOF
@@ -131,7 +140,8 @@ cat > /etc/motd <<'MOTD'
 ai-cpu-os: tuning aplicado no primeiro boot.
   - Estado:      cat /opt/ai-cpu-os/.firstboot-status
   - Log:         cat /var/log/ai-cpu-os-firstboot.log
-  - Próximos:    docs/TUTORIAL.md § 7 (perfil xeon) ou § 8 (perfil ryzen)
+  - Mods:        bash /opt/ai-cpu-os/mods/apply.sh list
+  - Próximos:    docs/TUTORIAL.md
 MOTD
 
 # Desabilita o serviço (o ConditionPathExists já impede, mas limpamos o linkset).
@@ -139,6 +149,7 @@ systemctl disable ai-cpu-os-firstboot.service >/dev/null 2>&1 || true
 
 log "=== concluído ==="
 
+# Reboot automático opcional (é o que faz a cmdline de C-states valer).
 if [[ "${FIRSTBOOT_REBOOT,,}" == "yes" || "${FIRSTBOOT_REBOOT,,}" == "true" ]]; then
   log "reboot automático habilitado na ISO: reiniciando em 15 s..."
   shutdown -r +0 "ai-cpu-os: aplicado. Reiniciando para aplicar o tuning de C-states." || true

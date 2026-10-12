@@ -75,8 +75,18 @@ jobs:
           yamllint -c .yamllint.yml .github/ docker/ roles/
           echo "YAML OK."
 
+      # O template do autoinstall NÃO é YAML válido enquanto tem @@TOKENS@@ (o
+      # `@` é indicador reservado do YAML), então ele não entra no yamllint
+      # acima. Este passo substitui os tokens e valida o YAML RESULTANTE —
+      # que é o que de fato vai para a ISO.
+      - name: ISO (lint + autoteste dos templates)
+        run: |
+          set -euo pipefail
+          make iso-lint
+          make iso-yaml
+
   # ---------------------------------------------------------------------------
-  # Dry-run: prova que a orquestração funciona nos dois perfis sem alterar nada.
+  # Dry-run: prova que a orquestração funciona nos dois papéis sem alterar nada.
   # ---------------------------------------------------------------------------
   dry-run:
     name: Dry-run (papel ${{ matrix.role }})
@@ -132,6 +142,7 @@ jobs:
             iso/build-iso.sh iso/preseed/ai-cpu-os.cfg
             iso/preseed/late-command.sh iso/preseed/firstboot.sh
             iso/preseed/ai-cpu-os-firstboot.service
+            iso/autoinstall/autoinstall.yaml
             families/resolve.sh families/_base/family.conf
             families/intel-haswell/family.conf families/intel-broadwell/family.conf
             families/intel-skylake-avx512/family.conf families/generic/family.conf
@@ -204,9 +215,16 @@ jobs:
           # templates do preseed não podem perder os marcadores de substituição.
           grep -qi 'entregável final' AGENTS.md
           grep -q 'build-iso.sh' AGENTS.md
-          grep -q '@@PROFILE@@' iso/preseed/firstboot.sh
+          grep -q '@@ROLE@@' iso/preseed/firstboot.sh
+          grep -q '@@FAMILY@@' iso/preseed/late-command.sh
           grep -q 'late_command' iso/preseed/ai-cpu-os.cfg
           grep -q 'firstboot-pending' iso/preseed/firstboot.sh
+          # A variante Ubuntu precisa do autoinstall na raiz da ISO e do
+          # flag de distro no gerador; se isso sumir, a ISO volta a ser só Debian.
+          grep -q '@@STORAGE_LAYOUT@@' iso/autoinstall/autoinstall.yaml
+          grep -q 'autoinstall' iso/autoinstall/autoinstall.yaml
+          grep -q 'ubuntu' iso/build-iso.sh
+          grep -q -- '--distro' iso/build-iso.sh
           # O diário de continuidade é o que permite retomar sem perder nada
           # (Regra 14): precisa continuar existindo e com as seções-chave.
           grep -qi 'retomada em 5 minutos' docs/JOURNAL.md

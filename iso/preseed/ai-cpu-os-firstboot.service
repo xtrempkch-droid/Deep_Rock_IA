@@ -1,7 +1,7 @@
 [Unit]
-Description=ai-cpu-os: aplicar tuning e instalar o perfil (primeiro boot)
+Description=ai-cpu-os: aplicar mods e instalar o papel (primeiro boot)
 Documentation=file:///opt/ai-cpu-os/docs/ISO.md
-# Precisa de rede para clonar o llama.cpp (perfil xeon) e baixar pacotes.
+# Precisa de rede para clonar o llama.cpp (papel inference) e baixar pacotes.
 After=network-online.target
 Wants=network-online.target
 # Não atrapalha o boot: roda depois que o sistema já subiu.

@@ -192,8 +192,8 @@ terminado** — este é o critério de conclusão.
 ```bash
 # Gerar a ISO (a partir de um Debian/Ubuntu com xorriso)
 sudo apt install -y xorriso curl isolinux mtools
-bash iso/build-iso.sh --disk /dev/nvme0n1 --profile auto --dry-run   # simular
-sudo bash iso/build-iso.sh --disk /dev/nvme0n1 --profile auto         # gerar
+bash iso/build-iso.sh --distro ubuntu --disk /dev/nvme0n1 --dry-run   # simular
+sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/nvme0n1         # gerar
 
 # Testar em VM (sempre antes de máquina real)
 qemu-system-x86_64 -m 4096 -enable-kvm -cdrom iso/out/ai-cpu-os-*.iso -boot d

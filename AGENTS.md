@@ -137,11 +137,13 @@ ai-cpu-os/
 │   ├── Dockerfile          # Runtime do llama.cpp (GGML_NATIVE=OFF — ver docs/CI.md)
 │   └── docker-compose.example.yml
 ├── iso/                    # 🎯 ENTREGÁVEL FINAL: ISO de instalação
-│   ├── build-iso.sh        # Remasteriza a ISO Debian netinst (preseed + projeto)
-│   └── preseed/            # Templates do preseed e do serviço de 1º boot
+│   ├── build-iso.sh        # Remasteriza a ISO base (--distro ubuntu|debian)
+│   ├── autoinstall/        # Templates do Ubuntu (Subiquity/autoinstall)
+│   │   └── autoinstall.yaml # Config de instalação automática (padrão)
+│   └── preseed/            # Templates compartilhados + os do Debian (legado)
 │       ├── ai-cpu-os.cfg   # Respostas automáticas do debian-installer
-│       ├── late-command.sh # Copia o projeto p/ /opt/ai-cpu-os no alvo
-│       ├── firstboot.sh    # Aplica o tuning no primeiro boot (hardware real)
+│       ├── late-command.sh # Copia o projeto p/ /opt/ai-cpu-os (os 2 instaladores)
+│       ├── firstboot.sh    # Aplica as mods no primeiro boot (hardware real)
 │       └── ai-cpu-os-firstboot.service
 ├── docs/
 │   ├── ROADMAP.md          # Concluído / Em progresso / Planejado / Ideias
@@ -208,6 +210,7 @@ ai-cpu-os/
 | Como o CI compila/valida o sistema     | `.github/workflows/`, `docs/CI.md`, `Makefile` |
 | **Testar em hardware e registrar resultados** | **`docs/VALIDATION.md`**              |
 | **Gerar a ISO de instalação (entregável final)** | **`iso/build-iso.sh`**, **`docs/ISO.md`** |
+| **Entender a variante Ubuntu (autoinstall)** | **`iso/autoinstall/autoinstall.yaml`**, **`docs/ISO.md`** § 4.5 |
 | **Retomar/continuar depois de um tempo parado** | **`docs/JOURNAL.md`** (§ 1 retomada, § 5 threads abertas) |
 | Scripts principais                     | `build.sh`, `detect-hardware.sh`, `llama-build.sh` |
 | Famílias de CPU (ISA/march)            | `families/`                                  |
@@ -269,9 +272,11 @@ Estas regras são **obrigatórias**:
     `docker/`, **verifique se a ISO continua coerente** (o `late-command.sh`
     copia o projeto inteiro; o `firstboot.sh` o executa). Ao mexer na ISO,
     atualize **`docs/ISO.md`** e o **Bloco M** de `docs/VALIDATION.md`.
+    **Base padrão = Ubuntu Server (autoinstall); Debian (preseed) é o caminho
+    legado.** Mudou um template? Rode `make iso-yaml` — o autoteste substitui os
+    marcadores e valida o `autoinstall.yaml` resultante com `yamllint` (o
+    template isolado NÃO é YAML válido: `@` é reservado).
     ⚠️ Nunca declare a ISO pronta sem tê-la **bootado e instalado** em VM.
-    A base de referência é **Ubuntu Server** (ver `docs/ISO.md`); a remasterização
-    Debian segue como caminho legado funcional.
 15. **Integridade da tríade `build.sh` → `detect-hardware.sh` → `families/`.**
     Ao adicionar família, papel ou mod, atualize **as três** superfícies que o CI
     cobra: a lista `required` de `.github/workflows/validate.yml`, a árvore do § 4
@@ -294,8 +299,19 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-12
-- **O que mudou:** **Refatoração para FAMÍLIAS de CPU + PAPÉIS + MODS.**
-  Suporte deixou de ser "um processador por perfil" e passou a ser por
+- **O que mudou:** **ISO em base Ubuntu Server (autoinstall/Subiquity).**
+  `--distro ubuntu` passou a ser o padrão (Debian/preseed segue como legado),
+  com a config em `iso/autoinstall/autoinstall.yaml` na raiz da ISO e
+  remontagem por `xorriso -indev/-outdev -map` (setores de boot da ISO oficial
+  preservados — sem `mtools`/`isohdpfx.bin`). O `late-command.sh` passou a ser
+  compartilhado pelos dois instaladores (`AI_CURTIN=1`) e a ISO grava
+  **papel + família** (não mais "perfil"). Novo autoteste de templates
+  (`--check-templates` / `make iso-yaml`) validando o `autoinstall.yaml`
+  substituído com `yamllint`, rodando no CI. Docs: `ISO.md` § 4.5 e Bloco M
+  distro-aware; passada mecânica corrigindo caminhos quebrados em todo o
+  `docs/`. **Nenhuma ISO gerada/bootada.**
+- **Data anterior:** 2026-10-12 — **Refatoração para FAMÍLIAS de CPU + PAPÉIS +
+  MODS.** Suporte deixou de ser "um processador por perfil" e passou a ser por
   **família de microarquitetura com herança** (`families/`, 8 famílias, AVX-512
   por política), com **papéis** separados do hardware (`roles/inference`,
   `roles/builder`) e **mods portáveis** aplicáveis/reversíveis em qualquer

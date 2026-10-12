@@ -60,12 +60,12 @@ Dispara em **todo push para `main` e em todo Pull Request**.
 ### Job `lint`
 1. `bash -n` em todos os `.sh` — pega erro de sintaxe.
 2. `shellcheck -x -S warning` — pega bug real (`SC2046`, `SC2155`, `SC2034`...).
-3. `python3 -m compileall profiles/` — valida o `shell-ia.py`.
+3. `python3 -m compileall roles/` — valida o `shell-ia.py`.
 4. `yamllint` — valida workflows, compose e templates.
 
 ### Job `dry-run` (matriz: `xeon` e `ryzen`)
 Roda `detect-hardware.sh`, depois
-`sudo ./build.sh --profile <perfil> --dry-run --yes --skip-tests` e
+`sudo ./build.sh --role <papel> --dry-run --yes --skip-tests` e
 `tests/smoke-test.sh --dry-run`.
 
 **Por que isso importa:** prova que a orquestração, a passagem de argumentos e
@@ -103,7 +103,7 @@ vários minutos e queimaria minutos de CI sem ganho.
 | `ryzen` | as mesmas **+ `-march=znver2 -mtune=znver2 -O3`** | Zen 2 (6c/6t) |
 
 O build **usa o próprio script do projeto**
-(`profiles/<perfil>/llama-build.sh`), não um comando solto. Assim o CI valida
+(`llama-build.sh`), não um comando solto. Assim o CI valida
 o script que o usuário vai rodar — inclusive a checagem de ISA em
 `/proc/cpuinfo` e o fallback seguro.
 
@@ -189,7 +189,7 @@ O `Makefile` existe para que você não precise adivinhar o que o CI faz:
 make help         # lista os alvos
 make lint         # bash -n + shellcheck + python + yamllint
 make docs         # verifica documentos obrigatórios
-make dry-run      # sudo ./build.sh --profile auto --dry-run --yes --skip-tests
+make dry-run      # sudo ./build.sh --role auto --dry-run --yes --skip-tests
 make ci           # = lint + docs + dry-run  (idêntico ao workflow 'validate')
 make build-xeon   # compila o llama.cpp para o Xeon
 make build-ryzen  # compila o llama.cpp para o Ryzen (znver2)
@@ -281,13 +281,13 @@ Call Stack:
 mas **não** traz o `pkg-config`. Sem ele, o CMake aborta.
 
 **Impacto descoberto:** o bug **não era exclusivo da imagem Docker** — o
-`profiles/xeon/llama-build.sh` (`check_deps`) e o
-`profiles/xeon/install.sh` tinham a mesma falha. Ou seja: **o primeiro build
+`llama-build.sh` (`check_deps`) e o
+`roles/inference/install.sh` tinham a mesma falha. Ou seja: **o primeiro build
 real no host também teria falhado**.
 
 **Correção aplicada em três lugares:** `docker/Dockerfile`,
-`profiles/xeon/llama-build.sh` (checagem + instalação) e
-`profiles/xeon/install.sh`. Também ajustamos o job `build-llama`
+`llama-build.sh` (checagem + instalação) e
+`roles/inference/install.sh`. Também ajustamos o job `build-llama`
 (dependências) para cobrir o caso.
 
 **Lição registrada:** "lint verde" não significa "build comprovado". Foi

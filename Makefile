@@ -14,8 +14,8 @@ SHELL := /bin/bash
 
 ROLE     ?= auto
 FAMILY   ?= auto
-# Legado: usado apenas pelos alvos da ISO (cuja base ainda é Debian).
-PROFILE  ?= auto
+# Base da ISO: ubuntu (autoinstall, padrão) | debian (preseed, legado)
+DISTRO   ?= ubuntu
 JOBS     ?= 4
 LLAMA_REF ?= master
 IMAGE    ?= ai-cpu-os-llama:local
@@ -23,7 +23,7 @@ IMAGE    ?= ai-cpu-os-llama:local
 SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
 
 .PHONY: help lint bashn shellcheck python yaml docs validate dry-run apply \
-        build mods mods-check mods-test iso iso-dry-run iso-lint \
+        build mods mods-check mods-test iso iso-dry-run iso-lint iso-yaml \
         docker docker-check ci clean families
 
 help: ## Lista os alvos disponíveis
@@ -90,15 +90,23 @@ iso: ## Gera a ISO de instalação (entregável final); requer DISK=/dev/xxx
 	@if [ -z "$(DISK)" ]; then \
 	  echo "Defina o disco alvo: make iso DISK=/dev/nvme0n1"; exit 1; \
 	fi
-	@bash iso/build-iso.sh --disk $(DISK) --profile $(PROFILE)
+	@bash iso/build-iso.sh --distro $(DISTRO) --disk $(DISK) \
+	  --role $(ROLE) --family $(FAMILY)
 
-iso-dry-run: ## Simula a geração da ISO (seguro, não baixa nada pesado)
-	@bash iso/build-iso.sh --disk "$(or $(DISK),/dev/nvme0n1)" --profile $(PROFILE) --dry-run
+iso-dry-run: ## Simula a geração da ISO (seguro, não baixa nada)
+	@bash iso/build-iso.sh --distro $(DISTRO) \
+	  --disk "$(or $(DISK),/dev/nvme0n1)" \
+	  --role $(ROLE) --family $(FAMILY) --dry-run
 
-iso-lint: ## Verifica os scripts da ISO (bash -n + shellcheck)
+iso-yaml: ## Autoteste dos templates da ISO (valida o autoinstall.yaml gerado)
+	@bash iso/build-iso.sh --check-templates --yes
+
+iso-lint: ## Verifica os scripts da ISO e valida os templates gerados
 	@bash -n iso/build-iso.sh iso/preseed/firstboot.sh
 	@sh -n iso/preseed/late-command.sh
 	@shellcheck -x -S warning iso/build-iso.sh iso/preseed/late-command.sh
+	@bash iso/build-iso.sh --check-templates --yes >/dev/null \
+	  && echo "iso-lint: templates OK"
 	@echo "iso-lint: OK"
 
 docker: ## Constrói a imagem de runtime localmente

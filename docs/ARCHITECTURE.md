@@ -51,7 +51,7 @@ fluem** e **por que decidimos assim** — incluindo alternativas descartadas.
         │               │                                 │               │
         │               └──────────────┬──────────────────┘               │
         │                              ▼                                  │
-        │                   kernel tuning (common/)                       │
+        │                   mods/ (conjunto 'system')                     │
         │     governor · huge pages · sysctl · C-states · io_uring        │
         └─────────────────────────────────────────────────────────────────┘
 ```
@@ -61,33 +61,43 @@ fluem** e **por que decidimos assim** — incluindo alternativas descartadas.
 ## 2. Componentes
 
 ### 2.1 `build.sh` (orquestrador raiz)
-- Interpreta `--profile auto|xeon|ryzen`, `--dry-run`, `--yes`.
-- Chama `detect-hardware.sh` (se `auto`) para decidir o perfil.
-- Chama `common/*` (tuning de kernel, huge pages, governor).
-- Delega ao `profiles/<perfil>/install.sh`.
-- **Não** executa lógica de perfil diretamente — apenas orquestra.
+- Interpreta `--role auto|inference|builder`, `--family auto|<id>`, `--dry-run`, `--yes`.
+  (`--profile` continua aceito como alias obsoleto: `xeon`→`inference`, `ryzen`→`builder`.)
+- Chama `detect-hardware.sh` (se `auto`) para decidir a família e o papel.
+- Chama o motor de mods (`mods/apply.sh apply --set system`): kernel-tuning,
+  huge pages, governor.
+- Delega ao `roles/<papel>/install.sh`.
+- **Não** executa lógica de papel nem de família diretamente — apenas orquestra.
 
 ### 2.2 `detect-hardware.sh`
 - Lê `/proc/cpuinfo` e `lscpu` para modelo, núcleos, threads e flags ISA.
 - Usa `dmidecode -t 17` (fallback `lshw`) para inferir canais de memória.
 - Usa `lsblk`/`nvme list` para diferenciar NVMe de SATA.
-- Emite um relatório legível e uma linha `PROFILE=...` consumível por script.
+- Resolve a **família** delegando a `families/resolve.sh`.
+- Emite um relatório legível e duas linhas consumíveis por script:
+  `FAMILY=<id>` e `ROLE=<inference|builder>`.
 - **Nunca** aplica nada — é somente leitura.
 
-### 2.3 `common/` (tuning compartilhado)
-- `kernel-tuning.sh` — escreve `/etc/sysctl.d/99-ai-tuning.conf`, verifica
+### 2.3 `mods/` (modificações portáveis)
+Cada mod tem `mod.conf` + `apply.sh` + `revert.sh`; o motor é `mods/apply.sh`
+(`list`/`info`/`check`/`apply`/`revert`/`test`). Conjunto `system` (aplicado pelo
+`build.sh`):
+- `kernel-tuning` — escreve `/etc/sysctl.d/99-ai-tuning.conf`, verifica
   `io_uring` e orienta o kernel cmdline.
-- `hugepages.sh` — configura THP e, opcionalmente, huge pages estáticas.
-- `governor.sh` — aplica governor `performance` e C-states rasos.
+- `hugepages` — configura THP e, opcionalmente, huge pages estáticas.
+- `governor` — aplica governor `performance` e C-states rasos.
 
-### 2.4 `profiles/xeon/`
+Conjunto `portable` (aplicável em qualquer máquina, uma a uma):
+- `openblas-threads` — `OPENBLAS_NUM_THREADS=1` para não competir com o ggml.
+
+### 2.4 `roles/inference/`
 - `llama-build.sh` — clona e compila o llama.cpp com flags AVX2/FMA/F16C +
   OpenBLAS, **validando as flags antes**.
 - `shell-ia.py` — shell em linguagem natural com ferramentas e sandbox.
 - `ai-server.service` — unit systemd para o `llama-server`.
 - `sysctl.conf` — tuning específico do perfil.
 
-### 2.5 `profiles/ryzen/`
+### 2.5 `roles/builder/`
 - `docker-setup.sh` — instala Docker Engine + Compose (repo oficial).
 - `registry-setup.sh` — sobe `registry:2` em `localhost:5000`.
 - `gitea-compose.yml` — Gitea (SQLite, :3000, SSH :2222).
@@ -139,18 +149,18 @@ build-runner.sh <repo> <tag>
 ### Fluxo C: aplicação do tuning (ambos)
 
 ```text
-sudo ./build.sh --profile auto
+sudo ./build.sh --role auto
         │
         ▼
 detect-hardware.sh  ──▶  escolhe perfil
         │
         ▼
-common/kernel-tuning.sh  →  /etc/sysctl.d/99-ai-tuning.conf + reload
-common/hugepages.sh      →  THP always / huge pages estáticas
-common/governor.sh       →  governor performance + C-states
+mods/kernel-tuning/kernel-tuning.sh  →  /etc/sysctl.d/99-ai-tuning.conf + reload
+mods/hugepages/hugepages.sh      →  THP always / huge pages estáticas
+mods/governor/governor.sh       →  governor performance + C-states
         │
         ▼
-profiles/<perfil>/install.sh
+roles/<papel>/install.sh
         │
         ▼
 tests/smoke-test.sh  (validação rápida)
