@@ -1182,7 +1182,7 @@ reproduzível por um alvo do `make`.
   é uma decisão que eu deva tomar sozinho. Deixei a análise pronta (PR #2
   verde, PR #3 redundante).
 
-**Commits desta sessão:** (a preencher após o push).
+**Commits desta sessão:** `3bb16cf` — `fix(ci): o validate estava VERMELHO no main — default que abortava + comando duplicado`.
 
 ---
 
