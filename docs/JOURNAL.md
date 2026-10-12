@@ -1145,9 +1145,34 @@ que não tenho `xorriso` nem `cmake`):
 
 - **PR #2** (debian `12-slim` → `13-slim` no `docker/`): **✅ 6/6 checks
   verdes**, incluindo os dois smokes de imagem. É seguro mesclar.
-- **PR #3** (bump de 2 actions): ficou **redundante** — o bump já foi aplicado
-  no `main` nesta sessão. Pode ser fechado. O único check vermelho dele é o
-  workflow `iso` disparado à mão numa branch com código antigo.
+- **PR #3** (bump de 2 actions): está **EM CONFLITO** (`mergeable: false`,
+  `dirty`) e a análise anterior de "redundante" era **imprecisa** — correção
+  abaixo. O único check vermelho dele é o workflow `iso` disparado à mão numa
+  branch com código antigo.
+
+  **Correção (mesma sessão, depois de conferir as versões reais na API):**
+  o PR #3 mexe em 2 linhas, e o acerto é **50/50**:
+
+  | linha | PR #3 quer | `main` tem | veredito |
+  |---|---|---|---|
+  | `iso.yml` · `checkout` | `@v4` → `@v7` | **`@v7`** | já feito (foi o que corrigi) → **redundante** |
+  | `iso.yml` · `upload-artifact` | `@v4` → `@v7` | `@v6` | **bump REAL** (v7.0.2, 2026-10-07) → não é redundante |
+  | `build-llama.yml` · `upload-artifact` | `@v6` → `@v7` | `@v6` | **bump REAL** |
+
+  Ou seja: ao alinhar o `iso.yml` eu pus `@v6` (copiando o resto do repo), mas
+  o **`upload-artifact` já está em v7** (v7.0.0 em 2026-02-26). O PR #3 tem
+  valor real em `upload-artifact` e **nenhum** em `checkout`.
+
+  O conflito **não** vem do PR #2: os dois PRs mexem em arquivos
+  **disjuntos** (`docker/Dockerfile` × workflows), logo **não conflitam entre
+  si**. O PR #3 está `dirty` contra o **`main`**, e já estava assim antes de
+  qualquer merge — porque eu editei o `iso.yml` no `main` e mudei o contexto
+  das duas linhas que ele altera.
+
+  **Segurança da versão v7** (conferida no release notes): é **aditiva** — novo
+  parâmetro opcional `archive: false` para upload direto de arquivo único, e
+  migração do pacote para ESM. Mesmo runtime (`node24`) nos dois majors. O nosso
+  uso (`name:` + `path:` com glob) é o comportamento inalterado do default.
 
 **Decisões (e por quê):**
 
@@ -1206,7 +1231,7 @@ reproduzível por um alvo do `make`.
 |--------|------|
 | **Nada de código no caminho da ISO** | ✅ Os 5 requisitos do § 3.1 do `docs/ISO.md` estão implementados. **Não há pendência de implementação conhecida** — falta EXECUTAR (ver abaixo). |
 | 🔴 **CI estava vermelho no `main`** | ✅ **Corrigido na sessão #18** (default que abortava + comando duplicado CI×make). Os runs verdes anteriores eram de antes das mudanças. |
-| **PRs abertos para decidir** | **PR #2** (debian `13-slim` no `docker/`): ✅ 6/6 checks verdes, incluindo os dois smokes de imagem — seguro mesclar. **PR #3** (bump de actions): ficou **redundante** (o bump foi aplicado no `main`) — pode fechar. |
+| **PRs abertos para decidir** | **PR #2** (debian `13-slim` no `docker/`): ✅ 6/6 checks verdes — `mergeable: clean`, **mescla sem conflito**. **PR #3** (bump de actions): 🔴 **`mergeable: false` (dirty) contra o `main`** — precisa ser rebaseado. Só a parte do `upload-artifact` (`@v6`→`@v7`) tem valor real; a do `checkout` já está feita. **Os dois PRs NÃO conflitam entre si** (arquivos disjuntos). |
 | **Gerar a ISO (passo 3 do checklist)** | Não roda nesta máquina (sem `xorriso`). Caminho prático: workflow `iso` no GitHub com `air_gapped: true`. Ver `docs/ISO.md` § 9.1. |
 | **Bootar em VM (passo 4 — o critério de conclusão)** | Precisa de `qemu`+KVM. Gere a ISO com `--serial-console` ou o `test-vm.sh` não vê o 1º boot. Ver `docs/ISO.md` § 9.2. |
 | ⚠️ **Limite de 2 GiB por arquivo de Release** | A ISO air-gapped (~4,3–5 GB) **não pode** ser anexada a uma Release. O CI pula o upload e avisa. Distribuição: pendrive/`scp`, runner self-hosted, ou outro host + SHA256 na Release. |
@@ -1282,7 +1307,8 @@ reproduzível por um alvo do `make`.
 | Fazer um valor **default** abortar o build | `--iso-repo auto` (default) fazia `exit 1` no caminho Debian e quebrou qualquer `--distro debian`; o CI ficou vermelho por causa de um default razoável | Default **degrada com aviso**; `exit 1` só para **entrada do usuário** (caminho digitado errado). Ver Regra 13-a |
 | Ignorar o aviso de migração do runner | `ubuntu-latest` migra para Ubuntu 26 em **2026-10-19**; o guarda de release do `--iso-repo` compara o codename do host e passaria a pular o repo sem ninguém entender | Fixe a versão (`ubuntu-24.04`) nos jobs cuja lógica depende da release do host |
 | `make` com **espaços** em vez de TAB na receita | `Makefile:118: *** missing separator (did you mean TAB instead of 8 spaces?)` — erro claro, mas só aparece ao rodar o alvo | Ao gerar regra por script, use `\t` de verdade; rode o alvo antes de commitar |
-| Escrever merge de PR sem o usuário presente | Decisão que não é minha: dependência bump pode quebrar o build de um jeito que os checks não pegam | Analise e **reporte** (PR #2 verde, #3 redundante); quem mescla é o dono |
+| Escrever merge de PR sem o usuário presente | Decisão que não é minha: dependência bump pode quebrar o build de um jeito que os checks não pegam | Analise e **reporte** (PR #2 verde e `clean`; PR #3 em conflito e com valor parcial); quem mescla é o dono |
+| Chamar um PR de dependabot de "redundante" sem conferir **linha por linha** | Um PR pode ter vários hunks e só *alguns* já aplicados: o do `checkout` já estava feito, o do `upload-artifact` não | Compare `changed_files` + o **diff real** com o conteúdo do `main`; conferir as versões publicadas na API antes de opinar |
 | Guarda negativo com `grep` de texto que aparece em **comentário** | O guarda reprova o repositório correto (ex.: o Dockerfile **cita** `COPY build/bin` para explicar por que NÃO usá-lo) | Ancore na forma do comando (`^COPY[[:space:]]+.*build/bin`) e teste o guarda com um caso positivo |
 | `sed -i` na 1ª linha de um script com `#!` | Pode trocar o **shebang** (`#!/usr/bin/env bash` vs `#!/bin/sh`) e mudar o interpretador | Nunca use `sed -i '1s/…'`; confirme o shebang depois (o CI verifica o modo estrito por shebang) |
 | Renomear/remover uma **chave de matriz** do CI e esquecer quem a consome | Ficou `${{ matrix.profile }}` no `build-llama.yml` depois de a matriz virar `family` → o **nome do artefato ia vazio** e o `upload-artifact` falharia (só num run de tag, longe do PR) | Ao renomear uma chave de matriz, `grep -n 'matrix\.'` no workflow inteiro; prefira `matrix.family` a nomes genéricos |
