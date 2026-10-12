@@ -78,6 +78,13 @@ readonly DEBIAN_CD_BASE_DEFAULT="https://cdimage.debian.org/debian-cd/current/am
 readonly UBUNTU_CD_BASE_DEFAULT="https://releases.ubuntu.com/24.04"
 readonly UBUNTU_ISO_PATTERN='live-server-amd64\.iso$'
 
+# Modelo embutido na mídia (decisão da sessão #14: a ISO é air-gapped, então o
+# .gguf tem de estar NA MÍDIA — não pode ser baixado no 1º boot).
+# O nome precisa bater com o DEFAULT_MODEL_NAME do papel inference para o
+# MODEL_PATH do serviço sair previsível.
+readonly SUGGESTED_MODEL_NAME="Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf"
+readonly SUGGESTED_MODEL_URL="https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+
 # --- configuração (sobrescrita por argumentos) ------------------------------
 DISTRO="ubuntu"
 DISK=""
@@ -114,6 +121,15 @@ KEEP_WORK=0
 DRY_RUN=0
 ASSUME_YES=0
 CHECK_TEMPLATES=0
+
+# --- modelo na mídia (--iso-model) ------------------------------------------
+# auto  → baixa o modelo sugerido NA MÁQUINA QUE GERA A ISO (aqui a rede é
+#         aceitável; o que não pode haver é rede no 1º boot do alvo).
+# none  → ISO sem modelo (o usuário traz o .gguf por pendrive/--model-file).
+# CAMINHO → um .gguf seu.
+ISO_MODEL="auto"
+MODEL_SRC=""      # caminho local do .gguf a embutir (vazio = sem modelo)
+MODEL_NAME=""     # nome do arquivo dentro da ISO (vazio = sem modelo)
 
 if [[ -t 1 ]]; then
   C_RESET="\033[0m"; C_INFO="\033[36m"; C_WARN="\033[33m"; C_ERR="\033[31m"; C_OK="\033[32m"; C_BOLD="\033[1m"
@@ -168,6 +184,12 @@ Opções principais:
   --password-hash HASH  Hash crypt da senha. Se omitido, gera e mostra um.
   --locale / --keymap / --timezone / --mirror-host / --mirror-dir
   --extra-packages "…"  Pacotes extras instalados no alvo.
+  --iso-model VALOR     Modelo .gguf embutido na mídia (a ISO é air-gapped, logo
+                        o modelo não pode ser baixado no 1º boot):
+                          auto (padrão) — baixa o Qwen2.5-Coder-1.5B (~1,1 GB)
+                          none          — nenhum modelo na ISO
+                          CAMINHO       — um arquivo .gguf seu
+                        O late-command o copia para /opt/models no alvo.
   --work-dir DIR        Diretório de trabalho (padrão: iso/work).
   --keep-work           Não apaga o diretório de trabalho.
   --check-templates     Autoteste: substitui os templates e valida o YAML gerado
@@ -223,6 +245,7 @@ parse_args() {
       --mirror-host)     [[ $# -ge 2 ]] || { log_error "--mirror-host exige valor"; exit 2; }; MIRROR_HOST="$2"; shift 2 ;;
       --mirror-dir)      [[ $# -ge 2 ]] || { log_error "--mirror-dir exige valor"; exit 2; }; MIRROR_DIR="$2"; shift 2 ;;
       --extra-packages)  [[ $# -ge 2 ]] || { log_error "--extra-packages exige valor"; exit 2; }; EXTRA_PACKAGES="$2"; shift 2 ;;
+      --iso-model)       [[ $# -ge 2 ]] || { log_error "--iso-model exige valor (auto|none|CAMINHO)"; exit 2; }; ISO_MODEL="$2"; shift 2 ;;
       --work-dir)        [[ $# -ge 2 ]] || { log_error "--work-dir exige valor"; exit 2; }; WORK_DIR="$2"; shift 2 ;;
       --keep-work)       KEEP_WORK=1; shift ;;
       --check-templates) CHECK_TEMPLATES=1; DRY_RUN=1; shift ;;
@@ -558,6 +581,83 @@ inject_project() {
 }
 
 # ---------------------------------------------------------------------------
+# Modelo embutido na mídia (--iso-model)
+# ---------------------------------------------------------------------------
+# POR QUE ELE VAI NA MÍDIA: a ISO é air-gapped (decisão da sessão #14). O que
+# NÃO pode acontecer é o 1º boot do alvo precisar de rede para buscar o modelo.
+# Baixá-lo AGORA, na máquina que gera a ISO, é aceitável — aqui há rede e o
+# arquivo fica auditável dentro da mídia, com nome e tamanho conhecidos.
+#
+# O late-command copia o arquivo para /opt/models no sistema instalado e o
+# firstboot.sh o repassa ao papel via AI_MODEL_FILE (sem download).
+acquire_model() {
+  section "Modelo na mídia (--iso-model ${ISO_MODEL})"
+
+  case "$ISO_MODEL" in
+    none|no|"")
+      MODEL_SRC=""; MODEL_NAME=""
+      log_info "Sem modelo na ISO. O alvo sobe sem modelo; use --model-file para instalar um .gguf depois."
+      return 0 ;;
+    auto)
+      MODEL_NAME="$SUGGESTED_MODEL_NAME"
+      local dir="${WORK_DIR}/models"
+      MODEL_SRC="${dir}/${MODEL_NAME}"
+      if [[ -f "$MODEL_SRC" ]]; then
+        log_info "Modelo já baixado (idempotente): ${MODEL_SRC} ($(du -h "$MODEL_SRC" | cut -f1))"
+        return 0
+      fi
+      if [[ $DRY_RUN -eq 1 ]]; then
+        MODEL_SRC=""; MODEL_NAME="$SUGGESTED_MODEL_NAME"
+        log_info "[dry-run] baixaria ${SUGGESTED_MODEL_URL} para ${dir} (≈1,1 GB)"
+        return 0
+      fi
+      log_info "Baixando o modelo sugerido (≈1,1 GB): ${SUGGESTED_MODEL_URL}"
+      run "Criando ${dir}" mkdir -p "$dir"
+      if ! curl -fL --retry 3 --create-dirs -o "${MODEL_SRC}.part" "$SUGGESTED_MODEL_URL"; then
+        rm -f "${MODEL_SRC}.part"
+        MODEL_SRC=""; MODEL_NAME=""
+        log_warn "Falha ao baixar o modelo. A ISO será gerada SEM modelo."
+        log_warn "Gere com '--iso-model CAMINHO' apontando para um .gguf que você já tem."
+        return 0
+      fi
+      mv "${MODEL_SRC}.part" "$MODEL_SRC"
+      log_ok "Modelo baixado: ${MODEL_SRC} ($(du -h "$MODEL_SRC" | cut -f1))"
+      return 0 ;;
+  esac
+
+  # Caminho fornecido pelo usuário.
+  [[ -f "$ISO_MODEL" ]] \
+    || { log_error "--iso-model ${ISO_MODEL}: arquivo não encontrado (use auto, none ou um .gguf)."; exit 1; }
+  local magic
+  magic="$(head -c 4 "$ISO_MODEL" 2>/dev/null || true)"
+  [[ "$magic" == "GGUF" ]] \
+    || { log_error "--iso-model ${ISO_MODEL}: não parece um arquivo GGUF (esperado o magic 'GGUF')."; exit 1; }
+
+  MODEL_SRC="$ISO_MODEL"
+  MODEL_NAME="$(basename "$ISO_MODEL")"
+  log_ok "Modelo do usuário: ${MODEL_SRC} ($(du -h "$MODEL_SRC" | cut -f1)) → ${MODEL_NAME}"
+}
+
+# Copia o .gguf para a árvore da ISO (a MESMA que o late-command vai ler em
+# /cdrom/models). Sem modelo, não faz nada.
+inject_model() {
+  [[ -n "$MODEL_SRC" && -n "$MODEL_NAME" ]] || return 0
+
+  local base
+  if [[ "$DISTRO" == "ubuntu" ]]; then base="${UBUNTU_STAGE}"; else base="${ISO_ROOT}"; fi
+  local dest="${base}/models"
+
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log_info "[dry-run] copiaria ${MODEL_SRC} → ${dest}/${MODEL_NAME}"
+    return 0
+  fi
+
+  mkdir -p "$dest"
+  run "Copiando o modelo para a ISO" cp -f "$MODEL_SRC" "${dest}/${MODEL_NAME}"
+  log_ok "Modelo na mídia: /models/${MODEL_NAME} ($(du -h "${dest}/${MODEL_NAME}" | cut -f1))"
+}
+
+# ---------------------------------------------------------------------------
 # Templates: substituição de marcadores e gravação
 # ---------------------------------------------------------------------------
 # Escapa o que o `sed` trataria como sintaxe no lado da substituição.
@@ -623,6 +723,7 @@ subst_template() {
     -e "s|@@MIRROR_DIR@@|${MIRROR_DIR}|g" \
     -e "s|@@GRUB_WITH_OTHER_OS@@|${GRUB_WITH_OTHER_OS}|g" \
     -e "s|@@EXTRA_PACKAGES@@|${EXTRA_PACKAGES}|g" \
+    -e "s|@@ISO_MODEL@@|${MODEL_NAME}|g" \
     -e "s|@@STORAGE_LAYOUT@@|${store_esc}|g" \
     -e "s|@@PARTMAN_DISK@@|${PARTMAN_DISK_LINE}|g" \
     "$src" > "$dst"
@@ -647,7 +748,7 @@ inject_common_templates() {
 check_no_leftover_tokens() {
   local -a required_tokens=(
     DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME PASSWORD_HASH
-    LOCALE KEYMAP TIMEZONE EXTRA_PACKAGES PACKAGES_BLOCK STORAGE_LAYOUT
+    LOCALE KEYMAP TIMEZONE EXTRA_PACKAGES PACKAGES_BLOCK STORAGE_LAYOUT ISO_MODEL
   )
   local t leftover=0
   for t in "${required_tokens[@]}"; do
@@ -1192,6 +1293,11 @@ check_templates() {
 
   DISK=""
   rm -rf "$tmp" 2>/dev/null || true
+  if [[ -n "$MODEL_NAME" ]]; then
+    log_info "Modelo embutido: /models/${MODEL_NAME} (copiado para /opt/models no 1º boot)"
+  else
+    log_warn "ISO SEM modelo: o alvo sobe sem LLM. Instale um com --model-file (ver docs/ISO.md § 3.1)."
+  fi
 
   if [[ $rc -eq 0 ]]; then
     log_ok "Autoteste dos templates: OK."
@@ -1239,17 +1345,23 @@ main() {
   resolve_password
   acquire_iso
 
+  # O modelo é obtido ANTES de montar a árvore: um erro (arquivo errado,
+  # magic inválido) falha cedo, sem gastar extração/remontagem.
+  acquire_model
+
   # A ordem importa: o layout (extração Debian / stage Ubuntu) precisa existir
   # antes de injetar o projeto, e o patch de boot precisa do kernel/initrd que
   # só é conhecido depois do stage/extração.
   if [[ "$DISTRO" == "ubuntu" ]]; then
     prepare_ubuntu
     inject_project
+    inject_model
     inject_templates
     patch_boot_ubuntu
   else
     extract_iso_debian
     inject_project
+    inject_model
     inject_templates
     # Kernel/initrd são descobertos no patch do isolinux; rodamos primeiro.
     patch_isolinux
@@ -1269,6 +1381,11 @@ main() {
   log_info "Papel gravado: ${ROLE} (auto = detecta o hardware no primeiro boot)"
   log_info "Família gravada: ${FAMILY} (auto = detecta o hardware no primeiro boot)"
   log_info "Usuário: ${USERNAME} (sudo) · root bloqueado"
+  if [[ -n "$MODEL_NAME" ]]; then
+    log_info "Modelo embutido: /models/${MODEL_NAME} (o late-command copia para /opt/models)"
+  else
+    log_warn "ISO SEM modelo: o alvo sobe sem LLM. Instale um depois com --model-file (docs/ISO.md § 3.1)."
+  fi
   if [[ -n "$GENERATED_PASSWORD" ]]; then
     log_warn "SENHA GERADA: ${GENERATED_PASSWORD} — anote agora, não é recuperável daqui."
   fi

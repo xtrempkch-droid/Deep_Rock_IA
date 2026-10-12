@@ -234,6 +234,70 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 4-b. Modelo embutido na mídia (air-gapped)
+# ---------------------------------------------------------------------------
+# A ISO deve funcionar SEM internet, então o modelo não pode ser baixado no 1º
+# boot: ou ele está na mídia, ou o alvo sobe sem LLM (mas nunca "baixa sozinho").
+# Verificamos dois aspectos distintos:
+#   (a) a LIGAÇÃO — o instalador copia /models para o alvo e o 1º boot usa esse
+#       arquivo sem rede (se alguém remover isso, a ISO volta a depender de rede);
+#   (b) o CONTEÚDO — se há um .gguf na mídia, ele parece mesmo um GGUF?
+section "Modelo embutido (/models) e caminho offline"
+
+# (LATE_LOCAL é definido mais abaixo, para a seção de YAML; aqui buscamos de
+#  novo porque este trecho roda antes e a variável ainda não existe.)
+MODEL_LATE="$(fetch "/preseed/late-command.sh" 2>/dev/null || true)"
+
+if [[ -n "$MODEL_LATE" ]] && grep -q '/models' "$MODEL_LATE"; then
+  pass "late-command copia o modelo da mídia para o alvo"
+else
+  fail "late-command NÃO menciona /models: o modelo (se houver) não chegaria ao alvo"
+fi
+if [[ -n "$MODEL_LATE" ]] && grep -q 'MODEL_FILE' "$MODEL_LATE"; then
+  pass "late-command registra MODEL_FILE para o primeiro boot"
+else
+  fail "late-command não registra MODEL_FILE no .iso-config"
+fi
+
+FIRST_LOCAL="$(fetch "/preseed/firstboot.sh" 2>/dev/null || true)"
+if [[ -n "$FIRST_LOCAL" ]] && grep -q 'AI_MODEL_FILE' "$FIRST_LOCAL"; then
+  pass "firstboot repassa o modelo local (AI_MODEL_FILE) — sem download"
+else
+  fail "firstboot não repassa AI_MODEL_FILE: o modelo da mídia seria ignorado"
+fi
+
+# Conteúdo: procura um .gguf na mídia (pode legitimamente não existir).
+MODEL_LIST=""
+if [[ "$MODE" == "dir" ]]; then
+  MODEL_LIST="$(find "${INPUT}/models" -maxdepth 1 -name '*.gguf' -type f 2>/dev/null || true)"
+else
+  MODEL_LIST="$(xorriso -osirrox on -indev "$INPUT" -find /models -name '*.gguf' 2>/dev/null | grep '\.gguf$' || true)"
+fi
+
+if [[ -z "$MODEL_LIST" ]]; then
+  skip "nenhum .gguf na mídia (ISO gerada com --iso-model none) — caminho offline não exercitado"
+else
+  while IFS= read -r m; do
+    [[ -n "$m" ]] || continue
+    if [[ "$MODE" == "dir" ]]; then
+      src="$m"
+    else
+      src="$(fetch "$m" 2>/dev/null || true)"
+    fi
+    [[ -n "$src" && -f "$src" ]] || { fail "não consegui extrair o modelo ${m}"; continue; }
+    magic="$(head -c 4 "$src" 2>/dev/null || true)"
+    size_mb=$(( $(stat -c %s "$src" 2>/dev/null || echo 0) / 1024 / 1024 ))
+    if [[ "$magic" != "GGUF" ]]; then
+      fail "modelo ${m}: magic '${magic}' em vez de 'GGUF' (arquivo inválido na mídia)"
+    elif (( size_mb < 10 )); then
+      fail "modelo ${m}: ${size_mb} MB — pequeno demais para ser um modelo útil"
+    else
+      pass "modelo ${m}: GGUF válido, ${size_mb} MB, sem depender de rede"
+    fi
+  done <<< "$MODEL_LIST"
+fi
+
+# ---------------------------------------------------------------------------
 # 5. Conteúdo específico da distro
 # ---------------------------------------------------------------------------
 AI_LOCAL="$(fetch "/autoinstall.yaml" 2>/dev/null || true)"

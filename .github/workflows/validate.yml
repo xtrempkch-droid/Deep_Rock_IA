@@ -282,6 +282,21 @@ jobs:
           grep -q -- '--source' llama-build.sh
           grep -q 'prepare_source_local' llama-build.sh
           grep -q 'fonte LOCAL' llama-build.sh
+          # O MODELO VAI NA MÍDIA (decisão: ISO air-gapped). Se algum elo
+          # desaparecer, a ISO volta a precisar de rede no 1º boot — e o modo
+          # de falha é silencioso (sobe sem modelo), então guardamos cada elo.
+          grep -q -- '--iso-model' iso/build-iso.sh
+          grep -q 'SUGGESTED_MODEL_URL' iso/build-iso.sh
+          grep -q 'MODEL_FILE' iso/preseed/late-command.sh
+          grep -q 'AI_MODEL_FILE' iso/preseed/firstboot.sh
+          grep -q 'AI_MODEL_FILE' roles/inference/install.sh
+          grep -q -- '--model-file' roles/inference/install.sh
+          # E o atalho proibido continua proibido: nunca embutir binário
+          # pré-compilado do llama.cpp (exigiria 1 ISO por família).
+          ! grep -q -- '--prebuilt' iso/build-iso.sh
+          # Instrução COPY de verdade (o Dockerfile CITA esse comando num
+          # comentário didático — por isso ancoramos no início da linha).
+          ! grep -qE '^COPY[[:space:]]+.*build/bin' docker/Dockerfile
           # O diário de continuidade é o que permite retomar sem perder nada
           # (Regra 14): precisa continuar existindo e com as seções-chave.
           grep -qi 'retomada em 5 minutos' docs/JOURNAL.md

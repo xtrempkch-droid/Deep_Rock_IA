@@ -8,8 +8,14 @@
 #
 # Uso:
 #   sudo bash roles/inference/install.sh [--dry-run] [--yes]
-#                                      [--download-model URL]
+#                                      [--download-model URL | --auto-model]
 #                                      [--model-path /opt/models/model.gguf]
+#                                      [--model-file /caminho/existente.gguf]
+#
+# --model-file CAMINHO: usa um .gguf que JÁ existe (copiando para MODEL_DIR).
+# É o caminho OFFLINE: a ISO air-gapped traz o modelo na mídia, e nada é
+# baixado. Também pode vir pela variável de ambiente AI_MODEL_FILE, que é como
+# o primeiro boot da ISO repassa a escolha (mesmo padrão do AI_FAMILY).
 #
 # Idempotente.
 # -----------------------------------------------------------------------------
@@ -24,6 +30,9 @@ readonly REPO_ROOT
 DRY_RUN=0
 ASSUME_YES=0
 DOWNLOAD_URL=""
+# Caminho de um .gguf LOCAL (já existente) — o caminho OFFLINE da ISO.
+# AI_MODEL_FILE é como o firstboot.sh da ISO repassa a escolha.
+MODEL_FILE="${AI_MODEL_FILE:-}"
 MODEL_DIR="/opt/models"
 DEFAULT_MODEL_NAME="Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf"
 MODEL_PATH="${MODEL_DIR}/${DEFAULT_MODEL_NAME}"
@@ -159,9 +168,48 @@ download_model() {
     log_ok "Modelo baixado: ${MODEL_PATH}"
   else
     rm -f "${MODEL_PATH}.part"
-    log_error "Falha ao baixar o modelo. Baixe manualmente e ajuste MODEL_PATH em ${env_dst:-/etc/default/ai-server}."
+    log_error "Falha ao baixar o modelo. Baixe manualmente e ajuste MODEL_PATH em /etc/default/ai-server."
     log_error "Ver docs/TROUBLESHOOTING.md → 'Modelo não carrega / OOM'."
   fi
+}
+
+# Instala um modelo que JÁ existe no disco — sem rede. É o caminho usado pelo
+# primeiro boot de uma ISO air-gapped (o .gguf veio na mídia e o late-command
+# já o colocou em /opt/models).
+use_local_model() {
+  local src="$1"
+  [[ -f "$src" ]] \
+    || { log_error "--model-file '${src}': arquivo não encontrado."; return 1; }
+
+  # Sanidade mínima: um .gguf começa com "GGUF". Sem isso, o serviço subiria e
+  # só falharia no primeiro prompt — tarde demais para ser óbvio.
+  # (Verificamos também no --dry-run: é só uma leitura, e assim o erro aparece
+  #  antes de o usuário investir a cópia de 1 GB.)
+  local magic
+  magic="$(head -c 4 "$src" 2>/dev/null || true)"
+  if [[ "$magic" != "GGUF" ]]; then
+    log_error "--model-file ${src}: não parece um arquivo GGUF (esperado o magic 'GGUF')."
+    return 1
+  fi
+
+  local base; base="$(basename "$src")"
+  local dst="${MODEL_DIR}/${base}"
+  MODEL_PATH="$dst"
+
+  log_info "Modelo local (sem rede): ${src}"
+  log_info "Destino: ${MODEL_PATH}"
+  if [[ -f "$dst" ]]; then
+    log_info "Já existe no destino (idempotente): ${dst}"
+  elif [[ $DRY_RUN -eq 1 ]]; then
+    log_info "[dry-run] instalaria ${src} → ${dst}"
+  else
+    mkdir -p "$MODEL_DIR"
+    cp -f "$src" "${dst}.part" && mv "${dst}.part" "$dst"
+    log_ok "Modelo instalado localmente: ${dst} ($(du -h "$dst" | cut -f1))"
+  fi
+
+  chown "$SERVICE_USER":"$SERVICE_USER" "$dst" 2>/dev/null || true
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -174,9 +222,10 @@ main() {
       --yes)            ASSUME_YES=1; shift ;;
       --download-model) [[ $# -ge 2 ]] || { log_error "--download-model exige URL"; exit 2; }; DOWNLOAD_URL="$2"; shift 2 ;;
       --model-path)     [[ $# -ge 2 ]] || { log_error "--model-path exige caminho"; exit 2; }; MODEL_PATH="$2"; shift 2 ;;
+      --model-file)     [[ $# -ge 2 ]] || { log_error "--model-file exige caminho"; exit 2; }; MODEL_FILE="$2"; shift 2 ;;
       --auto-model)     DOWNLOAD_URL="${SUGGESTED_MODEL_URL}"; shift ;;
       -h|--help)
-        echo "Uso: $0 [--dry-run] [--yes] [--download-model URL | --auto-model] [--model-path CAMINHO]"
+        echo "Uso: $0 [--dry-run] [--yes] [--download-model URL | --auto-model | --model-file CAMINHO] [--model-path CAMINHO]"
         exit 0 ;;
       *) log_error "Argumento desconhecido: $1"; exit 2 ;;
     esac
@@ -195,14 +244,26 @@ main() {
   build_llama
   apply_sysctl
   create_service_user
-  install_service
 
-  if [[ -n "$DOWNLOAD_URL" ]]; then
+  # O modelo é escolhido ANTES do serviço: o /etc/default/ai-server grava o
+  # MODEL_PATH, e um --model-file define esse caminho a partir do nome do
+  # arquivo. Escrever o env antes deixaria o serviço apontando para o lugar
+  # errado.
+  if [[ -n "$MODEL_FILE" ]]; then
+    # Prioridade ao modelo LOCAL: é o caminho offline (ISO air-gapped) e não
+    # usa rede. Se ambos foram pedidos, o local ganha e o aviso é explícito.
+    [[ -z "$DOWNLOAD_URL" ]] \
+      || log_warn "--model-file e --download-model juntos: usando o arquivo local (sem rede)."
+    use_local_model "$MODEL_FILE"
+  elif [[ -n "$DOWNLOAD_URL" ]]; then
     download_model "$DOWNLOAD_URL"
   else
-    log_info "Nenhum modelo solicitado. Use --auto-model para baixar o Qwen2.5-Coder-1.5B (~1.1 GB)."
+    log_info "Nenhum modelo solicitado. Use --auto-model para baixar o Qwen2.5-Coder-1.5B (~1.1 GB),"
+    log_info "ou --model-file CAMINHO para usar um .gguf que você já tem (sem rede)."
     log_info "Modelo esperado em MODEL_PATH: ${MODEL_PATH}"
   fi
+
+  install_service
 
   log_ok "install.sh (inference) concluído."
   log_info "Próximos passos:"

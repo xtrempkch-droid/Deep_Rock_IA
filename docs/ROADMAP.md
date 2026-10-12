@@ -62,6 +62,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | Guardas no CI para a dupla de READMEs (ambos precisam existir e se referenciar) | 2026-10-12 | 2026-10-12 |
 | Correção do nome de artefato do `build-llama` (`matrix.profile` → `matrix.family`; o upload falharia) | 2026-10-12 | 2026-10-12 |
 | **`llama-build.sh --source <dir|tar.gz>`** — compila de um fonte **local**, sem rede e sem `git`; registra a origem em `AI-CPU-OS-BUILD.txt`. É o primeiro passo da ISO air-gapped | 2026-10-12 | 2026-10-12 |
+| **O modelo `.gguf` vai na mídia** (`--iso-model auto|<caminho>|none`) + `late-command` copiando para `/opt/models` + `AI_MODEL_FILE` no `firstboot` + **`--model-file`** no papel `inference` (instala modelo local sem rede) | 2026-10-12 | 2026-10-12 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em
@@ -81,7 +82,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | **🎯 Construir e bootar a ISO de instalação numa VM** (Bloco M) | 2026-10-07 | Entregável final; maior risco não validado do projeto |
 | **ISO em base Ubuntu Server** (`--distro ubuntu` + autoinstall/Subiquity) | 2026-10-12 | Implementada e validada no autoteste de templates; **nunca executada** contra uma ISO real |
 | **Validar a resolução de famílias em hardware real** (blocos N/O do `VALIDATION.md`) | 2026-10-12 | Testado só com nomes de CPU simulados |
-| **🎯 ISO AIR-GAPPED** (decisão da sessão #14) | 2026-10-12 | **Decidida, não implementada.** Falta: `firstboot.sh` usar `--source`; repo apt local (toolchain + pacotes do instalador) na mídia; `OFFLINE=1` no `.iso-config`; flag `--offline` no `build-iso.sh`; **e decidir a política do modelo** (embutir vs pendrive). Ver `docs/ISO.md` § 3.1 |
+| **🎯 ISO AIR-GAPPED** (decisão da sessão #14) | 2026-10-12 | **Decidida, parcialmente implementada.** Feito: fonte local (`--source`) e **modelo na mídia** (`--iso-model`). Falta: repo apt local (toolchain + pacotes do instalador, ~300–500 MB) na mídia; `--source`/modelo no `firstboot.sh`; `OFFLINE=1`; flag `--offline` no `build-iso.sh`. Ver `docs/ISO.md` § 3.1 |
 
 ---
 

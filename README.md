@@ -406,6 +406,15 @@ sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/vda         # gerar
 bash iso/test-vm.sh --iso iso/out/ai-cpu-os-ubuntu-*.iso --yes
 ```
 
+**O modelo vai dentro da ISO.** Por padrão, gerar a ISO baixa o modelo sugerido
+(~1,1 GB) na **sua máquina** e o embute na mídia — assim ela funciona sozinha,
+sem depender de internet. Para trocar ou dispensar:
+
+```bash
+bash iso/build-iso.sh --iso-model ~/modelos/meu.gguf   # usa um modelo seu
+bash iso/build-iso.sh --iso-model none                 # ISO sem modelo
+```
+
 Como funciona, em três linhas:
 
 1. A ISO traz o **software e a intenção** (qual papel/família você quer).
@@ -417,8 +426,12 @@ Como funciona, em três linhas:
 > está numa rede isolada, a ISO tem de bastar-se — nada de baixar coisa no meio
 > da instalação. E o llama.cpp é **compilado no primeiro boot** (mais demorado,
 > porém é o que garante que o binário saia com as instruções exatas da sua CPU).
-> ⚠️ **Isto ainda é objetivo, não fato:** hoje a ISO **precisa de rede** no
-> primeiro boot. O que falta está listado em [`docs/ISO.md`](docs/ISO.md) § 3.1.
+> O **modelo já vai na mídia**; o que falta é o **ambiente de compilação**, e
+> isso está listado em [`docs/ISO.md`](docs/ISO.md) § 3.1. Ou seja: **hoje a ISO
+> ainda precisa de rede** no primeiro boot — mas o modelo, não.
+>
+> 💡 A ISO com o modelo fica em torno de **4,3 GB**; com `--iso-model none`, por
+> **3,2 GB** (estimativas).
 >
 > 💡 **A ISO APAGA o disco** indicado em `--disk`. Teste em máquina virtual
 > **primeiro**, sempre.

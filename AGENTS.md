@@ -306,13 +306,16 @@ Estas regras são **obrigatórias**:
     - **Nunca** embutir binário pré-compilado do llama.cpp como atalho: exigiria
       uma ISO por família e reintroduziria o risco de portabilidade (`SIGILL`).
       Compilar no alvo é o que garante o `-march` correto da família detectada.
+      (Há guardas no CI contra `--prebuilt` e contra `COPY build/bin`.)
     - **Nenhum passo pode exigir rede** na instalação ou no 1º boot. Tudo que
-      fosse baixado tem de estar na mídia: fonte do llama.cpp (`--source`, já
-      pronto), toolchain de build + pacotes do instalador (repo apt local) e o
-      modelo (política pendente).
+      fosse baixado tem de estar na mídia: fonte do llama.cpp (`--source`), o
+      **modelo** (`--iso-model`, que embute o `.gguf` e o leva a `/opt/models`)
+      e o toolchain de build + pacotes do instalador (repo apt local — ainda
+      **não** implementado).
     - O `llama-build.sh` **precisa** continuar aceitando `--source <dir|tar.gz>`
-      (caminho offline, sem rede e sem `git`) — há guarda no CI. Ao mexer nele,
-      rode `--source` num diretório **e** num tarball em `--dry-run`.
+      (offline, sem rede e sem `git`) e o papel `inference` **precisa** manter
+      `--model-file`/`AI_MODEL_FILE` (modelo local, sem download) — há guarda no
+      CI para ambos.
     - Se você adicionar qualquer download (script, papel, template), ele é uma
       **violação** desta regra: ou embuta na ISO, ou torne-o explicitamente
       opcional com aviso. Registre em `docs/ISO.md` § 3.1 (tabela de requisitos).
@@ -338,8 +341,19 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-12
-- **O que mudou:** **Decisões firmadas sobre a ISO (Regra 13-b): air-gapped e
-  compilar no 1º boot.** A ISO **deve funcionar sem internet** e o llama.cpp é
+- **O que mudou:** **O modelo `.gguf` vai na mídia** (resposta à dúvida em
+  aberto): ~1 GB de ISO é preço justo por uma mídia que se basta. Implementado
+  `--iso-model auto|<caminho>|none` no `iso/build-iso.sh` (recusa `.gguf`
+  inválido — magic `GGUF` — **antes** de montar a ISO), a cópia para
+  `/opt/models` no `late-command.sh` (`MODEL_FILE` no `.iso-config`), o repasse
+  no `firstboot.sh` (`AI_MODEL_FILE`) e **`--model-file`** no papel `inference`
+  (instala um modelo local sem rede). O `iso/verify-iso.sh` confere a corrente
+  toda e reprova modelo inválido/pequeno; guardas novos no CI, incluindo
+  **negativos** (proibido `--prebuilt` e `COPY build/bin`).
+  **A ISO ainda exige rede no 1º boot** para o toolchain e o clone do llama.cpp —
+  o repositório apt local segue como o item mais pesado em aberto.
+- **Data anterior:** 2026-10-12 — **Decisões firmadas sobre a ISO (Regra 13-b):
+  air-gapped e compilar no 1º boot.** A ISO **deve funcionar sem internet** e o llama.cpp é
   **compilado no alvo** — nunca um binário pré-compilado (exigiria uma ISO por
   família e reintroduziria o risco de `SIGILL`). Consequência prática: nenhum
   download novo pode entrar em script/papel/template sem ser embutido na mídia

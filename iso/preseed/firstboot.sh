@@ -61,6 +61,9 @@ if [[ -r "$CONFIG" ]]; then
   ROLE="${ROLE:-auto}"
   FAMILY="${FAMILY:-auto}"
   FIRSTBOOT_REBOOT="${FIRSTBOOT_REBOOT:-no}"
+  # Modelo já copiado para /opt/models pelo late-command (ISO air-gapped).
+  # Vazio = a ISO não trouxe modelo; ninguém baixa nada daqui.
+  MODEL_FILE="${MODEL_FILE:-}"
 fi
 
 case "$ROLE" in
@@ -74,6 +77,24 @@ esac
 log "papel configurado na ISO: ${ROLE}"
 log "família configurada na ISO: ${FAMILY}"
 log "reboot automático após aplicar: ${FIRSTBOOT_REBOOT}"
+
+# ---------------------------------------------------------------------------
+# Modelo embutido na mídia (opcional)
+# ---------------------------------------------------------------------------
+# O late-command já copiou o .gguf para /opt/models. Repassamos por variável de
+# ambiente (mesmo padrão do AI_FAMILY) para o papel instalar SEM baixar nada —
+# é o que torna o caminho air-gapped possível.
+if [[ -n "$MODEL_FILE" ]]; then
+  if [[ -f "$MODEL_FILE" ]]; then
+    export AI_MODEL_FILE="$MODEL_FILE"
+    log "modelo local: ${MODEL_FILE} (será usado sem rede)"
+  else
+    log "AVISO: MODEL_FILE=${MODEL_FILE} não existe; seguindo sem modelo."
+    MODEL_FILE=""
+  fi
+else
+  log "nenhum modelo embutido nesta ISO (o alvo subirá sem LLM)."
+fi
 
 # ---------------------------------------------------------------------------
 # Esperar pela rede (best-effort): o papel 'inference' clona o llama.cpp.

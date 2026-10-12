@@ -41,6 +41,12 @@ SRC="/cdrom"
 DST="/target/opt/ai-cpu-os"
 UNIT="/etc/systemd/system/ai-cpu-os-firstboot.service"
 
+## Nome do modelo embutido na mídia (vazio = a ISO foi gerada com --iso-model none).
+## O arquivo correspondente é lido de ${SRC}/models/ e copiado para o alvo AQUI,
+## na instalação, para o primeiro boot não precisar de rede para nada disso.
+ISO_MODEL_NAME="@@ISO_MODEL@@"
+MODEL_DST_DIR="/opt/models"
+
 ## ---------------------------------------------------------------------------
 ## Executar um comando DENTRO do sistema instalado.
 ##   d-i:       `in-target` já faz o chroot.
@@ -73,9 +79,44 @@ cp -a "${SRC}/ai-cpu-os/." "${DST}/"
 ## ---------------------------------------------------------------------------
 ## 2. Papel, família e configuração desta ISO
 ## ---------------------------------------------------------------------------
-printf 'ROLE=%s\nFAMILY=%s\nFIRSTBOOT_REBOOT=%s\nDISTRO=%s\nISO_BUILD=%s\n' \
-    "@@ROLE@@" "@@FAMILY@@" "@@FIRSTBOOT_REBOOT@@" "@@DISTRO@@" "@@ISO_BUILD@@" \
+## MODEL_FILE vazio significa "sem modelo na mídia": o firstboot.sh então não
+## passa --model-file e o sistema sobe sem LLM (o usuário instala um depois).
+MODEL_FILE=""
+if [ -n "${ISO_MODEL_NAME}" ]; then
+    MODEL_FILE="${MODEL_DST_DIR}/${ISO_MODEL_NAME}"
+fi
+
+printf 'ROLE=%s\nFAMILY=%s\nFIRSTBOOT_REBOOT=%s\nDISTRO=%s\nISO_BUILD=%s\nMODEL_FILE=%s\n' \
+    "@@ROLE@@" "@@FAMILY@@" "@@FIRSTBOOT_REBOOT@@" "@@DISTRO@@" "@@ISO_BUILD@@" "${MODEL_FILE}" \
     > "${DST}/.iso-config"
+
+## ---------------------------------------------------------------------------
+## 2-b. Modelo embutido na mídia → /opt/models do alvo
+## ---------------------------------------------------------------------------
+## Copiamos AGORA (e não no primeiro boot) por dois motivos: a mídia já está
+## montada e o destino já está sendo escrito — e um erro de cópia aparece no
+## log da instalação, em vez de virar um "modelo ausente" misterioso depois.
+if [ -n "${ISO_MODEL_NAME}" ]; then
+    if [ -f "${SRC}/models/${ISO_MODEL_NAME}" ]; then
+        log "instalando o modelo embutido em ${MODEL_FILE}"
+        mkdir -p "/target${MODEL_DST_DIR}"
+        if cp "${SRC}/models/${ISO_MODEL_NAME}" "/target${MODEL_DST_DIR}/.part"; then
+            mv "/target${MODEL_DST_DIR}/.part" "/target${MODEL_FILE}"
+            chown -R llama:llama "/target${MODEL_DST_DIR}" 2>/dev/null || true
+            log "modelo instalado: ${MODEL_FILE}"
+        else
+            log "AVISO: falha ao copiar o modelo; a instalação continua sem ele"
+            MODEL_FILE=""
+            sed -i "s|^MODEL_FILE=.*|MODEL_FILE=|" "${DST}/.iso-config" 2>/dev/null || true
+        fi
+    else
+        log "AVISO: ${SRC}/models/${ISO_MODEL_NAME} não está na mídia; seguindo sem modelo"
+        MODEL_FILE=""
+        sed -i "s|^MODEL_FILE=.*|MODEL_FILE=|" "${DST}/.iso-config" 2>/dev/null || true
+    fi
+else
+    log "sem modelo embutido nesta ISO (--iso-model none)"
+fi
 
 ## ---------------------------------------------------------------------------
 ## 3. Serviço de primeiro boot

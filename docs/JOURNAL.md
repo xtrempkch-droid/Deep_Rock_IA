@@ -9,7 +9,7 @@
 > [`docs/STATE.md`](STATE.md).
 > **Quando escrever:** **ao fim de TODA sessão de trabalho** (ver § 8).
 >
-> **Última entrada:** sessão **#14** (2026-10-12) — decisões: ISO air-gapped + compilar no 1º boot (`--source` implementado).
+> **Última entrada:** sessão **#15** (2026-10-12) — o modelo `.gguf` vai na mídia (implementado de ponta a ponta).
 
 ---
 
@@ -718,6 +718,107 @@ Ou seja: o usuário estava respondendo ativamente as dúvidas abertas do § 5.3.
 
 ---
 
+### Sessão #15 — 2026-10-12 · 📦 O modelo `.gguf` vai na mídia (implementado)
+
+**Objetivo (pedido do usuário, verbatim):** *"um pouco maior não é um problema"*
+— resposta à dúvida aberta na sessão #14: a ISO pode crescer para levar o modelo.
+
+**Feito:**
+
+1. **Decisão registrada:** o modelo `.gguf` **vai na mídia**. ~1 GB a mais é
+   aceito em troca de uma ISO que se basta — a alternativa (modelo por pendrive)
+   exigiria um passo manual depois da instalação. O requisito 5 do `docs/ISO.md`
+   § 3.1 saiu de "decisão pendente" para ✅ **implementado**.
+2. **`build-iso.sh --iso-model auto|<caminho>|none`**: `auto` (padrão) baixa o
+   modelo sugerido **na máquina que gera a ISO** — ali a rede é aceitável, e o
+   arquivo passa a ser auditável dentro da mídia (nome + tamanho + magic);
+   `CAMINHO` usa um `.gguf` seu; `none` gera sem modelo. Um `.gguf` inválido é
+   **recusado antes de montar a ISO** (magic `GGUF` + tamanho), e o download roda
+   em `$WORK_DIR/models`, idempotente (reaproveita o que já baixou).
+3. **A corrente completa até o alvo** (nenhum elo pode faltar, senão a ISO volta
+   a depender de rede — e o modo de falha é silencioso):
+   `--iso-model` → `/models/<arquivo>` na mídia → `late-command.sh` copia para
+   `/opt/models` e grava **`MODEL_FILE`** no `.iso-config` → `firstboot.sh`
+   exporta **`AI_MODEL_FILE`** (mesmo padrão do `AI_FAMILY`) → papel `inference`
+   instala por **`--model-file`**, **sem rede**.
+4. **`roles/inference/install.sh --model-file CAMINHO`** — o caminho OFFLINE do
+   papel: copia um `.gguf` local para `/opt/models`, confere o magic e não toca a
+   rede. Também aceita `AI_MODEL_FILE` por ambiente. Se o usuário passar
+   `--model-file` **e** `--auto-model`, o local ganha e o aviso é explícito.
+5. **Bug de ordem corrigido no papel:** o modelo era escolhido **depois** de
+   `install_service`, que grava `MODEL_PATH` em `/etc/default/ai-server`. Com um
+   caminho vindo por flag isso passava despercebido; com o modelo local (cujo
+   `MODEL_PATH` sai do **nome do arquivo**) o serviço apontaria para o lugar
+   errado. A escolha do modelo passou para **antes** do serviço.
+6. **`verify-iso.sh`** ganhou a seção "Modelo embutido (/models) e caminho
+   offline": confere os **elos** de ligação (late-command menciona `/models` e
+   `MODEL_FILE`; firstboot repassa `AI_MODEL_FILE`) e o **conteúdo** (se houver
+   `.gguf` na mídia, valida o magic e recusa arquivo pequeno demais). Sem modelo,
+   é `[SKIP]` — nunca um `PASS` falso.
+7. **Guardas no CI**, incluindo os **negativos** que materializam a decisão:
+   `! --prebuilt` e `! ^COPY.*build/bin`.
+8. Docs: `ISO.md` (§ 3.1 item 5, § 4.7 sobre rede no build, § 6, § 8, § 9),
+   `AGENTS.md` (Regra 13-b + § 8), `STATE`, `ROADMAP`, `README.md` § 10 e
+   `README.technical.md` (§ 4.4, § 11, § 12).
+
+**Decisões (e por quê):**
+
+- **Baixar o modelo no BUILD da ISO, não no 1º boot.** A regra é que **o alvo**
+  não precise de rede; a máquina que monta a mídia pode ter. Fazer o download ali
+  torna o arquivo **parte da mídia** (auditável, com nome e tamanho conhecidos)
+  em vez de um efeito colateral da instalação.
+- **Validar o `.gguf` cedo e em quatro lugares:** `build-iso.sh` (antes de montar
+  a ISO — erro barato), `--model-file` (antes de copiar), `verify-iso.sh` (no
+  produto) e o serviço (na partida). Um `.gguf` de 2 KB ou com magic errado não
+  deve chegar ao ar para só então falhar no primeiro prompt.
+- **`none` existe de propósito.** Sem ele, quem estiver sem rede na máquina de
+  build ficaria travado — e nem todo mundo quer 1 GB a mais na mídia.
+- **O modelo ganha o mesmo tratamento que o fonte:** ambos passam a ser
+  **artefatos da mídia**, com o build apenas os materializando. É isso que torna
+  o air-gapped uma propriedade da ISO, e não uma esperança sobre a rede.
+
+**Problemas encontrados e resolvidos:**
+
+- 🐛🐛 **Editei `main()` e o arquivo ficou corrompido em três pontos:** uma linha
+  colada (`fiO modelo é obtido ANTES...`), uma duplicação com texto intercalado
+  (`inject_modela: o layout...`) e um bloco inserido no meio do ramo Debian. O
+  `bash -n` passou a acusar `syntax error near unexpected token 'done'` numa linha
+  que, isolada, estava correta — **sintoma longe da causa**. Pior: a substituição
+  destruiu também o trecho que roda `bash -n`/`sh -n` dentro do `check_templates`,
+  ou seja, **o autoteste que teria pegado o erro**. Reparado extraindo o `main()`
+  original com `git show HEAD:iso/build-iso.sh` e reaplicando as mudanças por
+  **âncoras exatas em script** (linha inteira igual a `  acquire_iso`), não por
+  bloco de texto.
+- **A armadilha do "editar bloco sem incluir a linha seguinte" aconteceu pela
+  TERCEIRA vez** (AGENTS.md, validate.yml, agora build-iso.sh). Em todas o sintoma
+  foi uma linha colada ao texto anterior; nesta a consequência foi pior (arquivo
+  inteiro inválido).
+- ⚠️ **Guarda negativo quase falso:** `! grep -q 'COPY build/bin' docker/Dockerfile`
+  reprovava porque o Dockerfile **cita** o comando num comentário explicando por
+  que não se deve usá-lo. Corrigido ancorando na forma do comando
+  (`^COPY[[:space:]]+.*build/bin`) e verificado com um caso positivo de teste.
+- **`--iso-model` com magic errado falhava tarde demais** se a validação ficasse
+  depois de `acquire_iso`. Movido para **antes** de montar a árvore: erro barato
+  primeiro.
+
+**NÃO feito / não testado (importante):**
+
+- **Nada do modelo foi exercitado num boot real.** Os testes foram `--dry-run`
+  nas duas distros, validações de magic/tamanho (positivas e negativas),
+  `verify-iso.sh` reprovando `pequeno.gguf` e `magic-ruim.gguf` numa árvore de
+  teste, e o autoteste de templates (36 PASS / 0 FAIL / 2 SKIP).
+- **O `late-command.sh` nunca copiou um `.gguf` de verdade**, e o `firstboot.sh`
+  nunca exportou `AI_MODEL_FILE` num sistema instalado.
+- **A ISO continua exigindo rede no 1º boot** (toolchain do apt + clone do
+  llama.cpp). O **repositório apt local** na mídia é o item mais pesado que resta
+  (~300–500 MB de `.deb`).
+- O **tamanho real** da ISO com modelo (~4,3 GB estimado) continua sendo
+  **estimativa** — nenhuma ISO foi gerada.
+
+**Commits desta sessão:** (a preencher após o push).
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,
@@ -746,8 +847,12 @@ Ou seja: o usuário estava respondendo ativamente as dúvidas abertas do § 5.3.
 
 | Dúvida | Contexto |
 |--------|----------|
-| **O modelo vai na ISO?** | Air-gapped (decisão da sessão #14) significa que o `--auto-model` **não** pode baixar da HuggingFace. Ou o `.gguf` vai na mídia (~1,1 GB a mais, ISO ~4,3 GB), ou fica de fora (ISO ~3,2 GB, o usuário copia por pendrive). Meio-termo: embutir **um** modelo pequeno por padrão + `--iso-model CAMINHO`. Ver `docs/ISO.md` § 3.1, item 5. |
+| — (nenhuma em aberto) | Todas as dúvidas de arquitetura registradas até aqui foram respondidas. As pendências são de **execução**, não de decisão: gerar/bootar a ISO, montar o repo apt local, medir em hardware. |
 
+> ✅ **Resolvido na sessão #15:** o **modelo `.gguf` vai na mídia** ("um pouco
+> maior não é um problema"). Implementado de ponta a ponta: `--iso-model` →
+> `/models` na ISO → `MODEL_FILE` → `AI_MODEL_FILE` → `--model-file`.
+>
 > ✅ **Resolvido na sessão #14:** as duas dúvidas que estavam aqui foram
 > respondidas pelo usuário — **a ISO DEVE ser air-gapped** (sim) e **compilar no
 > 1º boot é melhor que embutir binário pré-compilado** (mesmo sendo demorado:
@@ -795,6 +900,8 @@ Ou seja: o usuário estava respondendo ativamente as dúvidas abertas do § 5.3.
 | `git push` rejeitado (`non-fast-forward`) | Alguém (você, pelo site) comitou no remoto | `git fetch` → inspecionar → `git rebase origin/main` → push (nunca force no `main`) |
 | `sed -i "s/.*texto.*/.../"` em `.md` | Pode quebrar linha sem intenção | Prefira edições por bloco com contexto |
 | Editar **bloco** de texto incluindo a quebra de linha final | O texto seguinte **gruda** na mesma linha (ex.: `perfil├── .github/`) e corrompe a árvore/lista | **Sempre confira o resultado** (`sed -n ...p`, `git diff`) e inclua a linha seguinte no contexto da edição |
+| Editar um **trecho grande** (uma função inteira) por substituição de bloco | O match pode cair em outro ponto, duplicar trechos e destruir código vizinho — 3 ocorrências em `build-iso.sh` de uma vez, e o `bash -n` acusou erro **longe da causa** | Para edição estrutural, extraia o original com `git show HEAD:arquivo` e reaplique as mudanças por **âncoras exatas** (linha inteira) em script |
+| Guarda negativo com `grep` de texto que aparece em **comentário** | O guarda reprova o repositório correto (ex.: o Dockerfile **cita** `COPY build/bin` para explicar por que NÃO usá-lo) | Ancore na forma do comando (`^COPY[[:space:]]+.*build/bin`) e teste o guarda com um caso positivo |
 | `sed -i` na 1ª linha de um script com `#!` | Pode trocar o **shebang** (`#!/usr/bin/env bash` vs `#!/bin/sh`) e mudar o interpretador | Nunca use `sed -i '1s/…'`; confirme o shebang depois (o CI verifica o modo estrito por shebang) |
 | Renomear/remover uma **chave de matriz** do CI e esquecer quem a consome | Ficou `${{ matrix.profile }}` no `build-llama.yml` depois de a matriz virar `family` → o **nome do artefato ia vazio** e o `upload-artifact` falharia (só num run de tag, longe do PR) | Ao renomear uma chave de matriz, `grep -n 'matrix\.'` no workflow inteiro; prefira `matrix.family` a nomes genéricos |
 | Documentar citando **nomes/comandos de cabeça** | A doc descreve algo que não existe, e ninguém descobre até alguém tentar (ex.: `@@PROFILE@@`, removido na refatoração) | Sempre **copie a saída real** (rode o script) e confira nomes com `grep` no código antes de escrever |
@@ -864,6 +971,7 @@ Ao **fim de cada sessão**, faça nesta ordem:
 | 2026-10-07 | Criação — diário de continuidade (sessões #1–#8), inventário do ambiente, threads abertas e armadilhas. |
 | 2026-10-12 | Sessões #9–#13 (famílias → ISO Ubuntu → ferramentas de validação → Zen 3/4 + GPU → documentação por público). Corrigido o marcador "Última entrada" do topo (estava parado em #7) e a lista de marcadores do § 7 (era `@@PROFILE@@`, removido na refatoração). |
 | 2026-10-12 | Sessão #14 — fechadas as duas dúvidas de arquitetura da ISO (**air-gapped = sim**; **compilar no 1º boot > binário pré-colado**). Item 1 dos requisitos implementado (`--source`). Nova dúvida aberta: o modelo vai na mídia? |
+| 2026-10-12 | Sessão #15 — o **modelo `.gguf` vai na mídia** (`--iso-model`): implementada a corrente completa `--iso-model` → `/models` → `MODEL_FILE` → `AI_MODEL_FILE` → `--model-file`, com validação de magic/tamanho em 4 pontos e guardas (inclusive negativos) no CI. **Nenhuma dúvida de arquitetura em aberto**: as pendências agora são de execução. |
 
 > **Ao criar uma sessão nova, atualize também a "Última entrada" no topo deste
 > arquivo** — é o primeiro número que uma sessão futura olha para saber se está
