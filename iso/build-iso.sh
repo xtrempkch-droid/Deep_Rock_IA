@@ -35,6 +35,12 @@
 #   --role NAME           Papel gravado na ISO: auto|inference|builder (padrão: auto).
 #   --family NAME         Família gravada na ISO: auto ou um id (padrão: auto).
 #   --firstboot-reboot    Reinicia automaticamente ao fim do primeiro boot.
+#   --serial-console      Habilita console serial (ttyS0,115200) na ISO **e** no
+#                         sistema instalado. É o que torna a instalação e o
+#                         primeiro boot observáveis sem tela (usado pelo
+#                         iso/test-vm.sh).
+#   --no-verify           Não roda o iso/verify-iso.sh no fim (ele é rápido e
+#                         somente leitura; o padrão é verificar).
 #   --hostname NAME       Hostname do sistema instalado (padrão: <usuario>).
 #   --username NAME       Usuário administrativo (padrão: ai-cpu-os).
 #   --password-hash HASH  Hash da senha (crypt). Se omitido, gera e mostra um.
@@ -83,6 +89,8 @@ EXPECTED_SHA=""
 ROLE="auto"
 FAMILY="auto"
 FIRSTBOOT_REBOOT="no"
+SERIAL_CONSOLE="no"
+NO_VERIFY=0
 USERNAME="ai-cpu-os"
 USER_FULLNAME="ai-cpu-os"
 # Nome HOSTNAME NÃO é usado de propósito: o bash já define uma variável com esse
@@ -151,6 +159,10 @@ Opções principais:
   --role NAME           Papel gravado na ISO: auto|inference|builder (padrão: auto).
   --family NAME         Família gravada na ISO: auto ou um id (padrão: auto).
   --firstboot-reboot    Reinicia ao fim do primeiro boot (aplica C-states).
+  --serial-console      Console serial (ttyS0) na ISO e no sistema instalado —
+                        é o que permite observar a instalação e o 1º boot sem
+                        tela (usado pelo iso/test-vm.sh).
+  --no-verify           Não roda o iso/verify-iso.sh no fim.
   --hostname NAME       Hostname do sistema instalado (padrão: <usuario>).
   --username NAME       Usuário administrativo (padrão: ai-cpu-os).
   --password-hash HASH  Hash crypt da senha. Se omitido, gera e mostra um.
@@ -200,6 +212,8 @@ parse_args() {
         esac
         shift 2 ;;
       --firstboot-reboot) FIRSTBOOT_REBOOT="yes"; shift ;;
+      --serial-console)   SERIAL_CONSOLE="yes"; shift ;;
+      --no-verify)        NO_VERIFY=1; shift ;;
       --hostname)        [[ $# -ge 2 ]] || { log_error "--hostname exige valor"; exit 2; }; SYS_HOSTNAME="$2"; shift 2 ;;
       --username)        [[ $# -ge 2 ]] || { log_error "--username exige valor"; exit 2; }; USERNAME="$2"; shift 2 ;;
       --password-hash)   [[ $# -ge 2 ]] || { log_error "--password-hash exige valor"; exit 2; }; PASSWORD_HASH="$2"; shift 2 ;;
@@ -594,6 +608,7 @@ subst_template() {
     -e "s|@@ROLE@@|${ROLE}|g" \
     -e "s|@@FAMILY@@|${FAMILY}|g" \
     -e "s|@@FIRSTBOOT_REBOOT@@|${FIRSTBOOT_REBOOT}|g" \
+    -e "s|@@SERIAL_CONSOLE@@|${SERIAL_CONSOLE}|g" \
     -e "s|@@ISO_BUILD@@|${ISO_BUILD_ID}|g" \
     -e "s|@@USERNAME@@|${USERNAME}|g" \
     -e "s|@@USER_FULLNAME@@|${USER_FULLNAME}|g" \
@@ -631,7 +646,7 @@ inject_common_templates() {
 # Retorna 1 (não aborta) para que o autoteste possa acumular falhas.
 check_no_leftover_tokens() {
   local -a required_tokens=(
-    DISTRO ROLE FAMILY FIRSTBOOT_REBOOT ISO_BUILD USERNAME USER_FULLNAME HOSTNAME PASSWORD_HASH
+    DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME PASSWORD_HASH
     LOCALE KEYMAP TIMEZONE EXTRA_PACKAGES PACKAGES_BLOCK STORAGE_LAYOUT
   )
   local t leftover=0
@@ -742,7 +757,7 @@ patch_isolinux() {
 label ai-cpu-os-auto
  menu label ^Instalar ai-cpu-os (automatico${DISK:+, APAGA ${DISK}})
  kernel ${KERNEL_PATH}
- append vga=788 initrd=${INITRD_PATH} auto=true priority=critical preseed/file=/cdrom/preseed/ai-cpu-os.cfg --- quiet
+ append vga=788 initrd=${INITRD_PATH} auto=true priority=critical preseed/file=/cdrom/preseed/ai-cpu-os.cfg $(kernel_args_extra) --- quiet
 EOF
   log_ok "Boot BIOS configurado (default ai-cpu-os-auto, timeout 10s)."
 }
@@ -898,6 +913,15 @@ detect_casper_paths() {
   log_info "Kernel: ${KERNEL_PATH} · initrd: ${INITRD_PATH}"
 }
 
+# Args extra de kernel quando o console serial está habilitado: sem isto, o
+# instalador e o primeiro boot não aparecem no log serial (tela virtual, que
+# num teste headless não existe).
+kernel_args_extra() {
+  if [[ "$SERIAL_CONSOLE" == "yes" ]]; then
+    printf 'console=ttyS0,115200'
+  fi
+}
+
 # Acrescenta timeout/default + a menuentry automática ao fim de um grub.cfg.
 # `autoinstall` é o parâmetro de kernel que liga o modo não interativo; o
 # `autoinstall.yaml` é achado sozinho na raiz da mídia (ver o cabeçalho do
@@ -913,7 +937,7 @@ set timeout=10
 set default="ai-cpu-os-auto"
 menuentry "Instalar ai-cpu-os (automatico${DISK:+, APAGA ${DISK}})" {
     set gfxpayload=keep
-    linux   ${KERNEL_PATH} autoinstall quiet ---
+    linux   ${KERNEL_PATH} autoinstall quiet $(kernel_args_extra) ---
     initrd  ${INITRD_PATH}
 }
 EOF
@@ -1202,7 +1226,9 @@ main() {
   # Autoteste dos templates: não gera ISO, não precisa de disco nem de root.
   if [[ $CHECK_TEMPLATES -eq 1 ]]; then
     check_templates
-    exit $?
+    local rc_tpl=$?
+    selftest_iso_tools || rc_tpl=1
+    exit $rc_tpl
   fi
 
   if [[ "${EUID:-$(id -u)}" -ne 0 && $DRY_RUN -eq 0 ]]; then
@@ -1255,10 +1281,127 @@ main() {
   log_info "No sistema instalado, o tuning é aplicado no primeiro boot:"
   log_info "    systemctl status ai-cpu-os-firstboot && cat /var/log/ai-cpu-os-firstboot.log"
 
+  if [[ $NO_VERIFY -eq 0 ]]; then
+    run_verify_iso
+  fi
+
+  log_info "Teste automatizado de boot (instala + 1º boot; precisa de qemu):"
+  log_info "    bash iso/test-vm.sh --iso '${OUT_ISO}' --yes"
+  if [[ "$SERIAL_CONSOLE" != "yes" ]]; then
+    log_warn "Para o teste de VM enxergar a instalação, gere a ISO com --serial-console."
+  fi
+
   if [[ $KEEP_WORK -eq 0 && $DRY_RUN -eq 0 ]]; then
     log_info "Removendo o diretório de trabalho (${WORK_DIR}); use --keep-work para mantê-lo."
     rm -rf "$WORK_DIR" 2>/dev/null || log_warn "Não consegui remover ${WORK_DIR}."
   fi
+}
+
+# ---------------------------------------------------------------------------
+# Verificação automática da ISO gerada (delega ao iso/verify-iso.sh)
+# ---------------------------------------------------------------------------
+# Verificar é barato e somente leitura, então o padrão é verificar. Um FAIL aqui
+# é tratado como erro do build: é melhor falhar agora do que entregar uma ISO
+# que não instala sozinha.
+run_verify_iso() {
+  local verifier="${ISO_DIR}/verify-iso.sh"
+  if [[ ! -f "$verifier" ]]; then
+    log_warn "iso/verify-iso.sh não encontrado; pulando a verificação automática."
+    return 0
+  fi
+
+  # Em --dry-run nada foi gerado: não há o que verificar.
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log_info "[dry-run] pularia a verificação automática (nenhuma ISO foi gerada)."
+    return 0
+  fi
+
+  # Cinto de segurança: se por algum motivo a ISO não existe, avisamos em vez de
+  # transformar isso num erro confuso vindo do verificador.
+  if [[ ! -f "$OUT_ISO" ]]; then
+    log_warn "ISO de saída não existe (${OUT_ISO}); nada a verificar."
+    return 0
+  fi
+
+  section "Verificação automática da ISO"
+  local -a args=(--iso "$OUT_ISO" --distro "$DISTRO" --role "$ROLE" --family "$FAMILY")
+  if [[ -n "$DISK" ]]; then
+    args+=(--disk "$DISK")
+  fi
+
+  if bash "$verifier" "${args[@]}"; then
+    log_ok "A ISO passou na verificação de conteúdo."
+  else
+    log_error "A ISO gerada NÃO passou na verificação (iso/verify-iso.sh)."
+    log_error "Corrija antes de bootar: veja os [FAIL] acima."
+    exit 1
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Autoteste (usado pelo CI): monta uma árvore com os templates REAIS e o
+# projeto REAL e roda as duas ferramentas sobre ela. Não precisa de xorriso,
+# nem de disco, nem de root.
+# ---------------------------------------------------------------------------
+selftest_iso_tools() {
+  section "Autoteste das ferramentas da ISO"
+  local tmp rc=0
+  tmp="$(mktemp -d)"
+  local stage="${tmp}/stage"
+
+  # 1) Os templates, já substituídos (mesmo caminho do build de verdade).
+  UBUNTU_STAGE="$stage"
+  mkdir -p "${stage}/boot/grub"
+  subst_template "${ISO_DIR}/autoinstall/autoinstall.yaml" "${stage}/autoinstall.yaml"
+  expand_packages_block "${stage}/autoinstall.yaml"
+  inject_common_templates "${stage}/preseed"
+
+  # 2) O projeto real (o mesmo tar que o build injeia).
+  mkdir -p "${stage}/ai-cpu-os"
+  tar -C "$REPO_ROOT" -cf - \
+      --exclude=./.git --exclude=./iso/work --exclude=./iso/out --exclude='./*.iso' \
+      . | tar -C "${stage}/ai-cpu-os" -xf -
+  chmod +x "${stage}/ai-cpu-os/build.sh" "${stage}/ai-cpu-os/detect-hardware.sh" \
+           "${stage}/ai-cpu-os/llama-build.sh" "${stage}/ai-cpu-os/families/resolve.sh" \
+           "${stage}/ai-cpu-os/mods/apply.sh" "${stage}/preseed/late-command.sh" \
+           "${stage}/preseed/firstboot.sh" 2>/dev/null || true
+
+  # 3) A entrada de boot, gerada pela MESMA função do build.
+  KERNEL_PATH="/casper/vmlinuz"
+  INITRD_PATH="/casper/initrd"
+  append_grub_ai_entry "${stage}/boot/grub/grub.cfg"
+
+  # 4) Verificador sobre a árvore (é isto que o CI cobre de verdade).
+  log_info "Rodando iso/verify-iso.sh sobre a árvore de teste (--dir)…"
+  if bash "${ISO_DIR}/verify-iso.sh" --dir "$stage" --distro ubuntu \
+       --disk "$DISK" --role "$ROLE" --family "$FAMILY"; then
+    log_ok "verify-iso.sh passou na árvore de teste."
+  else
+    log_error "verify-iso.sh REPROVOU a árvore de teste — o verificador ou o build estão errados."
+    rc=1
+  fi
+
+  # 5) E, de propósito, a prova de que o verificador DETECTA problema: apaga o
+  #    autoinstall.yaml e exige um FAIL. Um verificador que nunca falha não vale
+  #    nada — este é o teste negativo.
+  log_info "Teste negativo: removendo o autoinstall.yaml (o verificador deve REPROVAR)…"
+  mv "${stage}/autoinstall.yaml" "${stage}/autoinstall.yaml.bak"
+  if bash "${ISO_DIR}/verify-iso.sh" --dir "$stage" --distro ubuntu --quiet >/dev/null 2>&1; then
+    log_error "verify-iso.sh APROVOU uma árvore sem autoinstall.yaml (falso positivo!)."
+    rc=1
+  else
+    log_ok "verify-iso.sh reprovou corretamente a árvore sem config."
+  fi
+  mv "${stage}/autoinstall.yaml.bak" "${stage}/autoinstall.yaml"
+
+  rm -rf "$tmp" 2>/dev/null || true
+
+  if [[ $rc -eq 0 ]]; then
+    log_ok "Autoteste das ferramentas da ISO: OK."
+  else
+    log_error "Autoteste das ferramentas da ISO: FALHOU."
+  fi
+  return $rc
 }
 
 # Permite `source iso/build-iso.sh` para carregar as funções sem executar nada

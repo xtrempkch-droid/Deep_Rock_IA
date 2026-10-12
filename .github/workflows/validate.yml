@@ -85,6 +85,17 @@ jobs:
           make iso-lint
           make iso-yaml
 
+      # O build real da ISO só roda em manual/tag (baixa ~2,6 GB). O dry-run dos
+      # DOIS caminhos é barato e prova que a orquestração não quebrou.
+      - name: ISO (dry-run dos dois caminhos)
+        run: |
+          set -euo pipefail
+          bash iso/build-iso.sh --distro ubuntu --disk /dev/vda \
+            --role inference --family intel-broadwell --serial-console --dry-run
+          bash iso/build-iso.sh --distro debian --disk /dev/vda \
+            --role builder --family amd-zen2 --dry-run
+          echo "Dry-run da ISO (ubuntu + debian): OK."
+
   # ---------------------------------------------------------------------------
   # Dry-run: prova que a orquestração funciona nos dois papéis sem alterar nada.
   # ---------------------------------------------------------------------------
@@ -103,7 +114,8 @@ jobs:
           set -euo pipefail
           chmod +x build.sh detect-hardware.sh llama-build.sh \
                    mods/apply.sh mods/*/*.sh families/resolve.sh \
-                   roles/*/*.sh roles/inference/shell-ia.py tests/*.sh
+                   roles/*/*.sh roles/inference/shell-ia.py tests/*.sh \
+                   iso/verify-iso.sh iso/test-vm.sh
 
       - name: detect-hardware.sh
         run: ./detect-hardware.sh
@@ -143,6 +155,7 @@ jobs:
             iso/preseed/late-command.sh iso/preseed/firstboot.sh
             iso/preseed/ai-cpu-os-firstboot.service
             iso/autoinstall/autoinstall.yaml
+            iso/verify-iso.sh iso/test-vm.sh
             families/resolve.sh families/_base/family.conf
             families/intel-haswell/family.conf families/intel-broadwell/family.conf
             families/intel-skylake-avx512/family.conf families/generic/family.conf
@@ -225,6 +238,15 @@ jobs:
           grep -q 'autoinstall' iso/autoinstall/autoinstall.yaml
           grep -q 'ubuntu' iso/build-iso.sh
           grep -q -- '--distro' iso/build-iso.sh
+          # As ferramentas de validação da ISO precisam continuar existindo e
+          # conectadas: verificar sem bootar E bootar numa VM são etapas
+          # diferentes e as duas têm de estar rastreáveis.
+          grep -q -- '--iso' iso/verify-iso.sh
+          grep -q -- '--dir' iso/verify-iso.sh
+          grep -q 'qemu-system-x86_64' iso/test-vm.sh
+          grep -q 'serial' iso/test-vm.sh
+          grep -q 'verify-iso.sh' Makefile
+          grep -q 'test-vm.sh' Makefile
           # O diário de continuidade é o que permite retomar sem perder nada
           # (Regra 14): precisa continuar existindo e com as seções-chave.
           grep -qi 'retomada em 5 minutos' docs/JOURNAL.md

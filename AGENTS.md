@@ -138,6 +138,8 @@ ai-cpu-os/
 │   └── docker-compose.example.yml
 ├── iso/                    # 🎯 ENTREGÁVEL FINAL: ISO de instalação
 │   ├── build-iso.sh        # Remasteriza a ISO base (--distro ubuntu|debian)
+│   ├── verify-iso.sh       # Verifica o CONTEÚDO da ISO (ou de uma árvore: --dir)
+│   ├── test-vm.sh          # Boota a ISO em qemu e espera instalação + 1º boot
 │   ├── autoinstall/        # Templates do Ubuntu (Subiquity/autoinstall)
 │   │   └── autoinstall.yaml # Config de instalação automática (padrão)
 │   └── preseed/            # Templates compartilhados + os do Debian (legado)
@@ -210,6 +212,8 @@ ai-cpu-os/
 | Como o CI compila/valida o sistema     | `.github/workflows/`, `docs/CI.md`, `Makefile` |
 | **Testar em hardware e registrar resultados** | **`docs/VALIDATION.md`**              |
 | **Gerar a ISO de instalação (entregável final)** | **`iso/build-iso.sh`**, **`docs/ISO.md`** |
+| **Validar a ISO (conteúdo, sem bootar)** | **`iso/verify-iso.sh`**, `docs/ISO.md` § 4.6 |
+| **Testar a ISO de verdade (boot em VM)** | **`iso/test-vm.sh`**, `docs/VALIDATION.md` Bloco M |
 | **Entender a variante Ubuntu (autoinstall)** | **`iso/autoinstall/autoinstall.yaml`**, **`docs/ISO.md`** § 4.5 |
 | **Retomar/continuar depois de um tempo parado** | **`docs/JOURNAL.md`** (§ 1 retomada, § 5 threads abertas) |
 | Scripts principais                     | `build.sh`, `detect-hardware.sh`, `llama-build.sh` |
@@ -276,6 +280,10 @@ Estas regras são **obrigatórias**:
     legado.** Mudou um template? Rode `make iso-yaml` — o autoteste substitui os
     marcadores e valida o `autoinstall.yaml` resultante com `yamllint` (o
     template isolado NÃO é YAML válido: `@` é reservado).
+    **"Terminado" exige DUAS provas distintas**, e não confunda uma com a outra:
+    `iso/verify-iso.sh` prova o **conteúdo** (não boota); `iso/test-vm.sh` prova
+    o **comportamento** (boota, instala e aplica no 1º boot). Nenhuma delas
+    substitui a outra.
     ⚠️ Nunca declare a ISO pronta sem tê-la **bootado e instalado** em VM.
 15. **Integridade da tríade `build.sh` → `detect-hardware.sh` → `families/`.**
     Ao adicionar família, papel ou mod, atualize **as três** superfícies que o CI
@@ -299,17 +307,28 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-12
-- **O que mudou:** **ISO em base Ubuntu Server (autoinstall/Subiquity).**
-  `--distro ubuntu` passou a ser o padrão (Debian/preseed segue como legado),
-  com a config em `iso/autoinstall/autoinstall.yaml` na raiz da ISO e
-  remontagem por `xorriso -indev/-outdev -map` (setores de boot da ISO oficial
-  preservados — sem `mtools`/`isohdpfx.bin`). O `late-command.sh` passou a ser
-  compartilhado pelos dois instaladores (`AI_CURTIN=1`) e a ISO grava
-  **papel + família** (não mais "perfil"). Novo autoteste de templates
-  (`--check-templates` / `make iso-yaml`) validando o `autoinstall.yaml`
-  substituído com `yamllint`, rodando no CI. Docs: `ISO.md` § 4.5 e Bloco M
-  distro-aware; passada mecânica corrigindo caminhos quebrados em todo o
-  `docs/`. **Nenhuma ISO gerada/bootada.**
+- **O que mudou:** **Ferramentas de validação da ISO.** Criados
+  `iso/verify-iso.sh` (confere o **conteúdo** da ISO — config, projeto embutido,
+  marcadores, YAML, entrada de boot, Volume ID — com modo `--dir` que dispensa
+  `xorriso`, o que o torna testável no CI) e `iso/test-vm.sh` (boota a ISO em
+  qemu, espera a instalação e o primeiro boot por **marcadores no console
+  serial**). Nova flag `--serial-console` no build (console ttyS0 na ISO **e** no
+  sistema instalado) e o build agora **verifica a ISO ao final**. `make
+  iso-yaml` roda o verificador sobre uma árvore real **com teste negativo**
+  (reprovar quando falta a config). Novos alvos `make iso-verify` e `make
+  iso-vm`. `docs/ISO.md` § 4.6 e Bloco M distro-aware. **Nenhuma ISO gerada;
+  `test-vm.sh` nunca executado (sem qemu no ambiente).**
+- **Data anterior:** 2026-10-12 — **ISO em base Ubuntu Server
+  (autoinstall/Subiquity).** `--distro ubuntu` passou a ser o padrão
+  (Debian/preseed segue como legado), com a config em
+  `iso/autoinstall/autoinstall.yaml` na raiz da ISO e remontagem por `xorriso
+  -indev/-outdev -map` (setores de boot da ISO oficial preservados — sem
+  `mtools`/`isohdpfx.bin`). O `late-command.sh` passou a ser compartilhado pelos
+  dois instaladores (`AI_CURTIN=1`) e a ISO grava **papel + família** (não mais
+  "perfil"). Novo autoteste de templates (`--check-templates` / `make iso-yaml`)
+  validando o `autoinstall.yaml` substituído com `yamllint`, rodando no CI.
+  Docs: `ISO.md` § 4.5 e Bloco M distro-aware; passada mecânica corrigindo
+  caminhos quebrados em todo o `docs/`. **Nenhuma ISO gerada/bootada.**
 - **Data anterior:** 2026-10-12 — **Refatoração para FAMÍLIAS de CPU + PAPÉIS +
   MODS.** Suporte deixou de ser "um processador por perfil" e passou a ser por
   **família de microarquitetura com herança** (`families/`, 8 famílias, AVX-512

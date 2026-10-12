@@ -119,6 +119,35 @@ cat >> /target/etc/issue <<'ISSUE'
 ISSUE
 
 ## ---------------------------------------------------------------------------
+## 4-b. Console serial (opcional) — torna o primeiro boot observável sem tela.
+## ---------------------------------------------------------------------------
+## Sem isto, um teste headless (iso/test-vm.sh) não vê nada do sistema
+## instalado: a saída vai para a tela virtual, que ninguém está olhando.
+SERIAL_CONSOLE="@@SERIAL_CONSOLE@@"
+if [ "${SERIAL_CONSOLE}" = "yes" ]; then
+    log "habilitando console serial no sistema instalado (console=ttyS0,115200)"
+    if [ -f /target/etc/default/grub ]; then
+        if grep -q 'ttyS0' /target/etc/default/grub; then
+            log "cmdline já contém ttyS0 (idempotente)"
+        else
+            cp -a /target/etc/default/grub "/target/etc/default/grub.bak"
+            sed -i 's|^\(GRUB_CMDLINE_LINUX_DEFAULT="\)\(.*\)"|\1\2 console=ttyS0,115200 console=tty1"|' \
+                /target/etc/default/grub
+            if in_target update-grub >/dev/null 2>&1; then
+                log "GRUB do alvo regenerado com o console serial"
+            else
+                log "AVISO: update-grub falhou; rode-o no sistema instalado"
+            fi
+        fi
+        # getty no serial permite logar sem tela (útil para depurar).
+        in_target systemctl enable serial-getty@ttyS0.service >/dev/null 2>&1 || \
+            log "AVISO: não habilitei serial-getty@ttyS0 (opcional)"
+    else
+        log "AVISO: /target/etc/default/grub ausente; console serial não configurado"
+    fi
+fi
+
+## ---------------------------------------------------------------------------
 ## 5. Registro
 ## ---------------------------------------------------------------------------
 cat > "${DST}/ISO-INFO.txt" <<INFO

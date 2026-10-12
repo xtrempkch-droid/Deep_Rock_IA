@@ -124,19 +124,8 @@ Aplicando no **primeiro boot**, ganhamos:
 
 ## 4. Como gerar a ISO
 
-### 4.1 Dependências
-
-```bash
-# Obrigatórias (as duas distros)
-sudo apt install -y xorriso curl coreutils
-
-# Só para --distro debian (boot UEFI dentro de efi.img + boot híbrido via MBR)
-sudo apt install -y isolinux mtools
-```
-
-> O caminho **Ubuntu não precisa** de `mtools` nem de `isolinux`: ele preserva os
-> setores de boot da ISO oficial (ver § 4.5). O script avisa isso e só cobra as
-> duas ferramentas extra no caminho Debian.
+> **Dependências:** veja a lista completa em § 4.7 (o que é obrigatório, o que só
+o Debian precisa e o que é só para o teste de VM).
 
 ### 4.2 Primeiro: simular (sempre)
 
@@ -223,6 +212,60 @@ instaladores — ver § 3.
 
 ---
 
+### 4.6 Validar a ISO (as duas ferramentas do projeto)
+
+O projeto traz duas ferramentas — e elas cobrem coisas **diferentes**:
+
+| Ferramenta | O que prova | Precisa de |
+|---|---|---|
+| `iso/verify-iso.sh` | **Conteúdo:** a config está no lugar certo, o projeto foi embutido, não sobrou marcador, o YAML é válido/coerente, a entrada de boot existe | `xorriso` **ou** só uma árvore extraída (`--dir`) |
+| `iso/test-vm.sh` | **Comportamento:** a ISO boota, instala sozinha e o primeiro boot aplica o ai-cpu-os | `qemu-system-x86` + `qemu-utils` (+ `/dev/kvm`, recomendado) |
+
+```bash
+# Conteúdo (segundos; roda sozinho no fim de todo build)
+make iso-verify ISO=iso/out/ai-cpu-os-ubuntu-*.iso DISK=/dev/vda
+bash iso/verify-iso.sh --dir iso/work/stage        # árvore extraída, sem xorriso
+
+# Comportamento (10-60 min; é o teste que importa de verdade)
+bash iso/test-vm.sh --iso iso/out/ai-cpu-os-ubuntu-*.iso --yes
+```
+
+**Por que `--dir` existe:** o `xorriso` não é obrigatório para verificar, e
+assim a mesma checagem roda em qualquer lugar — inclusive no CI, sobre a árvore
+que o próprio `build-iso.sh` gera (`make iso-yaml`). Isso é o que torna o
+verificador **testável** em vez de "escrito e nunca executado".
+
+**Observação sem tela (`--serial-console`).** Para o `test-vm.sh` enxergar algo,
+a ISO precisa mandar o console para serial, tanto na entrada de boot dela quanto
+**no sistema instalado** (via um ajuste de GRUB no late-command). Sem isso, a
+saída vai para a tela virtual e ninguém a vê. O `test-vm.sh` espera dois
+marcadores:
+
+| Marcador | Significa |
+|---|---|
+| `[ai-cpu-os/iso-late] pós-instalação concluído` | o instalador rodou o late-command e **achou** a config automática |
+| `aplicação concluída com sucesso` | o `ai-cpu-os-firstboot` aplicou as mods e instalou o papel |
+
+Se o primeiro marcador não aparecer, o problema é a **config** (rode
+`verify-iso.sh`); se o segundo não aparecer, o problema é o **primeiro boot**
+(veja se o `console=ttyS0` entrou na cmdline do sistema instalado).
+
+### 4.7 Dependências
+
+```bash
+# Obrigatórias
+sudo apt install -y xorriso curl coreutils
+
+# Só para --distro debian (boot UEFI dentro de efi.img + boot híbrido via MBR)
+sudo apt install -y isolinux mtools
+
+# Só para o teste de VM
+sudo apt install -y qemu-system-x86 qemu-utils
+sudo apt install -y ovmf     # apenas para --boot-mode uefi
+```
+
+---
+
 ## 5. O que a ISO faz com a sua máquina
 
 | Ação | Efeito | Onde desliga |
@@ -248,7 +291,10 @@ root desabilitado); no Debian o root fica bloqueado por padrão.
 | Item | Situação |
 |------|----------|
 | **Nenhuma ISO foi construída nem bootada** | ⚠️ **Os dois caminhos estão escritos e passam no autoteste de templates; o Debian foi exercitado em `--dry-run`. Nenhuma ISO real foi gerada, instalada ou bootada.** Requer `xorriso` (ausente no ambiente de desenvolvimento). |
-| **Caminho Ubuntu (`--distro ubuntu`)** | ⚠️ Escrito nesta sessão e validado no autoteste de templates (`autoinstall.yaml` final passa no `yamllint`) — mas **nunca executado**, nem em `--dry-run` contra uma ISO real do Ubuntu. É a lacuna mais relevante hoje. |
+| **Caminho Ubuntu (`--distro ubuntu`)** | ⚠️ Escrito na sessão #10 e validado no autoteste (`autoinstall.yaml` final passa no `yamllint` + verificador) — mas **nunca executado** contra uma ISO real do Ubuntu. |
+| **`iso/verify-iso.sh`** | ✅ Exercitado de verdade: roda no `make iso-lint` sobre uma árvore montada com os templates e o projeto **reais**, incluindo um **teste negativo** (reprova quando falta a config). O caminho `--iso` (com xorriso) ainda **não** foi executado. |
+| **`iso/test-vm.sh`** | ⚠️ **Nunca executado**: não há `qemu` no ambiente de desenvolvimento. O comando do qemu só foi conferido em `--dry-run`. |
+| **`--serial-console`** | ⚠️ Nunca validado num boot real. Se o `console=ttyS0` não entrar na cmdline do sistema instalado, o `test-vm.sh` não verá o primeiro boot (o script avisa exatamente isso). |
 | Layout da ISO base | Ubuntu exige `casper/` (recusado com mensagem clara se não existir); Debian exige `isolinux/`. Outras ISOs falham de propósito em vez de gerar algo quebrado. |
 | Boot BIOS | Ubuntu: El Torito preservado do original. Debian: `isolinux` + `isohdpfx.bin`. **Não validado.** |
 | Boot UEFI | Ubuntu: imagem EFI preservada + patch do `grub.cfg` do UEFI. Debian: **best-effort** (tenta `EFI/*/grub.cfg`; se estiver dentro de `efi.img`, exige `mtools`). **Não validado.** |
@@ -283,12 +329,12 @@ tudo por script, idempotente, auditável.
 
 | Prioridade | Item |
 |-----------|------|
-| 🔴 Alta | **Construir e bootar a ISO numa VM** (Bloco M do `VALIDATION.md`) — é o maior risco não validado do projeto. |
-| 🔴 Alta | **Rodar o caminho Ubuntu contra uma ISO real** (mesmo em `--dry-run`), para achar erro de layout/`xorriso` antes do teste em VM. |
-| 🔴 Alta | **Testar o boot UEFI** (Debian com e sem `mtools`) e o `md5sum.txt` regenerado. |
+| 🔴 Alta | **Construir e bootar a ISO numa VM** (Bloco M do `VALIDATION.md`) — é o maior risco não validado do projeto. Com as ferramentas de § 4.6 o caminho é `make iso` (com `ISO_ARGS=--serial-console`) → `make iso-verify` → `make iso-vm`. |
+| 🔴 Alta | **Rodar o caminho Ubuntu contra uma ISO real**, para achar erro de layout/`xorriso` antes do teste em VM. |
+| 🟡 Média | **Testar o boot UEFI** (`make iso-vm VM_ARGS="--boot-mode uefi"`). |
+| 🟢 Baixa | **Testar a ISO no CI:** `validate` pode rodar `verify-iso.sh --dir` sobre a árvore do stage (já roda, via `make iso-yaml`). Um teste de VM no CI exigiria KVM e 30+ min — fica para runner self-hosted. |
 | 🟡 Média | **Variante air-gapped:** embutir o fonte do llama.cpp e os `.deb` necessários, para instalar sem internet. |
 | 🟡 Média | **Variante com binário pré-compilado:** usar os `.tar.gz` da Release em vez de compilar no primeiro boot (instalação muito mais rápida, mas por família). |
-| 🟢 Baixa | **CI:** publicar a ISO na Release automaticamente (hoje o workflow só anexa artefato). |
 | 💡 Ideia | **Assinatura da ISO** com `gpg` + publicação do SHA256 no release. |
 | 💡 Ideia | **Imagem de VM (qcow2)** via Packer, derivada da mesma lógica. |
 
@@ -300,3 +346,4 @@ tudo por script, idempotente, auditável.
 |------|---------|
 | 2026-10-07 | Criação: `iso/build-iso.sh` + preseed + serviço de primeiro boot + este documento. Nada executado em ambiente real ainda. |
 | 2026-10-12 | **Variante Ubuntu (autoinstall/Subiquity) adicionada como base padrão** (`--distro ubuntu`), com `iso/autoinstall/autoinstall.yaml`, remontagem por `-indev/-outdev -map` (setores de boot preservados), `late-command.sh` compartilhado entre os dois instaladores (`AI_CURTIN=1`), flags `--role`/`--family` no lugar de `--profile` e autoteste de templates (`--check-templates` / `make iso-yaml`) rodando no CI. **Continuamos sem ter construído nem bootado nenhuma ISO.** |
+| 2026-10-12 | **Ferramentas de validação:** `iso/verify-iso.sh` (conteúdo, com modo `--dir` sem xorriso) e `iso/test-vm.sh` (boot real em qemu, com marcadores no console serial). `--serial-console` torna a instalação e o 1º boot observáveis sem tela. O build agora **verifica a ISO ao final** e o `make iso-yaml` roda o verificador **incluindo um teste negativo** (verificador que nunca falha não vale nada). |

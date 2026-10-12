@@ -50,6 +50,10 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | **ISO em base Ubuntu Server** — `--distro ubuntu` (padrão) + `iso/autoinstall/autoinstall.yaml` + remontagem por `-indev/-outdev -map` (setores de boot preservados) | 2026-10-12 | 2026-10-12 |
 | `late-command.sh` **compartilhado** entre debian-installer e Subiquity (`AI_CURTIN=1`); flags `--role`/`--family` também na ISO | 2026-10-12 | 2026-10-12 |
 | **Autoteste dos templates da ISO** (`--check-templates` / `make iso-yaml`): valida tokens, sintaxe e o `autoinstall.yaml` **substituído** com `yamllint` — rodando no CI | 2026-10-12 | 2026-10-12 |
+| **`iso/verify-iso.sh`** — verificação de *conteúdo* da ISO, com modo `--dir` que dispensa `xorriso` (por isso é exercitado no CI, com teste negativo) | 2026-10-12 | 2026-10-12 |
+| **`iso/test-vm.sh`** — teste de *comportamento*: boota a ISO em qemu e espera instalação + 1º boot por marcadores no console serial | 2026-10-12 | 2026-10-12 |
+| `--serial-console` (console ttyS0 na ISO **e** no sistema instalado) torna a instalação e o 1º boot observáveis sem tela | 2026-10-12 | 2026-10-12 |
+| O build passa a **verificar a ISO automaticamente** ao final; `make iso-verify` e `make iso-vm` | 2026-10-12 | 2026-10-12 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em
@@ -76,12 +80,15 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 
 ### Prioridade Alta
 - [ ] **🎯 Gerar as duas ISOs de verdade** (Ubuntu e Debian) numa máquina com
-      `xorriso` + rede. É o passo que falta para sair de "escrito" para
-      "existe" — e o mais provável de revelar ajustes.
-- [ ] **🎯 Gerar a ISO e instalar numa VM** (Bloco M do `VALIDATION.md`) —
-      é o critério de conclusão do projeto e o maior risco não validado.
-- [ ] **Validar o boot UEFI da ISO** (Debian com e sem `mtools`; Ubuntu com os
-      setores preservados) e o `md5sum.txt` regenerado (Debian).
+      `xorriso` + rede, e rodar `make iso-verify` (o build já verifica sozinho).
+      É o passo que falta para sair de "escrito" para "existe".
+- [ ] **🎯 Bootar a ISO em VM** (`make iso-vm`) — é o critério de conclusão e o
+      maior risco não validado. O `iso/test-vm.sh` já automatiza a espera e o
+      julgamento; falta executá-lo.
+- [ ] **Validar o caminho `--serial-console`** num boot real (é o que permite ao
+      `test-vm.sh` enxergar o primeiro boot).
+- [ ] **Validar o boot UEFI** (`make iso-vm VM_ARGS="--boot-mode uefi"`) e o
+      `md5sum.txt` regenerado (Debian).
 - [ ] **Validar os blocos N e O do `VALIDATION.md`** — famílias em hardware
       real e ciclo `apply`/`revert` das mods.
 - [ ] **Atualizar o tutorial ao validar cada família em hardware** — ao fechar

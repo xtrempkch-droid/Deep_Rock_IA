@@ -195,22 +195,36 @@ iso-yaml`) rodando no CI. Ver `docs/ISO.md` § 4.5.
 
 Antes de qualquer VM: gerar de verdade, em uma máquina com `xorriso` e rede
 (o ambiente de desenvolvimento não tem `xorriso`). É barato e pega erro de
-layout/`xorriso` cedo.
+layout/`xorriso` cedo. O `verify-iso.sh` roda sozinho no fim do build.
 
 ```bash
 sudo apt install -y xorriso curl coreutils
-make iso-lint && make iso-yaml
+make iso-lint && make iso-yaml     # autoteste (templates + verificador)
 
 # 1) Ubuntu (padrão) — o caminho menos exercitado
-sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/vda --keep-work
+sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/vda \
+  --serial-console --keep-work
 
 # 2) Debian (legado)
-sudo bash iso/build-iso.sh --distro debian --disk /dev/vda --keep-work
+sudo bash iso/build-iso.sh --distro debian --disk /dev/vda \
+  --serial-console --keep-work
 
-# 3) Conferir o conteúdo sem instalar (comandos no Bloco M.3)
+# 3) Reforçar a verificação (o build já roda; aqui é explícito)
+make iso-verify ISO=iso/out/ai-cpu-os-ubuntu-<data>.iso DISK=/dev/vda
 ```
 
-Depois: bootar em **VM** (Bloco M.4) e acompanhar o primeiro boot (M.5).
+**Passo 1.2 — bootar em VM (o teste que importa).**
+
+```bash
+sudo apt install -y qemu-system-x86 qemu-utils
+make iso-vm ISO=iso/out/ai-cpu-os-ubuntu-<data>.iso
+# ou, direto: bash iso/test-vm.sh --iso <iso> --yes
+```
+
+O `test-vm.sh` procura dois marcadores no console serial:
+`[ai-cpu-os/iso-late] pós-instalação concluído` (o instalador **achou** a
+config) e `aplicação concluída com sucesso` (o primeiro boot aplicou).
+Detalhes em `docs/ISO.md` § 4.6 e Bloco M de `docs/VALIDATION.md`.
 > ⚠️ Não declare a ISO pronta sem bootar e instalar em VM.
 
 **Passo 2 — validar as camadas novas em hardware real.**
@@ -266,3 +280,4 @@ Ao terminar qualquer tarefa:
 | 2026-10-07 | Registrado o **entregável final = ISO de instalação**; criado `iso/` (`build-iso.sh` + preseed + serviço de 1º boot) e `docs/ISO.md`. Nenhuma ISO gerada/bootada ainda. |
 | 2026-10-07 | Criado **`docs/JOURNAL.md`** (diário de continuidade) + "Retomada rápida" no `AGENTS.md` + **Regra 14**. Unificado o Xeon como **quad channel** e corrigido `detect-hardware.sh` (agora conta os canais reais via `Bank Locator`). |
 | 2026-10-12 | **Refatoração: FAMÍLIAS de CPU + PAPÉIS + MODS.** Criadas as camadas `families/` (8 famílias com herança + `resolve.sh` + política de AVX-512), `roles/` (papel `inference` e `builder`, substituindo `roles/inference` e `roles/builder`) e `mods/` (motor `list/info/check/apply/revert/test` + 4 mods com `revert`). O build do llama.cpp virou um **script único** dirigido pela família (`llama-build.sh`), com padrão **portátil** (`GGML_NATIVE=OFF`) e `--assume-family-isa` para cross-build. SO de referência passou a **Ubuntu Server**. CPU do Sistema A: **E5-2680 v4**. Comentários do README aplicados e removidos. Novos docs: `docs/FAMILIES.md`, `docs/MODS.md`, `mods/README.md`, `roles/README.md`. `make validate` verde (25 scripts). || 2026-10-12 | **ISO em base Ubuntu Server (autoinstall/Subiquity).** `--distro ubuntu` (padrão) com `iso/autoinstall/autoinstall.yaml` na raiz da ISO; remontagem por `xorriso -indev/-outdev -map` (setores de boot da ISO oficial preservados, sem `mtools`/`isohdpfx.bin`); `late-command.sh` compartilhado pelos dois instaladores (`AI_CURTIN=1`); flags `--role`/`--family` também na ISO; autoteste de templates (`--check-templates`/`make iso-yaml`) no CI, validando o `autoinstall.yaml` **substituído** com `yamllint`. `docs/ISO.md` reescrito (§ 4.5), Bloco M virou distro-aware. **Nenhuma ISO gerada/bootada.** |
+| 2026-10-12 | **Ferramentas de validação da ISO:** `iso/verify-iso.sh` (conteúdo; modo `--dir` sem `xorriso`, o que o torna **testável no CI**) e `iso/test-vm.sh` (boot real em qemu, marcadores no console serial). Flag `--serial-console`; o build passa a **verificar a ISO ao final**; `make iso-yaml` roda o verificador **com teste negativo**; alvos `make iso-verify` e `make iso-vm`. `verify-iso.sh` já derrubou um bug real do próprio verificador. **`test-vm.sh` nunca executado (sem qemu no ambiente).** |

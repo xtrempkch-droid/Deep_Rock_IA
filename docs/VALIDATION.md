@@ -696,14 +696,21 @@ sudo apt install -y xorriso curl coreutils
 sudo apt install -y isolinux mtools
 
 make iso-lint        # bash -n + shellcheck + autoteste dos templates
-make iso-yaml        # só o autoteste (valida o autoinstall.yaml já substituído)
+make iso-yaml        # só o autoteste (templates + verificador, com teste negativo)
 make iso-dry-run     # simulação completa, não baixa nem altera nada
 ```
+
+O `make iso-yaml` é o mais barato de rodar: ele monta uma árvore com os
+templates e o projeto reais, roda o `verify-iso.sh` sobre ela **e** confirma
+que o verificador reprova quando falta o `autoinstall.yaml` (teste negativo).
+Um verificador que nunca falha não vale nada.
 
 | Campo | Valor |
 |-------|-------|
 | `make iso-lint` passou? | _(preencher)_ |
 | Autoteste dos templates (`autoinstall.yaml` YAML válido) OK? | _(preencher)_ |
+| `verify-iso.sh` aprovou a árvore de teste (`FAIL=0`)? | _(preencher)_ |
+| Teste negativo reprovou sem o `autoinstall.yaml`? | _(preencher)_ |
 | `make iso-dry-run` sem erros? | _(preencher)_ |
 
 > **Registre as duas distros.** O caminho `ubuntu` é o padrão e o menos
@@ -714,13 +721,20 @@ make iso-dry-run     # simulação completa, não baixa nem altera nada
 ```bash
 # --disk é o disco que será apagado NA MÁQUINA QUE INSTALAR a ISO.
 # Para testar em VM, use o disco virtual dela (ex.: /dev/vda).
+# --serial-console torna a instalação e o 1º boot observáveis sem tela: é o que
+# o iso/test-vm.sh usa (recomendado em qualquer teste em VM).
 
 # 1) Ubuntu (padrão) — autoinstall/Subiquity
-sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/vda --keep-work
+sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/vda \
+  --serial-console --keep-work
 
 # 2) Debian (legado) — preseed/d-i
-sudo bash iso/build-iso.sh --distro debian --disk /dev/vda --keep-work
+sudo bash iso/build-iso.sh --distro debian --disk /dev/vda \
+  --serial-console --keep-work
 ```
+
+No fim do build, o `verify-iso.sh` roda **sozinho** (mesmo caminho do M.3).
+Use `--no-verify` só se quiser pulá-lo.
 
 O script imprime, no fim: caminho da ISO, **SHA256**, o Volume ID, e a
 **senha gerada** (se você não passou `--password-hash`). **Anote a senha.**
@@ -739,13 +753,29 @@ O script imprime, no fim: caminho da ISO, **SHA256**, o Volume ID, e a
 
 ### M.3 Verificar o conteúdo da ISO (sem instalar)
 
+**Caminho recomendado — o verificador do projeto:**
+
+```bash
+# Não boota nada: confere a config, o projeto embutido, os tokens, o YAML do
+# autoinstall, o layout de storage, a entrada de boot e o Volume ID.
+make iso-verify ISO=iso/out/ai-cpu-os-ubuntu-*.iso DISK=/dev/vda
+
+# Mesma checagem sobre uma árvore já extraída (não precisa de xorriso nem root):
+bash iso/verify-iso.sh --dir iso/work/stage --distro ubuntu --disk /dev/vda
+```
+
+Ele imprime uma linha `[PASS]/[FAIL]/[SKIP]` por item e um resumo
+(`PASS=n FAIL=n SKIP=n`). **Qualquer `FAIL` invalida a ISO** — não perca tempo
+bootando antes de zerar.
+
+**Conferência manual (opcional, para quem quiser ver com os próprios olhos):**
+
 ```bash
 # Os 3 primeiros valem para as DUAS distros:
 xorriso -indev iso/out/ai-cpu-os-*.iso -find /preseed -type f -exec echo
 xorriso -indev iso/out/ai-cpu-os-*.iso -find /ai-cpu-os -maxdepth 1 -exec echo
 
 # Ubuntu: a config automática é o autoinstall.yaml NA RAIZ (ao lado de casper/)
-xorriso -indev iso/out/ai-cpu-os-ubuntu*.iso -find /autoinstall.yaml -type f -exec echo
 xorriso -indev iso/out/ai-cpu-os-ubuntu*.iso -extract /autoinstall.yaml /tmp/ && \
   grep -E 'layout:|late-commands:' -A2 /tmp/autoinstall.yaml
 xorriso -indev iso/out/ai-cpu-os-ubuntu*.iso -extract /boot/grub/grub.cfg /tmp/ && \
@@ -758,6 +788,7 @@ xorriso -indev iso/out/ai-cpu-os-debian*.iso -extract /isolinux/isolinux.cfg /tm
 
 | Campo | Ubuntu | Debian |
 |-------|--------|--------|
+| `iso-verify.sh` com `FAIL=0`? | _(preencher)_ | _(preencher)_ |
 | `/preseed` contém os 4 arquivos? | _(preencher)_ | _(preencher)_ |
 | `/ai-cpu-os` presente? | _(preencher)_ | _(preencher)_ |
 | Menu de boot com `ai-cpu-os-auto`? | _(preencher)_ | _(preencher)_ |
@@ -769,8 +800,25 @@ xorriso -indev iso/out/ai-cpu-os-debian*.iso -extract /isolinux/isolinux.cfg /tm
 
 ### M.4 Boot e instalação em VM (o teste que importa)
 
+**Caminho A — automatizado (precisa de `qemu-system-x86` + `qemu-utils`):**
+
 ```bash
-# VM UEFI e BIOS — teste as duas se possível
+# Cria o disco virtual, boota a ISO, espera a instalação e o primeiro boot,
+# e diz se os marcadores apareceram. NÃO toca no seu disco real.
+bash iso/test-vm.sh --iso iso/out/ai-cpu-os-ubuntu-*.iso --yes
+
+# Opções úteis:
+#   --boot-mode uefi     testa o caminho UEFI (requer o pacote 'ovmf')
+#   --ram 8192           mais memória para o paper 'inference'
+#   --timeout-min 150    para máquinas lentas (ou sem KVM)
+#   --no-install         só confirma que a ISO boota (smoke rápido)
+#   --keep               mantém disco e VM para inspecionar depois
+#   --dry-run            só mostra o comando do qemu
+```
+
+**Caminho B — manual:**
+
+```bash
 qemu-system-x86_64 -m 4096 -enable-kvm \
   -drive file=/tmp/alvo.qcow2,if=virtio,format=qcow2 \
   -cdrom iso/out/ai-cpu-os-*.iso -boot d
@@ -797,6 +845,20 @@ qemu-system-x86_64 -m 4096 -enable-kvm \
 
 ### M.5 Pós-instalação: primeiro boot (dentro do sistema instalado)
 
+**Caminho A — automatizado (`iso/test-vm.sh`).** Se você gerou a ISO com
+`--serial-console`, o script boota a VM, espera e **procura os marcadores** no
+console serial. Não precisa de tela nem de login:
+
+```bash
+bash iso/test-vm.sh --iso iso/out/ai-cpu-os-ubuntu-*.iso --yes
+# marcadores usados:
+#   instalador:  "[ai-cpu-os/iso-late] pós-instalação concluído"
+#   primeiro boot: "aplicação concluída com sucesso"
+```
+
+**Caminho B — manual (login na VM).** Como o `--serial-console` também habilita
+`serial-getty@ttyS0`, dá para logar pelo console serial sem tela:
+
 ```bash
 # Faça login com o usuário criado (padrão: ai-cpu-os) e a senha anotada.
 systemctl status ai-cpu-os-firstboot --no-pager
@@ -807,16 +869,21 @@ cat /var/log/ai-cpu-os-build.log
 cat /proc/cmdline   # deve conter max_cstate=1 se o tuning rodou
 sysctl vm.swappiness kernel.numa_balancing
 cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+
+# E o que a ISO prometeu (papel + família), gravado no alvo:
+cat /opt/ai-cpu-os/.iso-config
 ```
 
 | Campo | Valor |
 |-------|-------|
 | O serviço rodou sozinho? | _(preencher)_ |
-| Perfil detectado (`xeon`/`ryzen`)? | _(preencher — em VM, provavelmente `xeon`)_ |
+| `test-vm.sh` encontrou o marcador de instalação? | _(preencher)_ |
+| `test-vm.sh` encontrou o marcador de primeiro boot? | _(preencher)_ |
+| Papel/família do `.iso-config` | _(preencher — em VM, provavelmente `inference` + `generic`)_ |
 | `.firstboot-status` = `ok`? | _(preencher)_ |
 | Sentinela `.firstboot-pending` removida? | _(preencher)_ |
 | Tuning aplicado (governor/sysctl)? | _(preencher)_ |
-| Compilou o llama.cpp? (perfil xeon) | _(preencher — pode levar 10-20 min)_ |
+| Compilou o llama.cpp? (papel `inference`) | _(preencher — pode levar 10-20 min)_ |
 | Funcionou sem rede? (teste proposital) | _(preencher — deve adiar para o próximo boot)_ |
 
 ### M.6 Critério de "pronto"
@@ -824,9 +891,11 @@ cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 O bloco M só é **✅** quando:
 
 - [ ] A ISO gera sem erro e o SHA256 é registrado.
+- [ ] `make iso-verify ISO=...` passa (`FAIL=0`).
 - [ ] Boota em BIOS **e** o instalador não faz nenhuma pergunta.
-- [ ] Instala e o primeiro boot aplica o tuning sozinho.
-- [ ] Em VM, ao menos o `xeon` (inferência) ou o `ryzen` (Docker) funciona.
+- [ ] Instala e o primeiro boot aplica o ai-cpu-os sozinho (ou o `test-vm.sh`
+      vê os dois marcadores).
+- [ ] Em VM, ao menos o `inference` (llama.cpp) ou o `builder` (Docker) funciona.
 - [ ] A senha gerada permite login e `sudo`.
 
 | Campo | Valor |

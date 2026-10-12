@@ -356,6 +356,78 @@ ou seja, o passo registrado no `STATE.md` § 6 como "Passo 1": a ISO em base
 
 ---
 
+### Sessão #11 — 2026-10-12 · 🔍 Ferramentas de validação da ISO
+
+**Objetivo (pedido do usuário, verbatim):** *"seria otimo essa validaçao"* — em
+resposta à oferta de preparar "um script/roteiro de teste em VM com qemu +
+verificação automática do autoinstall.yaml a partir da ISO gerada".
+
+**Feito:**
+
+1. **`iso/verify-iso.sh`** — verifica o **conteúdo** da ISO: config no lugar
+   certo, projeto embutido (a mesma lista que o CI exige), templates presentes,
+   nenhum `@@TOKEN@@` sobrando, `autoinstall.yaml` válido **e semanticamente
+   coerente** (via PyYAML: version, hash de senha, layout de storage,
+   late-commands com `AI_CURTIN=1`, shutdown), entrada de boot e Volume ID.
+   Tem modo **`--dir`** que dispensa `xorriso` — é o que o torna testável.
+2. **`iso/test-vm.sh`** — o teste que **boota**: cria o qcow2, sobe o qemu com
+   `-display none -serial file:`, e **espera marcadores** no console serial em
+   vez de olhar a tela (`[ai-cpu-os/iso-late] pós-instalação concluído` e
+   `aplicação concluída com sucesso`). Timeout configurável, mostra o progresso,
+   detecta falha explícita sem esperar o timeout, e limpa a VM no `trap`.
+3. **`--serial-console`** no `build-iso.sh`: `console=ttyS0,115200` na entrada
+   de boot da ISO **e** no sistema instalado (via ajuste de GRUB no
+   late-command + `serial-getty@ttyS0`). Sem isso, um teste headless não vê
+   nada do sistema instalado.
+4. O build agora **verifica a ISO ao final** (`--no-verify` para pular).
+5. `make iso-yaml` ganhou o **autoteste das ferramentas**: monta uma árvore com
+   os templates **e o projeto reais**, roda o verificador sobre ela e — o ponto
+   — roda um **teste negativo** (apaga o `autoinstall.yaml` e exige reprovação).
+6. Alvos `make iso-verify` / `make iso-vm`, variáveis `ISO`/`ISO_ARGS`/`VM_ARGS`.
+7. Docs: `docs/ISO.md` § 4.6 (as duas ferramentas, o que cada uma prova, os
+   marcadores) e § 4.7 (dependências separadas por caminho), Bloco M do
+   `VALIDATION.md` distro-aware e apontando para as ferramentas, `STATE` § 6
+   com Passo 1.1/1.2, ROADMAP, este diário e a Regra 13 do `AGENTS.md`.
+
+**Decisões (e por quê):**
+
+- **Duas ferramentas, dois propósitos.** `verify-iso.sh` prova **conteúdo**;
+  `test-vm.sh` prova **comportamento**. Misturá-las faria o usuário achar que
+  "ISO verificada" significa "ISO que boota" — não significa.
+- **`--dir` no verificador** para que ele seja exercitável sem `xorriso` (e,
+  portanto, no CI). Sem isso, seria mais um script "escrito e nunca rodado".
+- **Teste negativo no autoteste.** Um verificador que nunca reprova dá falsa
+  segurança; o CI agora prova que ele **reprova** quando falta a config.
+- **Marcadores no lugar de OCR/tela:** julgar por string no log serial é
+  determinístico e não depende de resolução de vídeo.
+- **`console=ttyS0` no sistema instalado** (e não só na ISO): era a única forma
+  de o primeiro boot — que é onde o trabalho de verdade acontece — ficar
+  observável num teste headless.
+
+**Problemas encontrados e resolvidos:**
+
+- 🐛 **Bug no próprio verificador**, pego pelo autoteste: a checagem de
+  `ROLE`/`FAMILY` exigia encontrar `@@ROLE@@` no arquivo **já substituído** —
+  isto é, exigia justamente o que a substituição remove. O autoteste detectou
+  como `FAIL` na árvore boa e evitou um verificador que reprovaria toda ISO
+  correta.
+- `shellcheck SC2054` no array de argumentos do qemu (as vírgulas de
+  `user,id=net0`); resolvido citando os valores, sem gambiarra de disable.
+- Escrevi uma linha com uma variável inexistente (`SIMULATED_RAM_MB`) ao montar
+  a dica final do build; corrigida antes de qualquer execução.
+
+**NÃO feito / não testado (importante):**
+
+- **`iso/test-vm.sh` nunca foi executado**: não há `qemu` no ambiente de
+  desenvolvimento. Só o `--dry-run` (que não invoca o qemu) foi conferido.
+- O caminho `--iso` do verificador (com `xorriso`) também **não** foi executado.
+- `--serial-console` nunca validado num boot real.
+- **Nenhuma ISO foi gerada** — continua valendo o de sempre: `xorriso` ausente.
+
+**Commits desta sessão:** (a preencher após o push).
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,
