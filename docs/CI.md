@@ -99,7 +99,7 @@ vários minutos e queimaria minutos de CI sem ganho.
 
 | Perfil | Flags efetivas | Alvo |
 |--------|----------------|------|
-| `xeon` | `GGML_NATIVE=ON` + `AVX2/FMA/F16C` + OpenBLAS | Haswell-EP (12c/24t) |
+| `intel-broadwell` | `GGML_NATIVE=OFF` + `AVX2/FMA/F16C` + OpenBLAS | Broadwell-EP (14c/28t) |
 | `ryzen` | as mesmas **+ `-march=znver2 -mtune=znver2 -O3`** | Zen 2 (6c/6t) |
 
 O build **usa o próprio script do projeto**
@@ -153,7 +153,7 @@ Dentro do Docker **não podemos** usar `GGML_NATIVE=ON`. O motivo:
 
 > O CMake detectaria a CPU da **máquina de build** — o runner do GitHub, que
 > hoje pode ser Zen 3/4/5 **com AVX-512** — e geraria um binário que sofre
-> `SIGILL` no Xeon E5-2678 v3 e no Ryzen 5 3500X, que só têm AVX2.
+> `SIGILL` no Xeon E5-2680 v4 e no Ryzen 5 3500X, que só têm AVX2.
 
 Por isso o `docker/Dockerfile` habilita `AVX2`, `FMA` e `F16C`
 **explicitamente**, com `GGML_NATIVE=OFF`, e **nunca** AVX-512. A variante

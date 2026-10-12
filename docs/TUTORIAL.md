@@ -60,7 +60,7 @@ projeto existe e **o que** ele otimiza. Sem isso, cada comando parece
 Em uma GPU, gerar o próximo token é limitado pela **capacidade de
 processamento** (FLOPs). Em uma CPU sem GPU, o cenário muda: gerar um token
 exige ler **todos os pesos do modelo** da memória RAM. Gerar 10 tokens/s com
-um modelo de 7B Q4 (~4 GB) significa ler ~40 GB/s da RAM — e o Xeon E5-2678 v3
+um modelo de 7B Q4 (~4 GB) significa ler ~40 GB/s da RAM — e o Xeon E5-2680 v4
 com DDR3-1333 **quad channel** entrega cerca de ~30 GB/s efetivos: ele já
 nasce perto do limite, e cada canal que falta derruba o teto de tokens/s.
 
@@ -85,7 +85,7 @@ paginação (swappiness) e jitter de escalonamento (governor/C-states).
 
 ### 0.3 Avisos que você precisa ter em mente desde já
 
-- ❌ **O Xeon E5-2678 v3 e o Ryzen 5 3500X NÃO têm AVX-512** (apenas AVX2).
+- ❌ **O Xeon E5-2680 v4 e o Ryzen 5 3500X NÃO têm AVX-512** (apenas AVX2).
 - ⚠️ **O Ryzen está em SINGLE CHANNEL** → ~50% de banda de memória perdida.
 - ❌ **A RX 580 serve só para vídeo** — nunca para computação (artefatos sob carga).
 - ⚠️ **16 GB no Xeon:** modelos acima de ~7B Q4 não cabem.
@@ -193,7 +193,7 @@ root, cai num fallback por heurística).
 
 ```text
 == CPU ==
-[i] Modelo:      Intel(R) Xeon(R) CPU E5-2678 v3 @ 2.50GHz   ← CPU alvo do perfil xeon
+[i] Modelo:      Intel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz   ← CPU alvo (família intel-broadwell)
 [i] Sockets:     1                                            ← single-socket ⇒ numa_balancing=0
 [i] Núcleos:     12
 [i] Threads:     24                                           ← -t 24 (ou 12; meça os dois)

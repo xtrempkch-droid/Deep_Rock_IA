@@ -1,7 +1,7 @@
 # docs/FAMILIES.md — Suporte por FAMÍLIA de CPU
 
 > **Por que este documento existe.** Antes, o projeto suportava *um processador*
-> (Xeon E5-2678 v3 + Ryzen 5 3500X). Isso é fechado e desperdiça tempo: a
+> (um único Xeon + um único Ryzen). Isso é fechado e desperdiça tempo: a
 > otimização de uma microarquitetura vale para **dezenas de modelos**. Otimizar
 > o Broadwell-EP (E5-2680 v4) beneficia automaticamente o E5-2620 v4, o
 > E5-2660 v4… e o mesmo tuning de Haswell-EP vale para toda a família **v3**.

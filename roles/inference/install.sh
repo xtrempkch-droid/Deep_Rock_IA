@@ -188,7 +188,7 @@ main() {
   fi
 
   log_info "=== install.sh (papel inference · servidor de IA em CPU) ==="
-  log_warn "Xeon E5-2678 v3: 12c/24t, AVX2 apenas (SEM AVX-512)."
+  log_warn "Xeon E5-2680 v4: 14c/28t, AVX2 apenas (SEM AVX-512)."
   log_warn "16 GB de RAM: modelos acima de ~7B Q4 não caberão."
 
   install_deps

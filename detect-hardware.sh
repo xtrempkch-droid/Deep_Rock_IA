@@ -176,7 +176,7 @@ detect_ram() {
 
   # Contagem real de canais: se dmidecode expôs 'Bank Locator', contamos quantos
   # canais distintos existem (1 = single, 2 = dual, 3 = triple, 4 = quad).
-  # Isto corrige o caso do Xeon E5-2678 v3 com 4 canais, que antes era sempre
+  # Isto corrige o caso do Xeon E5-2680 v4 com 4 canais, que antes era sempre
   # reportado como 'dual'.
   if [[ -n "$dmidecode_out" ]]; then
     local banks

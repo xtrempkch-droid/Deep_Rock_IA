@@ -23,7 +23,7 @@
 
 | Sistema | Hardware                        | Perfil   | Testado em hardware real? |
 |---------|---------------------------------|----------|---------------------------|
-| A       | Intel Xeon E5-2678 v3, 16 GB    | `xeon`   | ❌ **NÃO**                |
+| A       | Intel Xeon E5-2680 v4, 16 GB    | `intel-broadwell` / `inference` | ❌ **NÃO**                |
 | B       | AMD Ryzen 5 3500X, 64 GB        | `ryzen`  | ❌ **NÃO**                |
 
 > **Nada foi executado em hardware físico ainda.** Todos os scripts foram

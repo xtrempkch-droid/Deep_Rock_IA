@@ -84,7 +84,7 @@ Isto evita perder tempo (re)descobrindo o que já se sabe sobre **esta** máquin
 | Qual é o **fim** do projeto? | 🎯 Uma **ISO de instalação** com tudo embutido | `docs/ISO.md` |
 | Por que CPU, se é lento? | Os dois hardwares alvo **não têm GPU utilizável** | `docs/HARDWARE.md` |
 | Qual é o gargalo real? | **Banda de memória**, não FLOPs | `docs/TUNING.md` § 0 |
-| Quem são os alvos? | Xeon E5-2678 v3 (inferência) e Ryzen 5 3500X (build) | `docs/HARDWARE.md` |
+| Quem são os alvos? | Xeon E5-2680 v4 (`intel-broadwell`) e Ryzen 5 3500X (`amd-zen2`) | `docs/HARDWARE.md` |
 | O que **nunca** fazer? | AVX-512, usar a RX 580 p/ compute, `GGML_NATIVE=ON` no Docker | `AGENTS.md` Regras 12 |
 
 ### Regras que mais quebram o CI (e a paciência)
@@ -269,8 +269,8 @@ em seu sistema operacional"*.
 - `docs/{HARDWARE,ARCHITECTURE,ROADMAP,TUTORIAL,VALIDATION}.md` ainda têm
   referências ao modelo antigo de perfis (pendência registrada abaixo).
 
-**Commits desta sessão:** (a preencher após o push) — refatoração em um único
-commit de arquitetura (`refactor: suporte por famílias de CPU + papéis + mods`).
+**Commits desta sessão:** `8b6d57e` — `refactor!: suporte por FAMÍLIAS de CPU + papéis + mods portáveis`
+  (e um commit de acompanhamento propagando o modelo de CPU E5-2680 v4 nos docs).
 
 ---
 

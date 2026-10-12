@@ -29,7 +29,7 @@ services:
       - ./models:/models:ro
 
     # Ajuste threads/ctx ao hardware:
-    #   Xeon E5-2678 v3 (12c/24t)  → --threads 24 (teste também 12)
+    #   Xeon E5-2680 v4 (14c/28t) → --threads 14 (teste também 28)
     #   Ryzen 5 3500X  (6c/6t)     → --threads 6
     command:
       - "--host"

@@ -41,7 +41,7 @@ fluem** e **por que decidimos assim** — incluindo alternativas descartadas.
                                         ▼
         ┌─────────────────────────────────────────────────────────────────┐
         │                    SISTEMA A — PERFIL "xeon"                     │
-        │          Intel Xeon E5-2678 v3 · 12c/24t · 16 GB DDR3 QC         │
+        │          Intel Xeon E5-2680 v4 · 14c/28t · 16 GB DDR3 QC         │
         │                                                                  │
         │   ┌────────────────────────┐        ┌────────────────────────┐  │
         │   │   llama-server         │◀───────│   shell-ia.py          │  │
@@ -254,7 +254,7 @@ do projeto não se degradem. Detalhes completos em [`docs/CI.md`](CI.md).
 No host, `GGML_NATIVE=ON` é o ideal — o CMake lê a ISA da **CPU alvo**.
 Dentro do Docker, porém, "native" significa a CPU do **runner de CI**, que
 pode ser Zen 4/5 **com AVX-512**. Isso geraria um binário que sofre `SIGILL`
-no Xeon E5-2678 v3 e no Ryzen 5 3500X.
+no Xeon E5-2680 v4 e no Ryzen 5 3500X.
 
 Por isso a imagem habilita `AVX2`/`FMA`/`F16C` **explicitamente** e mantém
 `GGML_NATIVE=OFF` (Regra 12 do `AGENTS.md`).

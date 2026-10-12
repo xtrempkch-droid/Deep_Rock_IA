@@ -10,7 +10,7 @@ características aqui descritas.
 
 ## Sistema A — Servidor de IA (perfil `xeon`)
 
-### CPU: Intel Xeon E5-2678 v3
+### CPU: Intel Xeon E5-2680 v4
 
 | Propriedade             | Valor                                                        |
 |-------------------------|--------------------------------------------------------------|
@@ -123,10 +123,10 @@ características aqui descritas.
 
 ## Comparativo rápido
 
-| Característica     | Xeon E5-2678 v3        | Ryzen 5 3500X          |
+| Característica     | Xeon E5-2680 v4        | Ryzen 5 3500X          |
 |--------------------|------------------------|------------------------|
 | Função             | Inferência             | Build/Registry/Gitea   |
-| Núcleos/Threads    | 12c / 24t              | 6c / 6t                |
+| Núcleos/Threads    | 14c / 28t              | 6c / 6t                |
 | AVX-512            | ❌                     | ❌                     |
 | AVX2 / FMA / F16C  | ✅                     | ✅                     |
 | Canais de memória  | Quad ✅                | Single ⚠️              |

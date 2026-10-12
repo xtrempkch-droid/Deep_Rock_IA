@@ -18,7 +18,7 @@ EnvironmentFile=-/etc/default/ai-server
 Environment=LLAMA_HOST=127.0.0.1
 Environment=LLAMA_PORT=8080
 
-# -t 24 = 1 thread por thread lógica do Xeon E5-2678 v3 (12c/24t).
+# -t 14 = 1 thread por núcleo físico do Xeon E5-2680 v4 (14c/28t).
 # Se medir e -t 12 for mais rápido, ajuste em /etc/default/ai-server.
 ExecStart=/opt/llama.cpp/build/bin/llama-server \
     --model ${MODEL_PATH} \

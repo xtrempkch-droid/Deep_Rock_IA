@@ -209,7 +209,7 @@ TOOLS: dict[str, Callable[[dict[str, Any]], str]] = {
 # ---------------------------------------------------------------------------
 # Backend llama.cpp (endpoint compatível com OpenAI)
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT = """Você é o shell-IA do ai-cpu-os, rodando em um Intel Xeon E5-2678 v3 (12c/24t, AVX2).
+SYSTEM_PROMPT = """Você é o shell-IA do ai-cpu-os, rodando em um Intel Xeon E5-2680 v4 (14c/28t, AVX2).
 
 Você ajuda o usuário a operar o sistema. Quando precisar de informação do
 sistema, use ferramentas emitindo UMA linha no formato:

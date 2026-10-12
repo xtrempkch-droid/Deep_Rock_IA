@@ -2,7 +2,7 @@ name: container
 
 # Constrói a imagem de runtime do llama.cpp (docker/Dockerfile) e publica no
 # GHCR. Duas variantes:
-#   * portable → AVX2 genérico (roda no Xeon E5-2678 v3 E no Ryzen 5 3500X)
+#   * portable → AVX2 genérico (roda no Xeon E5-2680 v4 E no Ryzen 5 3500X)
 #   * znver2   → otimizada para o Ryzen 5 3500X (Zen 2)
 #
 # ⚠️ Nunca publicamos variante com AVX-512: nenhum dos hardwares alvo suporta.

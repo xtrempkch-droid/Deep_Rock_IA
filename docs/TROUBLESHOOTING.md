@@ -12,7 +12,7 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 ### `SIGILL` (Illegal instruction) ao rodar o binário
 
 - **Causa:** binário compilado com ISA que a CPU não suporta (ex.: AVX-512
-  em Xeon E5-2678 v3 ou Ryzen 5 3500X).
+  em Xeon E5-2680 v4 ou Ryzen 5 3500X).
 - **Solução:** recompile com `-DGGML_NATIVE=ON` (sem forçar
   `-mavx512*`). Verifique:
   ```bash

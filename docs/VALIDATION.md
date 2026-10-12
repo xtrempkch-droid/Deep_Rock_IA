@@ -106,7 +106,7 @@ chmod +x build.sh detect-hardware.sh common/*.sh \
 
 | Aviso | Detalhe |
 |-------|---------|
-| **Sem AVX-512** | O Xeon E5-2678 v3 e o Ryzen 5 3500X **não** têm AVX-512. Se aparecer `SIGILL`, alguma flag está errada. |
+| **Sem AVX-512** | O Xeon E5-2680 v4 e o Ryzen 5 3500X **não** têm AVX-512. Se aparecer `SIGILL`, alguma flag está errada. |
 | **Reboot necessário** | O Bloco D altera a **cmdline do kernel** (C-states). Só vale após reiniciar. |
 | **Consumo de energia** | Governor `performance` + C-states rasos deixam a CPU quente mesmo ociosa. |
 | **Single channel (Ryzen)** | Se confirmar, o problema é físico (slots). Anote como está antes de mudar. |
@@ -192,7 +192,7 @@ lsblk -d -o NAME,SIZE,ROTA,TRAN,MODEL
 
 | Campo | Esperado | Medido |
 |-------|----------|--------|
-| Modelo da CPU | Xeon E5-2678 v3 | _(preencher)_ |
+| Modelo da CPU | Xeon E5-2680 v4 | _(preencher)_ |
 | Núcleos / Threads | 12 / 24 | _(preencher)_ |
 | AVX2 | SIM | _(preencher)_ |
 | FMA / F16C | SIM / SIM | _(preencher)_ |
