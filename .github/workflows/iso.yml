@@ -58,7 +58,7 @@ jobs:
       ISO_FAMILY: ${{ inputs.family || 'auto' }}
       ISO_DISK: ${{ inputs.disk || '/dev/vda' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Instalar ferramentas de remasterização
         run: |
@@ -125,7 +125,7 @@ jobs:
             echo "Veja o Bloco M de \`docs/VALIDATION.md\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ai-cpu-os-iso-${{ env.ISO_DISTRO }}
           path: |
