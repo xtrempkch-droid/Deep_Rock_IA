@@ -714,7 +714,7 @@ Ou seja: o usuário estava respondendo ativamente as dúvidas abertas do § 5.3.
   em hardware real. A tabela do § 11 do `README.technical.md` segue sendo a
   fonte da verdade — e ela agora diz "Build offline: ⚠️".
 
-**Commits desta sessão:** (a preencher após o push).
+**Commits desta sessão:** `4474b75` — `feat(iso)!: ISO air-gapped + compilar no 1º boot (--source)`.
 
 ---
 
