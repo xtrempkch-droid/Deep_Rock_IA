@@ -1,7 +1,8 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-12 (CI consertado + repo limpo; a ISO air-gapped segue pendente de BOOT em VM)
+> **Última atualização:** 2026-10-12 (CI consertado + `upload-artifact` em `@v7`
+> + repo limpo; a ISO air-gapped segue pendente de BOOT em VM)
 
 ---
 
@@ -77,10 +78,15 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 | `build-llama` | ✅ **verde (build real!)** | Run #1 na tag `v0.2.0` (`4cde4bb`): **6m04s** · Run #2 (manual, `main`): ✅ — os dois perfis compilam, os binários executam e a **inferência real** roda. |
 | `container`   | ✅ **verde** | Runs #3/#4/#5/#7, **#8 (correção do RPATH)** e **#9 (PR do Dependabot)**: ✅ — imagens publicadas no GHCR. O job do PR passou em 8m28s **incluindo o passo "Smoke da imagem (PR)"**. |
 
-> **PR #1 do Dependabot** (`ci(deps): bump the actions group`): a branch foi
-> **rebaseada sobre `main`** (com a correção do RPATH) e agora está
-> **✅ verde** — `validate` + `container` passaram, inclusive o smoke step.
-> As 5 versões de action foram verificadas com `git ls-remote` (todas existem).
+> **PRs do Dependabot** (verificado pela API em 2026-10-12):
+> - **PR #1** (`bump the actions group`, 5 updates): **✅ mesclado** em
+>   2026-10-09.
+> - **PR #2** (`debian:12-slim` → `13-slim` no `docker/`): **✅ 6/6 checks
+>   verdes**, incluindo os dois smokes de imagem, e `mergeable: clean`. Só
+>   falta a decisão do dono.
+> - **PR #3** (`bump the actions group`, 2 updates): **resolvido direto no
+>   `main`** — a parte do `upload-artifact` (`@v6`→`@v7`) foi aplicada aqui e
+>   ganhou guarda no CI; a do `checkout` já estava feita. **Pode ser fechado.**
 
 ### 3.2 Histórico das execuções do CI (2026-10-07)
 
@@ -119,8 +125,9 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 7. **Métricas de performance ainda não medidas.** O CI prova que o llama.cpp
    compila e roda; **não** prova quantos tokens/s o hardware entrega. As
    seções 5, 6 e 7.6 do `docs/TUTORIAL.md` seguem `pendente`.
-8. **PR #1 do Dependabot:** ✅ **verde** após rebase sobre `main` com a
-   correção do RPATH. Pode ser mesclado (bumps de action verificados).
+8. **PRs do Dependabot:** #1 ✅ **mesclado** (2026-10-09). #2 ✅ **verde**
+   (6/6, `mergeable: clean`) aguardando a decisão do dono. #3 ✅ **resolvido
+   no `main`** (o `@v7` do `upload-artifact` foi aplicado) — pode ser fechado.
 9. **A imagem do GHCR não foi validada no hardware alvo.** Ela foi construída
    e verificada pelo próprio build (auto-verificação do Dockerfile) e
    publicada, mas ninguém ainda a executou no Xeon nem no Ryzen.

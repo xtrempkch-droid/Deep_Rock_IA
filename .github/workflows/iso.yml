@@ -177,7 +177,7 @@ jobs:
             echo "Veja o Bloco M de \`docs/VALIDATION.md\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         # Artefato de varios GB consome a cota da conta, e o canal certo
         # para distribuicao (Release) tem limite de 2 GiB por arquivo.
         if: steps.size.outputs.too_big != 'true'

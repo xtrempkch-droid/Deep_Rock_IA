@@ -370,9 +370,13 @@ Estas regras são **obrigatórias**:
   alcançou); runner fixado em `ubuntu-24.04` nos jobs que dependem da release
   (o label `ubuntu-latest` migra para Ubuntu 26 em 2026-10-19 e mudaria o
   resultado sozinho); `build-llama` agora **compila do tarball** (`--source`),
-  exercitando o caminho offline com cmake real nas 7 famílias; removido o
+  exercitando o caminho offline com cmake real nas 7 famílias; `upload-artifact`
+  **padronizado em `@v7`** nos dois workflows (sobrava um `@v6` que só o PR #3
+  do Dependabot trazia) com guarda de CI negativo+positivo; removido o
   diretório fantasma `profiles/` e corrigida a entrada obsoleta no `.gitignore`.
-  Novos guardas no CI para os dois invariantes.
+  Novos guardas no CI para todos esses invariantes. **PRs:** #1 mesclado, #2
+  (`debian:13-slim`) verde e sem conflito, #3 resolvido direto no `main`
+  (pode fechar).
 - **Data anterior:** 2026-10-12 — **O repositório apt também vai na mídia** (orçamento de 8 GB
   acordado). `--iso-repo auto|<dir>|none` resolve o **fecho de dependências** dos
   pacotes que o 1º boot precisa, baixa os `.deb`, gera o índice com `dpkg-deb`

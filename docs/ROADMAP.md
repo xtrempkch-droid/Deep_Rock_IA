@@ -68,6 +68,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | **CI consertado** (o `validate` estava vermelho no `main`): `--iso-repo auto` degrada em vez de abortar + `make iso-dry-run-both` compartilhado entre CI e `make` | 2026-10-12 | 2026-10-12 |
 | `build-llama` do CI passou a **compilar do tarball** (`--source`): prova o caminho offline com cmake real, nas 7 famílias | 2026-10-12 | 2026-10-12 |
 | `iso.yml` alinhado em `actions/*@v6`/`@v7`, runner fixado em `ubuntu-24.04`, `.gitignore` corrigido e fantasma `profiles/` removido | 2026-10-12 | 2026-10-12 |
+| **`upload-artifact` padronizado em `@v7`** nos dois workflows que o usam (era `@v6` no `main` enquanto o PR #3 do Dependabot já trazia o v7) + guarda de CI **negativo e positivo** para não regredir | 2026-10-12 | 2026-10-12 |
 | **`llama-build.sh --source <dir|tar.gz>`** — compila de um fonte **local**, sem rede e sem `git`; registra a origem em `AI-CPU-OS-BUILD.txt`. É o primeiro passo da ISO air-gapped | 2026-10-12 | 2026-10-12 |
 | **O modelo `.gguf` vai na mídia** (`--iso-model auto|<caminho>|none`) + `late-command` copiando para `/opt/models` + `AI_MODEL_FILE` no `firstboot` + **`--model-file`** no papel `inference` (instala modelo local sem rede) | 2026-10-12 | 2026-10-12 |
 | **Repositório apt local na mídia** (`--iso-repo auto|DIR|none`): fecho de dependências, índice gerado com `dpkg-deb`, embutido em `/apt-repo` e usado como fonte EXTRA (Ubuntu: seção `sources` do curtin; Debian: `apt-setup/local0/*`); build recusa release diferente | 2026-10-12 | 2026-10-12 |
@@ -134,13 +135,10 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
       **nenhum backend foi compilado ou testado** por este projeto.
 - [ ] **Promover a GPU a um papel (`roles/gpu-*`)** — só depois de existir
       medição real; hoje seria um papel sustentado por zero número.
-- [ ] **Variante air-gapped da ISO** — embutir o fonte do llama.cpp e os `.deb`
-      necessários para instalar **sem internet**.
-- [ ] **Variante com binário pré-compilado** — usar os `.tar.gz` da Release em
-      vez de compilar no primeiro boot (instalação muito mais rápida).
-- [ ] **Suporte a Ubuntu na ISO** (autoinstall/Subiquity) via `--distro ubuntu`.
-- [ ] **Mesclar o PR #1 do Dependabot** — rebaseado sobre `main` com a
-      correção do RPATH e **✅ verde**; só falta clicar em *Merge*.
+- [ ] **Mesclar o PR #2 do Dependabot** (`debian:12-slim` → `13-slim` no
+      `docker/`) — **✅ 6/6 checks verdes**, incluindo os dois smokes de imagem,
+      e `mergeable: clean`. Só falta a decisão do dono. *(O PR #1 foi mesclado
+      em 2026-10-09; o PR #3 foi resolvido direto no `main` — ver `JOURNAL.md`.)*
 - [ ] **Suporte a `nvme` tuning** — `mq-deadline` vs `none` scheduler para
       SSD NVMe, e `nr_requests`.
 - [ ] **Benchmark automatizado** — script que roda `llama-bench`, salva CSV e

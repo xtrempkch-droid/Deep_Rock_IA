@@ -1174,8 +1174,23 @@ que não tenho `xorriso` nem `cmake`):
   migração do pacote para ESM. Mesmo runtime (`node24`) nos dois majors. O nosso
   uso (`name:` + `path:` com glob) é o comportamento inalterado do default.
 
+  **Desfecho (caminho B, escolhido pelo dono):** em vez de rebasear o PR #3 por
+  uma linha, o `@v6 → @v7` do `upload-artifact` foi aplicado **direto no
+  `main`** (nos dois workflows) e o PR #3 fica para ser fechado. Sobrevive
+  exatamente o que tinha valor; o hunk do `checkout` já estava satisfeito. Foi
+  adicionado guarda no CI para o `upload-artifact` não voltar atrás:
+  **negativo** (`@v1..@v6` reprova) + **positivo** (tem de estar em `@v7` nos
+  dois arquivos), testado com um caso positivo plantado.
+
 **Decisões (e por quê):**
 
+- **Caminho B para o PR #3: aplicar o bump no `main`, não rebasear.** O PR #3
+  tinha **uma** linha com valor real (`upload-artifact` `@v6`→`@v7`) e uma já
+  satisfeita (`checkout`). Rebasear um PR de dependabot por causa de uma linha
+  é cerimônia sem retorno; aplicar no `main` + guarda no CI dá o mesmo
+  resultado e deixa só **um** PR aberto para o dono decidir (o #2). Evidência de
+  que o v7 é seguro: release notes aditivo (parâmetro **opcional** `archive`),
+  mesmo runtime `node24`, default `name:`/`path:` inalterado.
 - **Default degrada; entrada do usuário falha.** É a diferença entre "o
   ambiente não permite" (degrada e avisa) e "você digitou um caminho errado"
   (aborta e explica). Misturar os dois foi o que quebrou o CI.
@@ -1231,7 +1246,7 @@ reproduzível por um alvo do `make`.
 |--------|------|
 | **Nada de código no caminho da ISO** | ✅ Os 5 requisitos do § 3.1 do `docs/ISO.md` estão implementados. **Não há pendência de implementação conhecida** — falta EXECUTAR (ver abaixo). |
 | 🔴 **CI estava vermelho no `main`** | ✅ **Corrigido na sessão #18** (default que abortava + comando duplicado CI×make). Os runs verdes anteriores eram de antes das mudanças. |
-| **PRs abertos para decidir** | **PR #2** (debian `13-slim` no `docker/`): ✅ 6/6 checks verdes — `mergeable: clean`, **mescla sem conflito**. **PR #3** (bump de actions): 🔴 **`mergeable: false` (dirty) contra o `main`** — precisa ser rebaseado. Só a parte do `upload-artifact` (`@v6`→`@v7`) tem valor real; a do `checkout` já está feita. **Os dois PRs NÃO conflitam entre si** (arquivos disjuntos). |
+| **PRs abertos para decidir** | **PR #2** (debian `13-slim` no `docker/`): ✅ 6/6 checks verdes — `mergeable: clean`, **mescla sem conflito**; só falta a sua decisão. **PR #3** (bump de actions): ✅ **resolvido no `main`** (caminho B) — o `@v7` do `upload-artifact` foi aplicado direto, com guarda no CI; **pode fechar o PR**. |
 | **Gerar a ISO (passo 3 do checklist)** | Não roda nesta máquina (sem `xorriso`). Caminho prático: workflow `iso` no GitHub com `air_gapped: true`. Ver `docs/ISO.md` § 9.1. |
 | **Bootar em VM (passo 4 — o critério de conclusão)** | Precisa de `qemu`+KVM. Gere a ISO com `--serial-console` ou o `test-vm.sh` não vê o 1º boot. Ver `docs/ISO.md` § 9.2. |
 | ⚠️ **Limite de 2 GiB por arquivo de Release** | A ISO air-gapped (~4,3–5 GB) **não pode** ser anexada a uma Release. O CI pula o upload e avisa. Distribuição: pendrive/`scp`, runner self-hosted, ou outro host + SHA256 na Release. |
@@ -1309,6 +1324,7 @@ reproduzível por um alvo do `make`.
 | `make` com **espaços** em vez de TAB na receita | `Makefile:118: *** missing separator (did you mean TAB instead of 8 spaces?)` — erro claro, mas só aparece ao rodar o alvo | Ao gerar regra por script, use `\t` de verdade; rode o alvo antes de commitar |
 | Escrever merge de PR sem o usuário presente | Decisão que não é minha: dependência bump pode quebrar o build de um jeito que os checks não pegam | Analise e **reporte** (PR #2 verde e `clean`; PR #3 em conflito e com valor parcial); quem mescla é o dono |
 | Chamar um PR de dependabot de "redundante" sem conferir **linha por linha** | Um PR pode ter vários hunks e só *alguns* já aplicados: o do `checkout` já estava feito, o do `upload-artifact` não | Compare `changed_files` + o **diff real** com o conteúdo do `main`; conferir as versões publicadas na API antes de opinar |
+| Guarda de CI que **conta** um padrão varrendo `*.yml` quando a *string do próprio guarda* está dentro de um `*.yml` | Auto-referência: o `validate.yml` cita `uses: actions/upload-artifact@v7` dentro do comando, então a contagem ficava inflada (3 em vez de 2) e remover o v7 de **um** dos dois workflows não reprovava | Prefira asserção **por arquivo** (`grep -q <padrão> <arquivo>` para cada um) em vez de contar ocorrências num glob que inclui o próprio arquivo do guarda |
 | Guarda negativo com `grep` de texto que aparece em **comentário** | O guarda reprova o repositório correto (ex.: o Dockerfile **cita** `COPY build/bin` para explicar por que NÃO usá-lo) | Ancore na forma do comando (`^COPY[[:space:]]+.*build/bin`) e teste o guarda com um caso positivo |
 | `sed -i` na 1ª linha de um script com `#!` | Pode trocar o **shebang** (`#!/usr/bin/env bash` vs `#!/bin/sh`) e mudar o interpretador | Nunca use `sed -i '1s/…'`; confirme o shebang depois (o CI verifica o modo estrito por shebang) |
 | Renomear/remover uma **chave de matriz** do CI e esquecer quem a consome | Ficou `${{ matrix.profile }}` no `build-llama.yml` depois de a matriz virar `family` → o **nome do artefato ia vazio** e o `upload-artifact` falharia (só num run de tag, longe do PR) | Ao renomear uma chave de matriz, `grep -n 'matrix\.'` no workflow inteiro; prefira `matrix.family` a nomes genéricos |

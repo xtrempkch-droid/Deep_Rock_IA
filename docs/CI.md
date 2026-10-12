@@ -83,13 +83,14 @@ Foi exatamente este job que motivou corrigir o `SC2046` no `build.sh`
 ### Job `project-rules` — guarda-corpo da memória do projeto
 
 Além dos arquivos obrigatórios e das asserções negativas (`--gpu auto`,
-`--prebuilt`, `COPY build/bin`), ele verifica dois invariantes que nasceram de
-falhas reais:
+`--prebuilt`, `COPY build/bin`), ele verifica invariantes que nasceram de falhas
+reais:
 
 | Invariante | Por quê |
 |-----------|---------|
 | `iso-dry-run-both` existe no `Makefile`, está no `validate` e o CI **chama** esse alvo | Um comando duplicado entre CI e `make` deixou passar a regressão do `--iso-repo auto`, que quebrou o `validate` no GitHub com o `make validate` local verde |
 | Nenhum `actions/*` em major antigo (`@v1..@v4`) | O `iso.yml` ficou preso em `@v4` enquanto o resto do repo já estava em `@v6`/`@v7` — o bump do Dependabot não o alcançou |
+| `upload-artifact` em `@v7` nos **dois** workflows que o usam | Sobrou um `@v6` no `main` porque o PR #3 do Dependabot trazia o bump e o alinhamento do `iso.yml` copiou o major vizinho. O guarda é **negativo e positivo**: ficou **negativo** (`@v1..@v6` reprova, varrendo todos os `*.yml`) e **positivo por arquivo** (`build-llama.yml` **e** `iso.yml`, um `grep` para cada). O positivo **não** pode contar `*.yml`: o próprio `validate.yml` cita a string dentro do comando e a contagem ficaria inflada — a perda de um dos dois passaria despercebida |
 Este é o job que protege as regras do `AGENTS.md` de erosão:
 
 - Verifica que todos os **28 arquivos obrigatórios** existem.

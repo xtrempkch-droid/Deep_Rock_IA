@@ -326,6 +326,19 @@ jobs:
           # o resto do repo ja estava em @v6/@v7 (o bump do Dependabot nao o
           # alcancou). Nada de actions/* em major antigo.
           ! grep -qE 'uses: actions/[a-z-]+@v[1-4]$' .github/workflows/*.yml
+          # `upload-artifact` fixado no v7: o repo padronizou nele (runtime
+          # node24; o v7 e ADITIVO — novo parametro OPCIONAL `archive:false`
+          # para upload direto de arquivo unico, default `name:`/`path:`
+          # intacto). Sobrou um @v6 no main porque o PR #3 do Dependabot
+          # trazia o bump e eu alinhei o iso.yml copiando o major vizinho.
+          #
+          # Guarda NEGATIVO (nao pode voltar para @v1..@v6) + POSITIVO. O
+          # positivo e POR ARQUIVO de proposito: contar `*.yml` incluiria este
+          # proprio validate.yml, que CITA a string dentro do comando — a
+          # contagem ficaria inflada e a perda de UM dos dois passaria.
+          ! grep -qE 'actions/upload-artifact@v[1-6]' .github/workflows/*.yml
+          grep -q 'uses: actions/upload-artifact@v7' .github/workflows/build-llama.yml
+          grep -q 'uses: actions/upload-artifact@v7' .github/workflows/iso.yml
           # E o atalho proibido continua proibido: nunca embutir binário
           # pré-compilado do llama.cpp (exigiria 1 ISO por família).
           ! grep -q -- '--prebuilt' iso/build-iso.sh
