@@ -938,6 +938,31 @@ build_repo_index() {
   done < <(find "$dir" -name '*.deb' -type f | sort)
   gzip -9c "${dir}/Packages" > "${dir}/Packages.gz"
 
+  # `Release` do repositório local. O apt do instalador EXIGE um Release mesmo
+  # num repositório "flat" quando a fonte é a mídia (`file:///cdrom/apt-repo`),
+  # e sem ele o `apt-get update` do curtin retorna **100** ("The repository
+  # ... does not have a Release file"), derrubando o `apt-config` no meio da
+  # instalação — descoberto ao bootar uma ISO de verdade (o repositório na
+  # mídia nunca tinha sido exercitado; é o "aceite do instalador para o repo
+  # local" que o JOURNAL § 5.2 marcava como suposição). Os checksums referem-se
+  # ao índice na raiz (layout flat); `trusted=yes` na fonte dispensa assinatura.
+  {
+    printf 'Origin: ai-cpu-os\n'
+    printf 'Label: ai-cpu-os\n'
+    printf 'Suite: ./\n'
+    printf 'Codename: ./\n'
+    printf 'Date: %s\n' "$(date -Ru)"
+    printf 'Architectures: amd64 all\n'
+    printf 'Components: ./\n'
+    printf 'Description: ai-cpu-os - repositorio apt local (midia air-gapped)\n'
+    printf 'MD5Sum:\n'
+    printf ' %s %16s %s\n' "$(md5sum "${dir}/Packages" | cut -d' ' -f1)" "$(stat -c %s "${dir}/Packages")" Packages
+    printf ' %s %16s %s\n' "$(md5sum "${dir}/Packages.gz" | cut -d' ' -f1)" "$(stat -c %s "${dir}/Packages.gz")" Packages.gz
+    printf 'SHA256:\n'
+    printf ' %s %16s %s\n' "$(sha256sum "${dir}/Packages" | cut -d' ' -f1)" "$(stat -c %s "${dir}/Packages")" Packages
+    printf ' %s %16s %s\n' "$(sha256sum "${dir}/Packages.gz" | cut -d' ' -f1)" "$(stat -c %s "${dir}/Packages.gz")" Packages.gz
+  } > "${dir}/Release"
+
   # Sanidade do índice: sem estes campos o apt descarta a entrada em silêncio.
   local missing
   missing="$(awk '/^Package: /{p=1} /^Filename: /{f=1} /^Size: /{s=1}
@@ -1263,11 +1288,13 @@ expand_apt_local_block() {
 
   awk -v line="$line" '
     /^@@APT_LOCAL_SOURCES@@$/ {
-      if (line != "") {
-        print "  sources:"
-        print "    ai-cpu-os-local:"
-        printf "      source: \"%s\"\n", line
-      }
+      # A fonte local NÃO entra no apt do INSTALADOR. Descoberto ao bootar a
+      # ISO de verdade: o curtin roda o `apt-get update` DENTRO de um chroot no
+      # alvo, onde `/cdrom` não está montado, então `file:///cdrom/apt-repo`
+      # (mesmo com Release) derruba o `apt-config` com exit 100 ("does not have
+      # a Release file"). O repositório é carregado para o ALVO pelo
+      # late-command.sh (/opt/apt-repo) e usado no PRIMEIRO BOOT. Marcador
+      # removido de propósito — ver docs/ISO.md § 3.1.
       next
     }
     /^@@APT_LOCAL_PRESEED@@$/ {
@@ -1527,7 +1554,7 @@ patch_efi_debian() {
 # ai-cpu-os: entrada automática (iso/build-iso.sh)
 set timeout=10
 set default="ai-cpu-os-auto"
-menuentry "Instalar ai-cpu-os (automatico)" {
+menuentry "Instalar ai-cpu-os (automatico)" --id ai-cpu-os-auto {
   linux  ${KERNEL_PATH} auto=true priority=critical preseed/file=/cdrom/preseed/ai-cpu-os.cfg --- quiet
   initrd ${INITRD_PATH}
 }
@@ -1579,7 +1606,7 @@ EOF
 # ai-cpu-os: entrada automática (iso/build-iso.sh)
 set timeout=10
 set default="ai-cpu-os-auto"
-menuentry "Instalar ai-cpu-os (automatico)" {
+menuentry "Instalar ai-cpu-os (automatico)" --id ai-cpu-os-auto {
   linux  ${KERNEL_PATH} auto=true priority=critical preseed/file=/cdrom/preseed/ai-cpu-os.cfg --- quiet
   initrd ${INITRD_PATH}
 }
@@ -1661,6 +1688,13 @@ kernel_args_extra() {
 # `autoinstall` é o parâmetro de kernel que liga o modo não interativo; o
 # `autoinstall.yaml` é achado sozinho na raiz da mídia (ver o cabeçalho do
 # template em iso/autoinstall/autoinstall.yaml).
+#
+# `--id ai-cpu-os-auto` NÃO é decorativo: `set default` casa por id OU por
+# título, e o título é "Instalar ai-cpu-os (…)" — sem o `--id` o GRUB não acha
+# a entrada, cai para a 0 (a interativa "Try or Install Ubuntu Server") e a
+# instalação automática NUNCA acontece (sem autoinstall, sem console serial).
+# Descoberto ao bootar a primeira ISO de verdade: o GRUB subia a entrada
+# interativa e o teste de VM ficava mudo.
 append_grub_ai_entry() {
   local f="$1"
   cat >> "$f" <<EOF
@@ -1670,7 +1704,7 @@ append_grub_ai_entry() {
 # ---------------------------------------------------------------------------
 set timeout=10
 set default="ai-cpu-os-auto"
-menuentry "Instalar ai-cpu-os (automatico${DISK:+, APAGA ${DISK}})" {
+menuentry "Instalar ai-cpu-os (automatico${DISK:+, APAGA ${DISK}})" --id ai-cpu-os-auto {
     set gfxpayload=keep
     linux   ${KERNEL_PATH} autoinstall quiet $(kernel_args_extra) ---
     initrd  ${INITRD_PATH}
@@ -1762,7 +1796,18 @@ repack_iso_ubuntu() {
   local -a args=(
     -indev "$ISO_PATH"
     -outdev "$OUT_ISO"
-    -boot_image any keep
+    # `replay` (e NÃO `keep`): o Ubuntu guarda a imagem UEFI como imagem El
+    # Torito OCULTA, fora da árvore ISO9660. O `keep` só mantém a *referência*
+    # do catálogo — a imagem em si "precisa ser adicionada por -map/-add" (doc
+    # do xorriso) e, por ser oculta, não entra → a ISO sai ~6 MB menor, o
+    # `efi.img` vira 1 bloco e o MBR protetor (copiado verbatim) aponta para
+    # além do fim → "Read start address ... larger than readable blocks" e
+    # **exit 32 depois de a ISO já ter sido escrita**. O `replay` reexecuta os
+    # comandos que o `-report_system_area cmd` propõe (re-anexa a partição EFI
+    # via `--interval:imported_iso`, restaura o MBR do GRUB) e produz uma ISO
+    # coerente com o novo tamanho. Medido: keep → exit 32, efi 1 bloco;
+    # replay → exit 0, efi 2540 blocos. Ver docs/ISO.md § 4.5c.
+    -boot_image any replay
     -volid "$VOLUME_ID"
     -map "${UBUNTU_STAGE}/ai-cpu-os"        /ai-cpu-os
     -map "${UBUNTU_STAGE}/preseed"          /preseed
@@ -1774,13 +1819,36 @@ repack_iso_ubuntu() {
     args+=(-map "$UBUNTU_GRUB_EFI" /EFI/boot/grub.cfg)
   fi
 
+  # O modelo, a fonte do llama.cpp e o repositório apt entram na mídia por -map
+  # explícito. Isto é o preço do caminho Ubuntu mapear SÓ o que muda (em vez de
+  # reconstruir a árvore, como o Debian faz): o que não for mapeado fica no
+  # `stage` e **não** na ISO. Sem estes três, a ISO se dizia air-gapped mas não
+  # tinha o modelo/fonte/repo — o `verify-iso.sh` reprovou exatamente isso
+  # ("o autoinstall aponta para um repositório local, mas /apt-repo NÃO está na
+  # mídia"). Os destinos casam com o que o late-command lê: SRC=/cdrom, então
+  # /models/<nome>, /<fonte>.tar.gz e /apt-repo.
+  if [[ -n "$MODEL_NAME" ]]; then
+    args+=(-map "${UBUNTU_STAGE}/models" /models)
+  fi
+  if [[ -n "$SOURCE_NAME" ]]; then
+    args+=(-map "${UBUNTU_STAGE}/${SOURCE_NAME}" "/${SOURCE_NAME}")
+  fi
+  if [[ -n "$APT_REPO_PATH_REL" ]]; then
+    args+=(-map "${UBUNTU_STAGE}/${APT_REPO_PATH_REL}" "/${APT_REPO_PATH_REL}")
+  fi
+
   # O md5sum.txt original descreve a mídia ANTES das nossas alterações. O
   # Subiquity não o usa no autoinstall, mas um arquivo obsoleto confunde quem
   # for inspecionar a ISO. Removemos apenas se ele existir (senão o xorriso
   # reclama de um caminho inexistente).
   if [[ $DRY_RUN -eq 0 ]] \
      && [[ -n "$(xorriso -indev "$ISO_PATH" -find /md5sum.txt -type f 2>/dev/null || true)" ]]; then
-    args+=(-rm /md5sum.txt)
+    # O `--` FECHA a lista de caminhos do `-rm`. Sem ele, o xorriso lê o
+    # `-commit`/`-end` seguinte como mais um caminho a remover, emite
+    # "SORRY: Cannot find path '-commit'", tolera mas devolve **exit 32** — e
+    # derruba o build DEPOIS de a ISO ter sido escrita (o sintoma é uma ISO
+    # válida em disco + exit 32, não um erro legível).
+    args+=(-rm /md5sum.txt --)
     log_info "md5sum.txt será removido (ficaria obsoleto após as alterações)."
   fi
 
@@ -1841,8 +1909,17 @@ verify_output() {
 
   # O menu de boot precisa ter a nossa entrada padrão.
   if [[ "$DISTRO" == "ubuntu" ]]; then
-    local grub_txt
-    grub_txt="$(xorriso -osirrox on -indev "$OUT_ISO" -extract /boot/grub/grub.cfg /dev/stdout 2>/dev/null || true)"
+    local grub_txt grub_tmp
+    # Extrair para um arquivo temporário, NÃO para /dev/stdout: o xorriso não
+    # entrega o conteúdo de forma confiável em /dev/stdout (a captura vinha
+    # vazia e gerava um falso "Não confirmei a entrada 'ai-cpu-os-auto'" mesmo
+    # com a entrada presente).
+    grub_tmp="$(mktemp)"
+    if xorriso -osirrox on -indev "$OUT_ISO" \
+         -extract /boot/grub/grub.cfg "$grub_tmp" >/dev/null 2>&1; then
+      grub_txt="$(cat "$grub_tmp" 2>/dev/null || true)"
+    fi
+    rm -f "$grub_tmp"
     if [[ "$grub_txt" == *ai-cpu-os-auto* ]]; then
       log_ok "Menu do GRUB com a entrada automática 'ai-cpu-os-auto'."
     else

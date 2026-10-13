@@ -16,8 +16,12 @@ RemainAfterExit=no
 ExecStart=/opt/ai-cpu-os/iso/firstboot.sh
 # A compilação do llama.cpp pode demorar bastante (10-20 min no Xeon).
 TimeoutStartSec=infinity
-StandardOutput=journal
-StandardError=journal
+# journal+console: o journal guarda tudo, e o CONSOLE (ttyS0 quando a ISO é
+# gerada com --serial-console) deixa o teste de VM headless ver os marcadores
+# ("aplicação concluída com sucesso") sem tela nem login. Com `journal` apenas,
+# o iso/test-vm.sh nunca enxergava o fim do primeiro boot.
+StandardOutput=journal+console
+StandardError=journal+console
 SyslogIdentifier=ai-cpu-os-firstboot
 
 [Install]

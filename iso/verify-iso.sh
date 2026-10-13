@@ -155,6 +155,16 @@ existe() {
   [[ -n "$d" ]]
 }
 
+# Lista caminhos de dentro da ISO via -find, SEM as aspas simples que o xorriso
+# (1.5.x) coloca em volta de cada resultado: ele imprime '/apt-repo/x.deb', e
+# comparar isso com o caminho puro do índice ('x.deb') nunca casa. Só o modo
+# --iso sofre (o --dir usa `find`, sem aspas) — foi o que fez 408 falsos
+# "repositório incompleto" na primeira verificação de uma ISO real.
+xfind() {
+  xorriso -osirrox on -indev "$INPUT" -find "$@" 2>/dev/null \
+    | sed -e "s/^'//" -e "s/'$//"
+}
+
 check_file() {
   local abs="$1" desc="$2"
   if existe "$abs"; then
@@ -271,7 +281,7 @@ MODEL_LIST=""
 if [[ "$MODE" == "dir" ]]; then
   MODEL_LIST="$(find "${INPUT}/models" -maxdepth 1 -name '*.gguf' -type f 2>/dev/null || true)"
 else
-  MODEL_LIST="$(xorriso -osirrox on -indev "$INPUT" -find /models -name '*.gguf' 2>/dev/null | grep '\.gguf$' || true)"
+  MODEL_LIST="$(xfind /models -name '*.gguf' | grep '\.gguf$' || true)"
 fi
 
 if [[ -z "$MODEL_LIST" ]]; then
@@ -351,14 +361,17 @@ else
     else
       fail "fonte do llama.cpp: tarball com apenas ${N_FILES} arquivos -- nao parece o llama.cpp"
     fi
-    if printf '%s
-' "$TAR_LIST" | grep -qE '(^|/)CMakeLists\.txt$'; then
+    # `<<<` (here-string) e NÃO `printf … | grep -q`: com `set -o pipefail`,
+    # o `grep -q` sai no 1º match, o `printf` leva SIGPIPE (141) e o pipeline
+    # inteiro "falha" — o `if` cairia no else e acusaria a fonte. Vale para
+    # qualquer lista que passe de ~64 KB (o buffer do pipe). Mesma armadilha do
+    # `find | head` já registrada no JOURNAL § 6.
+    if grep -qE '(^|/)CMakeLists\.txt$' <<<"$TAR_LIST"; then
       pass "a fonte tem CMakeLists.txt (e compilavel)"
     else
       fail "a fonte nao tem CMakeLists.txt -- o 1o boot falharia ao compilar"
     fi
-    if printf '%s
-' "$TAR_LIST" | grep -qE '(^|/)ggml/' ; then
+    if grep -qE '(^|/)ggml/' <<<"$TAR_LIST"; then
       pass "a fonte contem ggml/ (arvore do llama.cpp)"
     else
       fail "a fonte nao contem ggml/ -- nao parece o llama.cpp"
@@ -396,16 +409,25 @@ if [[ "$DISTRO" == "debian" ]]; then
   CFG_FOR_REPO="$(fetch "/preseed/ai-cpu-os.cfg" 2>/dev/null || true)"
   CFG_REPO_MARKER='apt-setup/local0/repository'
   CFG_NAME="a preseed"
+  if [[ -n "$CFG_FOR_REPO" ]] && grep -q "$CFG_REPO_MARKER" "$CFG_FOR_REPO"; then
+    AI_WANTS_REPO=1
+  else
+    AI_WANTS_REPO=0
+  fi
 else
-  CFG_FOR_REPO="$(fetch "/autoinstall.yaml" 2>/dev/null || true)"
-  CFG_REPO_MARKER='cdrom/apt-repo'
-  CFG_NAME="o autoinstall"
-fi
-
-if [[ -n "$CFG_FOR_REPO" ]] && grep -q "$CFG_REPO_MARKER" "$CFG_FOR_REPO"; then
-  AI_WANTS_REPO=1
-else
-  AI_WANTS_REPO=0
+  # Ubuntu: a fonte local NÃO entra no apt do INSTALADOR (o curtin roda o
+  # `apt-get update` dentro de um chroot no alvo, sem /cdrom — foi bug real ao
+  # bootar a ISO). O repositório é carregado para o alvo pelo late-command.sh
+  # (/opt/apt-repo) e usado no PRIMEIRO BOOT. Então a "config" que importa é o
+  # late-command, e ele só é exigido quando o repositório VEIO na mídia.
+  CFG_FOR_REPO="$(fetch "/preseed/late-command.sh" 2>/dev/null || true)"
+  CFG_REPO_MARKER='/opt/apt-repo'
+  CFG_NAME="o late-command"
+  if [[ -n "$REPO_GZ" ]] && [[ -n "$CFG_FOR_REPO" ]]; then
+    AI_WANTS_REPO=1
+  else
+    AI_WANTS_REPO=0
+  fi
 fi
 
 if [[ -z "$REPO_GZ" ]]; then
@@ -430,14 +452,14 @@ else
     if [[ "$MODE" == "dir" ]]; then
       REPO_FILES="$(find "${INPUT}/apt-repo" -type f 2>/dev/null | sed "s|^${INPUT}/apt-repo/||")"
     else
-      REPO_FILES="$(xorriso -osirrox on -indev "$INPUT" -find /apt-repo -type f 2>/dev/null | sed 's|^/apt-repo/||')"
+      REPO_FILES="$(xfind /apt-repo -type f | sed 's|^/apt-repo/||')"
     fi
 
     MISSING=0; N_DEB_INDEX=0
     while IFS= read -r rel; do
       [[ -n "$rel" ]] || continue
       case "$rel" in *.deb) N_DEB_INDEX=$((N_DEB_INDEX + 1)) ;; esac
-      if ! printf '%s\n' "$REPO_FILES" | grep -qxF "$rel"; then
+      if ! grep -qxF "$rel" <<<"$REPO_FILES"; then
         fail "o índice cita ${rel}, que NÃO está na mídia (repositório incompleto)"
         MISSING=$((MISSING + 1))
       fi
@@ -470,10 +492,10 @@ else
       pass "amostra de ${CHECKED} .deb: magic '!<arch>' OK (arquivos íntegros)"
     fi
 
-    if [[ $AI_WANTS_REPO -eq 1 ]]; then
-      pass "${CFG_NAME} usa o repositório local (instalação pode ser offline)"
+    if [[ $AI_WANTS_REPO -eq 1 ]] && grep -q "$CFG_REPO_MARKER" "$CFG_FOR_REPO"; then
+      pass "${CFG_NAME} usa o repositório local (instalação/1º boot sem rede)"
     else
-      fail "o repositório está na mídia mas ${CFG_NAME} NÃO o usa (centenas de MB inúteis e instalação dependente de rede)"
+      fail "o repositório está na mídia mas ${CFG_NAME} NÃO o referencia (centenas de MB inúteis e alvo dependente de rede)"
     fi
   fi
 fi
@@ -631,10 +653,19 @@ if [[ "$DISTRO" == "ubuntu" ]]; then
   if [[ -z "$GRUB_LOCAL" ]]; then
     skip "sem /boot/grub/grub.cfg para conferir (o menu vem de outro lugar)"
   else
-    if grep -q 'ai-cpu-os-auto' "$GRUB_LOCAL"; then
-      pass "/boot/grub/grub.cfg tem a entrada 'ai-cpu-os-auto'"
+    # `set default="ai-cpu-os-auto"` só resolve se existir uma menuentry com
+    # esse `--id`. Sem ele o GRUB cai na entrada 0 (a interativa) e a
+    # instalação automática não acontece — foi um bug REAL, invisível para um
+    # `grep ai-cpu-os-auto` (que casava com o próprio `set default`).
+    if grep -qE 'menuentry[^"]*"[^"]*"[^\{]*--id[ =]ai-cpu-os-auto' "$GRUB_LOCAL"; then
+      pass "/boot/grub/grub.cfg tem a menuentry com --id 'ai-cpu-os-auto'"
     else
-      fail "/boot/grub/grub.cfg SEM a entrada 'ai-cpu-os-auto' (não instalaria sozinho)"
+      fail "/boot/grub/grub.cfg SEM menuentry com --id 'ai-cpu-os-auto' (o 'set default' não casaria; o GRUB subiria a entrada interativa)"
+    fi
+    if grep -q 'set default="ai-cpu-os-auto"' "$GRUB_LOCAL"; then
+      pass "set default aponta para 'ai-cpu-os-auto'"
+    else
+      fail "set default não aponta para 'ai-cpu-os-auto' (não instalaria sozinho)"
     fi
     if grep -q 'autoinstall' "$GRUB_LOCAL"; then
       pass "entrada usa o parâmetro de kernel 'autoinstall'"

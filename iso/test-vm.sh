@@ -231,12 +231,17 @@ main() {
     -m "$RAM" -smp "$CPUS"
     -drive "file=${DISK_PATH},if=virtio,format=qcow2"
     -cdrom "$ISO_PATH"
-    -boot d
+    # `once=d`: o CD (instalador) é o 1º boot; os SEGUINTES usam a ordem
+    # normal (c = disco) — é assim que a MESMA VM instala, reinicia e então
+    # roda o 1º boot do sistema instalado (onde o `firstboot` aplica o tuning).
+    # NÃO usar `-boot d` + `-no-reboot`: o instalador reinicia ao terminar e o
+    # `-no-reboot` encerraria o qemu, matando o 1º boot que é justamente o
+    # segundo marcador do teste.
+    -boot "order=c,once=d"
     -display none
     -serial "file:${SERIAL_LOG}"
     -monitor none
     -netdev "user,id=net0" -device "virtio-net-pci,netdev=net0"
-    -no-reboot
   )
 
   if [[ $DRY_RUN -eq 1 ]]; then
@@ -262,10 +267,9 @@ main() {
     "${ACCEL_ARGS[@]}" "${FW_ARGS[@]}" \
     -m "$RAM" -smp "$CPUS" \
     -drive "file=${DISK_PATH},if=virtio,format=qcow2" \
-    -cdrom "$ISO_PATH" -boot d \
+    -cdrom "$ISO_PATH" -boot "order=c,once=d" \
     -display none -serial "file:${SERIAL_LOG}" -monitor none \
-    -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
-    -no-reboot &
+    -netdev user,id=net0 -device virtio-net-pci,netdev=net0 &
   QEMU_PID=$!
   log_info "qemu iniciado (pid ${QEMU_PID}). Console serial em ${SERIAL_LOG}."
 

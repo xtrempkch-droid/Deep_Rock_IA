@@ -16,7 +16,7 @@
 # Este teste monta árvores mínimas (só o que a checagem do repositório olha) e
 # roda o verificador de verdade, sem xorriso, sem root, sem rede e sem Docker.
 #
-#   - Ubuntu: usar `sources` (seção do curtin) dentro do autoinstall;
+#   - Ubuntu: carregar o repositório para o ALVO pelo late-command (/opt/apt-repo);
 #   - Debian: usar `apt-setup/local0/repository` dentro da preseed.
 #
 # Uso: bash tests/test-verify-iso-repo-distro.sh [--verbose]
@@ -64,13 +64,19 @@ d-i apt-setup/local0/comment string ai-cpu-os local repository
 d-i preseed/late_command string in-target sh /cdrom/preseed/late-command.sh
 EOF
   else
+    # No caminho Ubuntu a fonte local NÃO entra no autoinstall: o apt do
+    # instalador roda dentro de um chroot no alvo, onde /cdrom não existe. O
+    # repositório é carregado para o alvo pelo late-command.sh (/opt/apt-repo)
+    # e usado no primeiro boot.
     cat > "$d/autoinstall.yaml" <<'EOF'
 #cloud-config
 autoinstall:
   version: 1
-  sources:
-    extra:
-      - uri: file:///cdrom/apt-repo
+EOF
+    cat > "$d/preseed/late-command.sh" <<'EOF'
+APT_REPO_SRC="/cdrom/apt-repo"
+APT_REPO_DST="/opt/apt-repo"
+cp -a "${APT_REPO_SRC}/." "/target${APT_REPO_DST}/"
 EOF
   fi
 }
@@ -82,7 +88,7 @@ run_verify() {
 }
 
 # O que é considerado "reclamou do repositório não ser usado pela config".
-SUSPECT='NÃO o usa|nao o usa|aponta para um repositório local, mas'
+SUSPECT='NÃO o usa|nao o usa|NÃO o referencia|aponta para um repositório local, mas'
 
 echo "Verificador da ISO × repositório apt local (distro-aware)"
 
@@ -130,7 +136,7 @@ else
 fi
 
 mk_tree "$WORK/ubuntu-sem-repo" ubuntu
-sed -i '/cdrom\/apt-repo/d' "$WORK/ubuntu-sem-repo/autoinstall.yaml"
+sed -i '/\/opt\/apt-repo/d' "$WORK/ubuntu-sem-repo/preseed/late-command.sh"
 out="$(run_verify "$VERIFIER" ubuntu "$WORK/ubuntu-sem-repo")"
 if printf '%s\n' "$out" | grep -Eq "$SUSPECT"; then
   ok "ubuntu sem a fonte extra: reprova (correto)"

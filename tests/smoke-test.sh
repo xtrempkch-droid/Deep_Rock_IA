@@ -179,12 +179,14 @@ main() {
     case "$1" in
       --dry-run) DRY_RUN=1; shift ;;
       --strict)  STRICT=1; shift ;;
+      --yes)     shift ;;   # smoke-test é não interativo; aceito por consistência
+                            # (o build.sh repassa --yes a TODOS os filhos)
       --role)    [[ $# -ge 2 ]] || { log_error "--role exige valor"; exit 2; }; ROLE="$2"; shift 2 ;;
       --family)  [[ $# -ge 2 ]] || { log_error "--family exige valor"; exit 2; }; FAMILY="$2"; shift 2 ;;
       --profile) [[ $# -ge 2 ]] || { log_error "--profile exige valor"; exit 2; }
                  case "$2" in xeon) ROLE="inference" ;; ryzen) ROLE="builder" ;; *) ROLE="$2" ;; esac
                  shift 2 ;;
-      -h|--help) echo "Uso: $0 [--dry-run] [--strict] [--role auto|inference|builder] [--family auto|<id>]"; exit 0 ;;
+      -h|--help) echo "Uso: $0 [--dry-run] [--strict] [--yes] [--role auto|inference|builder] [--family auto|<id>]"; exit 0 ;;
       *) log_error "Argumento desconhecido: $1"; exit 2 ;;
     esac
   done

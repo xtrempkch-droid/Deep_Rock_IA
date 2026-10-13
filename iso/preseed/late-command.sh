@@ -157,6 +157,34 @@ else
 fi
 
 ## ---------------------------------------------------------------------------
+## 2-d. Repositório apt local -> /opt/apt-repo do alvo
+## ---------------------------------------------------------------------------
+## POR QUE CARREGAR PARA DENTRO DO ALVO: o apt do INSTALADOR roda dentro de um
+## chroot no alvo, onde `/cdrom` NÃO está montado — então declarar
+## `file:///cdrom/apt-repo` como fonte de instalação faz o `apt-get update`
+## falhar com "does not have a Release file" (visto ao bootar a ISO de verdade;
+## a suposição do JOURNAL § 5.2 caiu). Copiando o repositório para o disco do
+## alvo e apontando-o lá, o PRIMEIRO BOOT (e instalações futuras) usam o
+## repositório SEM rede, direto do disco — que é o que a ISO air-gapped precisa.
+APT_REPO_SRC="${SRC}/apt-repo"
+APT_REPO_DST="/opt/apt-repo"
+if [ -d "${APT_REPO_SRC}" ]; then
+    log "carregando o repositório apt local para ${APT_REPO_DST}"
+    mkdir -p "/target${APT_REPO_DST}"
+    if cp -a "${APT_REPO_SRC}/." "/target${APT_REPO_DST}/"; then
+        mkdir -p /target/etc/apt/sources.list.d
+        printf 'deb [trusted=yes] file://%s ./\n' "${APT_REPO_DST}" \
+            > /target/etc/apt/sources.list.d/ai-cpu-os-local.list
+        printf 'APT_REPO=%s\n' "${APT_REPO_DST}" >> "${DST}/.iso-config"
+        log "repositório local em ${APT_REPO_DST} (fonte gravada no alvo)"
+    else
+        log "AVISO: falha ao copiar o repositório apt local; resta a rede"
+    fi
+else
+    log "sem repositório apt local nesta ISO (--iso-repo none)"
+fi
+
+## ---------------------------------------------------------------------------
 ## 3. Serviço de primeiro boot
 ## ---------------------------------------------------------------------------
 log "instalando o serviço de primeiro boot"
@@ -290,3 +318,9 @@ Comandos úteis:
 INFO
 
 log "pós-instalação concluído; o ai-cpu-os será aplicado no primeiro boot"
+
+## O `log()` acima vai para o stdout capturado pelo instalador (log do Subiquity),
+## NÃO para o console. O iso/test-vm.sh julga pelo CONSOLE SERIAL, então
+## repetimos o marcador em /dev/console (que é o ttyS0 quando a ISO é gerada
+## com --serial-console). Sem isto o teste headless ficava mudo na instalação.
+printf '[ai-cpu-os/iso-late] pós-instalação concluído\n' > /dev/console 2>/dev/null || true
