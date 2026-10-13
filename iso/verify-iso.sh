@@ -382,10 +382,27 @@ fi
 section "Repositório apt local (/apt-repo)"
 
 REPO_GZ="$(fetch "/apt-repo/Packages.gz" 2>/dev/null || true)"
-AI_FOR_REPO="$(fetch "/autoinstall.yaml" 2>/dev/null || true)"
 
-# A fonte extra aparece no autoinstall já SUBSTITUÍDO (o marcador vira o bloco).
-if [[ -n "$AI_FOR_REPO" ]] && grep -q 'cdrom/apt-repo' "$AI_FOR_REPO"; then
+# ⚠️ A CONFIGURAÇÃO É DISTRO-DEPENDENTE — e conferir só o autoinstall dava
+# FALSO POSITIVO no caminho Debian (run #10 do CI: "2 problema(s)", sendo um
+# deles "o repositório está na mídia mas o autoinstall NÃO o usa"). O repositório
+# estava na mídia e a preseed O USAVA; simplesmente não existe autoinstall numa
+# ISO Debian. Sintoma confuso: o build gerava a ISO e o verificador a reprovava.
+#   - Ubuntu: fonte extra na seção `sources` do curtin, dentro do autoinstall;
+#   - Debian: `d-i apt-setup/local0/repository` na preseed.
+# O modo de falha que a checagem existe para pegar (config sem a fonte extra,
+# deixando a instalação dependente de rede) continua coberto nos dois caminhos.
+if [[ "$DISTRO" == "debian" ]]; then
+  CFG_FOR_REPO="$(fetch "/preseed/ai-cpu-os.cfg" 2>/dev/null || true)"
+  CFG_REPO_MARKER='apt-setup/local0/repository'
+  CFG_NAME="a preseed"
+else
+  CFG_FOR_REPO="$(fetch "/autoinstall.yaml" 2>/dev/null || true)"
+  CFG_REPO_MARKER='cdrom/apt-repo'
+  CFG_NAME="o autoinstall"
+fi
+
+if [[ -n "$CFG_FOR_REPO" ]] && grep -q "$CFG_REPO_MARKER" "$CFG_FOR_REPO"; then
   AI_WANTS_REPO=1
 else
   AI_WANTS_REPO=0
@@ -393,7 +410,7 @@ fi
 
 if [[ -z "$REPO_GZ" ]]; then
   if [[ $AI_WANTS_REPO -eq 1 ]]; then
-    fail "o autoinstall aponta para um repositório local, mas /apt-repo NÃO está na mídia (a instalação vai falhar)"
+    fail "${CFG_NAME} aponta para um repositório local, mas /apt-repo NÃO está na mídia (a instalação vai falhar)"
   else
     skip "nenhum repositório apt na mídia (--iso-repo none) — instalar pacotes exigirá rede"
   fi
@@ -454,9 +471,9 @@ else
     fi
 
     if [[ $AI_WANTS_REPO -eq 1 ]]; then
-      pass "o autoinstall usa o repositório local (instalação pode ser offline)"
+      pass "${CFG_NAME} usa o repositório local (instalação pode ser offline)"
     else
-      fail "o repositório está na mídia mas o autoinstall NÃO o usa (500 MB inúteis e instalação dependente de rede)"
+      fail "o repositório está na mídia mas ${CFG_NAME} NÃO o usa (centenas de MB inúteis e instalação dependente de rede)"
     fi
   fi
 fi

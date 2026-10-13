@@ -105,6 +105,16 @@ jobs:
           set -euo pipefail
           make iso-repo-test
 
+      # O verificador da ISO tem de ser DISTRO-AWARE. Ele so olhava o
+      # autoinstall para decidir se a fonte extra estava em uso, e numa ISO
+      # Debian (que usa preseed) isso reprovava uma ISO CORRETA — foi o
+      # "2 problema(s)" do run #10.
+      # (o `:` no nome tem de vir entre aspas: solto, quebra o YAML)
+      - name: "ISO (verificador distro-aware: autoinstall x preseed)"
+        run: |
+          set -euo pipefail
+          make iso-verify-test
+
       # Prova que os guardas do próprio job REALMENTE derrubam o job, plantando
       # cada violacao numa COPIA temporaria. Existe porque SEIS guardas estavam
       # na forma `! grep`, que o `set -e` ignora quando o comando e invertido
@@ -212,6 +222,7 @@ jobs:
             tests/test-iso-selection.sh
             tests/test-iso-repo-filter.sh
             tests/test-ci-guards.sh
+            tests/test-verify-iso-repo-distro.sh
             tests/fixtures/SHA256SUMS.ubuntu-24.04
             tests/fixtures/SHA256SUMS.debian-13
             tests/fixtures/apt-cache-policy.txt
@@ -387,6 +398,13 @@ jobs:
           grep -q 'ci-guards-test' Makefile
           grep -q 'validate:.*ci-guards-test' Makefile
           grep -q 'make ci-guards-test' .github/workflows/validate.yml
+          grep -q 'iso-verify-test' Makefile
+          grep -q 'validate:.*iso-verify-test' Makefile
+          grep -q 'make iso-verify-test' .github/workflows/validate.yml
+          # O verificador TEM de escolher pela distro: a preseed tem o seu
+          # proprio marcador (apt-setup/local0) e nao pode ser cobrada pelo
+          # autoinstall (foi o falso positivo do run #10).
+          grep -q 'apt-setup/local0/repository' iso/verify-iso.sh
           if grep -q 'xargs -r -n 25' iso/build-iso.sh; then
             echo "::error file=iso/build-iso.sh::lote sem fallback: um nome ruim perde 25 pacotes"
             exit 1

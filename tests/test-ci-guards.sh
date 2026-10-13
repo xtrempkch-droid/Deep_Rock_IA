@@ -149,13 +149,17 @@ planta "tirar iso-repo-test do validate" Makefile \
 planta "tirar iso-select-test do validate" Makefile \
   sed_ 's|^validate: .*$|validate: lint docs families-test iso-repo-test ci-guards-test iso-dry-run-both|' Makefile
 planta "tirar ci-guards-test do validate" Makefile \
-  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-dry-run-both|' Makefile
+  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test iso-dry-run-both|' Makefile
+planta "tirar iso-verify-test do validate" Makefile \
+  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test ci-guards-test iso-dry-run-both|' Makefile
 planta "renomear packages_with_candidate()" iso/build-iso.sh \
   sed_ 's|^packages_with_candidate()|packages_with_candidate_velho()|' iso/build-iso.sh
 planta "renomear normalize_iso_name()" iso/build-iso.sh \
   sed_ 's|^normalize_iso_name()|normalize_iso_name_velho()|' iso/build-iso.sh
 planta "tirar o marcador '*' da fixture do SHA256SUMS" tests/fixtures/SHA256SUMS.ubuntu-24.04 \
   sed_ 's|\*ubuntu-24.04.5|ubuntu-24.04.5|' tests/fixtures/SHA256SUMS.ubuntu-24.04
+planta "o verificador esquecer a preseed (volta o falso positivo)" iso/verify-iso.sh \
+  sed_ 's|apt-setup/local0/repository|apt-setup/REMOVIDO|' iso/verify-iso.sh
 
 echo
 if [[ $FAIL -eq 0 ]]; then

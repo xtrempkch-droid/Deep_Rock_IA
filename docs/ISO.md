@@ -342,6 +342,22 @@ ruim, sem perder os vizinhos), com os nomes que falharam **reportados** no log.
 Quem guarda isso é `make iso-repo-test`, que reproduz o caso inteiro **offline**
 (com `apt-cache`/`apt-get` substituídos por stubs) — inclusive o modo lote.
 
+#### O verificador é distro-aware
+
+O `iso/verify-iso.sh` confere a **coerência** entre a mídia e a configuração de
+instalação. Essa configuração **muda de lugar conforme a distro**:
+
+| Base | Arquivo de config | Onde fica a fonte extra |
+|------|-------------------|--------------------------|
+| Ubuntu (autoinstall) | `/autoinstall.yaml` | seção `sources` do curtin |
+| Debian (preseed) | `/preseed/ai-cpu-os.cfg` | `d-i apt-setup/local0/repository` |
+
+Conferir só o autoinstall reprovava uma ISO **Debian correta** (o repo estava na
+mídia e a preseed o usava) — foi o `2 problema(s)` do run #10. Hoje a checagem
+escolhe o arquivo e o marcador pela `--distro`, e o modo de falha que ela existe
+para pegar (config **sem** a fonte extra → instalação dependente de rede)
+continua coberto nos dois caminhos. Quem guarda é `make iso-verify-test`.
+
 ### 4.4 Testar numa VM **antes** de qualquer máquina real
 
 ```bash

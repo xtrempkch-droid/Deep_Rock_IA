@@ -288,9 +288,43 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 - **Solução:** já corrigida em `iso/build-iso.sh`:
   `packages_with_candidate()` descarta nomes sem candidato **antes** de baixar,
   e o lote que falha mesmo assim é refeito **um a um** (o `apt-get` não derruba
-  o vizinho), com os nomes que falharam **reportados** no log.
+  o vizinho), com os nomes que falharam **reportados** no log. Se ainda faltar
+  algo, o build **refaz só os ausentes** uma vez (`Acquire::Retries`), porque
+  uma falha transitória de rede é indistinguível de "pacote não existe" no log.
 - **Teste que guarda isso:** `make iso-repo-test` — reproduz o caso inteiro
   offline, com `apt-get`/`apt-cache` substituídos por stubs.
+
+### A ISO Debian é REPROVADA pelo verificador, mas está correta
+
+- **Sintoma:** no caminho Debian com `--iso-repo`, o build **gera** a ISO e o
+  `verify-iso.sh` a reprova com **2 problemas**, um deles dizendo
+  *"o repositório está na mídia mas o autoinstall NÃO o usa"*.
+- **Causa:** **falso positivo do verificador.** A checagem de coerência do
+  repositório procurava o marcador `cdrom/apt-repo` dentro do
+  **`/autoinstall.yaml`** — que **não existe** numa ISO Debian (o Debian usa
+  preseed). Resultado: "a config não usa o repo" (mentira) e, por
+  consequência, a mensagem de repositório inútil. O repo estava na mídia e a
+  preseed **o usava** — via `d-i apt-setup/local0/repository`.
+- **Solução:** a checagem passou a ser **distro-aware**: Ubuntu confere a seção
+  `sources` do curtin no autoinstall; Debian confere
+  `apt-setup/local0/repository` na preseed. O modo de falha que a checagem
+  existe para pegar (config sem a fonte extra → instalação dependente de rede)
+  continua coberto nos dois caminhos.
+- **Lição:** o verificador tinha um viés de distro. Ao adicionar uma checagem,
+  pergunte **em qual base** ela faz sentido — e cubra a outra.
+
+### `openssl não encontrado e --password-hash não foi informado`
+
+- **Sintoma:** o build aborta logo na seção *Dependências*, num ambiente limpo.
+- **Causa:** o build gera o hash da senha aleatória com `openssl passwd -6`, mas
+  o `openssl` **não** estava na lista de ferramentas que o workflow `iso`
+  instalava — ele existia no runner **por acaso**. Numa imagem limpa (ex.: um
+  container `ubuntu:24.04`) ele não existe.
+- **Solução:** `openssl`, `gzip` e `ca-certificates` passaram a ser instalados
+  explicitamente pelo workflow. Regra geral: **dependência implícita do runner é
+  dependência que desaparece** quando o runner muda.
+- **Alternativa:** passe `--password-hash '$6$…'` (gerado com
+  `mkpasswd -m sha-512`).
 
 ---
 

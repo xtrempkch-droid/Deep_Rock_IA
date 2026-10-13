@@ -1028,14 +1028,17 @@ download_repo_packages() {
   local total=${#arr[@]} i=0 falhas=0
   local -a falhados=()
 
+  # `Acquire::Retries=3`: o apt tenta de novo em erro transitório de rede.
+  # Sem isto, um 5xx momentâneo do mirror entra como "pacote ausente" — que é
+  # indistinguível de "pacote não existe" no log e já custou uma sessão.
   # Lotes de 25 (medido: 5× mais rápido que 1-a-1) com fallback um-a-um no lote
   # que falhar, para que a perda fique restrita ao nome realmente ruim.
   while (( i < total )); do
     local lote=( "${arr[@]:i:25}" )
-    if ! ( cd "$dir/pool" && apt-get download "${lote[@]}" >/dev/null 2>&1 ); then
+    if ! ( cd "$dir/pool" && apt-get download -o Acquire::Retries=3 "${lote[@]}" >/dev/null 2>&1 ); then
       local p
       for p in "${lote[@]}"; do
-        ( cd "$dir/pool" && apt-get download "$p" >/dev/null 2>&1 ) \
+        ( cd "$dir/pool" && apt-get download -o Acquire::Retries=3 "$p" >/dev/null 2>&1 ) \
           || { falhas=$(( falhas + 1 )); falhados+=( "$p" ); }
       done
     fi
@@ -1055,26 +1058,38 @@ download_repo_packages() {
   return 0
 }
 
+# Lista (numa linha) os pacotes PEDIDOS que NÃO estão no diretório. Vazio =
+# completo. Existe para o retry: refazer só o que faltou custa segundos, em vez
+# de repetir 330 MB de download.
+# Aceita as duas formas: diretório com índice (grep no Packages) ou diretório
+# CRU de .deb (find) — é o que permite ao --dry-run validar um --iso-repo DIR.
+repo_missing_packages() {
+  local dir="$1" list="$2" p out=""
+  for p in $list; do
+    if [[ -f "${dir}/Packages" ]] && grep -q "^Package: ${p}$" "${dir}/Packages"; then
+      continue
+    elif [[ -n "$(find "$dir" -name "${p}_*.deb" -type f -print -quit 2>/dev/null)" ]]; then
+      continue
+    fi
+    out+="${p} "
+  done
+  printf '%s' "$out"
+}
+
 # Confere que cada pacote PEDIDO existe no repositório. O fecho pode ter falhas
 # toleradas; os pedidos, não — sem eles a ISO não cumpre a promessa offline.
 check_repo_completeness() {
-  local dir="$1" list="$2" p missing=0
-  for p in $list; do
-    # Aceita as duas formas: um diretório com índice (grep no Packages) ou um
-    # diretório CRU de .deb (find) — é o que permite ao --dry-run validar um
-    # --iso-repo DIR sem ter gerado nada.
-    local ok=0
-    if [[ -f "${dir}/Packages" ]] && grep -q "^Package: ${p}$" "${dir}/Packages"; then
-      ok=1
-    elif [[ -n "$(find "$dir" -name "${p}_*.deb" -type f -print -quit 2>/dev/null)" ]]; then
-      ok=1
-    fi
-    if [[ $ok -eq 0 ]]; then
+  local dir="$1" list="$2"
+  local missing
+  missing="$(repo_missing_packages "$dir" "$list")"
+  if [[ -n "$missing" ]]; then
+    local p
+    for p in $missing; do
       log_error "Pacote pedido está AUSENTE no repositório: ${p}"
-      missing=1
-    fi
-  done
-  [[ "$missing" -eq 0 ]] || { log_error "Repositório incompleto — o alvo precisaria de rede."; return 1; }
+    done
+    log_error "Repositório incompleto — o alvo precisaria de rede."
+    return 1
+  fi
   return 0
 }
 
@@ -1191,7 +1206,22 @@ acquire_repo() {
   else
     download_repo_packages "$dest" "$pkgs" || exit 1
     build_repo_index "$dest" || exit 1
-    check_repo_completeness "$dest" "$pkgs" || exit 1
+
+    if ! check_repo_completeness "$dest" "$pkgs"; then
+      # SEGUNDA TENTATIVA, só do que faltou. Por que existe: uma falha
+      # transitória de rede é indistinguível de "pacote não existe" no log, e
+      # no CI isso derrubou o build com "Pacote pedido está AUSENTE: git" — um
+      # pacote que simplesmente existe. Refazer apenas os ausentes custa
+      # segundos e converte a falha intermitente em sucesso.
+      local faltando
+      faltando="$(repo_missing_packages "$dest" "$pkgs")"
+      log_warn "Refazendo o download de: ${faltando} (segunda tentativa)"
+      # shellcheck disable=SC2086
+      ( cd "${dest}/pool" && apt-get download -o Acquire::Retries=5 ${faltando} ) \
+        >/dev/null 2>&1 || true
+      build_repo_index "$dest" || exit 1
+      check_repo_completeness "$dest" "$pkgs" || exit 1
+    fi
   fi
 
   if (( REPO_SIZE_MB > ISO_REPO_BUDGET_MB )); then

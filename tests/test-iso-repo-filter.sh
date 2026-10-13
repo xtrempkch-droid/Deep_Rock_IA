@@ -85,15 +85,29 @@ cat > "$WORK/bin/apt-get" <<'STUB'
 #!/bin/sh
 # Stub de `apt-get download`: reproduz o comportamento MEDIDO do apt real —
 # UM nome ruim (sem candidato) ABORTA O LOTE INTEIRO, sem baixar nem os válidos.
+#
+# Ignora as opções (`-o Acquire::Retries=N`) que o script passa de propósito:
+# o stub só se interessa pelos NOMES de pacote.
 [ "${1:-}" = "download" ] || exit 0
 shift
-for p in "$@"; do
+pkgs=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) shift 2 ;;
+    -*) shift ;;
+    *)  pkgs="$pkgs $1"; shift ;;
+  esac
+done
+[ -n "$pkgs" ] || exit 0
+# shellcheck disable=SC2086
+for p in $pkgs; do
   if [ -n "${STUB_ISCA:-}" ] && [ "$p" = "$STUB_ISCA" ]; then
     echo "E: Não é possível encontrar o pacote ${STUB_ISCA}" >&2
     exit 100
   fi
 done
-for p in "$@"; do : > "${p}_1.0_amd64.deb"; done
+# shellcheck disable=SC2086
+for p in $pkgs; do : > "${p}_1.0_amd64.deb"; done
 exit 0
 STUB
 chmod +x "$WORK/bin/apt-get"
@@ -217,6 +231,23 @@ jq
 libopenblas-dev" "$(printf '%s\n' "$got" | sort)"
 assert "descarta o virtual (Candidate: (none))" "" "$(printf '%s\n' "$got" | grep -x 'mail-transport-agent' || true)"
 assert "entrada vazia -> saída vazia" "" "$(packages_with_candidate "")"
+
+# ---------------------------------------------------------------------------
+# 5) repo_missing_packages: a base do retry
+# ---------------------------------------------------------------------------
+# Existia o risco de uma falha TRANSITÓRIA de rede virar "pacote ausente" no
+# log, indistinguível de "não existe" — foi assim que o CI caiu com
+# "Pacote pedido está AUSENTE: git", um pacote que obviamente existe. O retry
+# refaz SÓ o que faltou, então precisa saber exatamente o que falta.
+echo
+echo "5) repo_missing_packages (a base do retry)"
+mkdir -p "$WORK/c5/pool"
+: > "$WORK/c5/pool/git_1.0_amd64.deb"
+: > "$WORK/c5/pool/jq_1.0_amd64.deb"
+assert "detecta só os ausentes" "gnupg libopenblas-dev " \
+  "$(repo_missing_packages "$WORK/c5" "git jq gnupg libopenblas-dev")"
+assert "diretório completo -> vazio" "" "$(repo_missing_packages "$WORK/c5" "git jq")"
+assert "diretório vazio -> tudo falta" "git jq " "$(repo_missing_packages "$WORK/vazio" "git jq")"
 
 echo
 if [[ $FAIL -eq 0 ]]; then

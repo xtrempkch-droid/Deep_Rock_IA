@@ -198,6 +198,7 @@ ai-cpu-os/
     ├── families-matrix.txt # ~60 modelos reais → família esperada
     ├── test-iso-selection.sh # Escolha da ISO oficial no SHA256SUMS (sem rede)
     ├── test-iso-repo-filter.sh # Repo apt: filtro + fallback (stubs; sem rede)
+    ├── test-verify-iso-repo-distro.sh # Verificador distro-aware (autoinstall × preseed)
     ├── test-ci-guards.sh   # Prova que os guardas do CI REPROVAM (cópia temp.)
     └── fixtures/           # SHA256SUMS REAIS + saída REAL do apt-cache policy
 ```
@@ -220,6 +221,7 @@ ai-cpu-os/
 | **Testar o casamento CPU → família sem ter o hardware** | **`tests/test-families.sh`**, **`tests/families-matrix.txt`** |
 | **Testar a escolha da ISO oficial (sem rede)** | **`tests/test-iso-selection.sh`**, **`tests/fixtures/`** |
 | **Testar o repo apt local (filtro + fallback, sem rede)** | **`tests/test-iso-repo-filter.sh`** |
+| **Testar o verificador da ISO sem xorriso (distro-aware)** | **`tests/test-verify-iso-repo-distro.sh`** |
 | **Saber se um guarda do CI reprova de verdade** | **`tests/test-ci-guards.sh`** |
 | **Usar uma GPU (opcional, explícito)** | **`docs/GPU.md`**, `bash llama-build.sh --gpu-check` |
 | **Aprender o projeto do zero (passo a passo explicado)** | **`docs/TUTORIAL.md`**        |
@@ -367,25 +369,23 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-12
-- **O que mudou:** **A ISO Ubuntu não era gerada — corrigido (sessão #19).**
-  O build morria com **`exit code 22`** do `curl` e mais nada: o `SHA256SUMS`
-  do Ubuntu marca o modo binário com **`*`** (`*ubuntu-24.04.5-…iso`, como o
-  `md5sum -b`) e o do Debian não — o `*` ia para dentro da URL e dava **404**.
-  Segundo bug no mesmo lugar: o arquivo lista **todas** as point releases, e
-  pegar a **primeira** entrada baixaria a versão mais **velha**. Corrigido com
-  `pick_iso_entry`/`pick_iso_entry_by_name`/`normalize_iso_name` (padrões
-  ancorados + maior versão via `sort -V`) e uma checagem que **falha com
-  mensagem clara** em vez de deixar o `curl` devolver 404. Guarda nova:
-  **`make iso-select-test`** (`tests/test-iso-selection.sh` + `tests/fixtures/`
-  com `SHA256SUMS` **reais**), ligada ao `make validate` e ao CI. Também:
-  passo de **diagnóstico em falha** no `iso.yml` que converte os erros do log
-  em **anotações** (que são públicas, ao contrário dos logs de job) — foi a
-  falta disso que tornou o `exit code 22` indecifrável; e o passo de relatório
-  não derruba mais o job quando o `.sha256` não existe.
-  **Pendente:** o caminho **Debian + `air_gapped=true`** gerou a ISO (2046 MB)
-  mas falhou na verificação final — **causa ainda não identificada** (o log do
-  run #6 não é legível de fora). Reexecutar agora diz o motivo, por causa do
-  passo de diagnóstico.
+- **O que mudou:** **Os runs #9 e #10 da ISO — os dois erros finais (sessão #20).**
+  O **#9 (ubuntu)** falhou com `Pacote pedido está AUSENTE: git` — **só `git`**: o
+  filtro de candidatos resolveu `gnupg` e `jq`, e sobrou uma falha
+  **intermitente de rede** (pega no meio do download, indistinguível de "pacote
+  não existe" no log). Corrigido com `Acquire::Retries` e uma **segunda
+  tentativa só dos ausentes** (`repo_missing_packages`), que custa segundos em
+  vez de repetir 330 MB. O **#10 (debian)** era **falso positivo do próprio
+  verificador**: o `verify-iso.sh` procurava o repositório em uso **só no
+  `/autoinstall.yaml`** — que não existe numa ISO Debian (o Debian usa preseed)
+  — e reprovava uma ISO **correta** ("2 problema(s)"). Agora a checagem é
+  **distro-aware** (autoinstall × preseed), com `make iso-verify-test` provando
+  os dois caminhos e **reprovando o verificador antigo**. Também: dependências
+  **implícitas do runner** (`openssl`, `gzip`, `ca-certificates`) passaram a ser
+  instaladas explicitamente — descobertas reproduzindo o build num container
+  `ubuntu:24.04` limpo; e o passo de diagnóstico do `iso.yml` passou a capturar
+  `[FAIL]`/`[erro]` do verificador (antes só via `[ERROR]`, então a anotação
+  entregava o sintoma sem a causa).
 - **Data anterior:** 2026-10-12 — **A ISO Ubuntu + `air_gapped=true` não era gerada (sessão #19, 2ª parte).**
   O passo de diagnóstico que criei na 1ª parte funcionou e entregou a causa:
   `Pacote pedido está AUSENTE no repositório: gnupg/jq/git`. Causa **medida**:

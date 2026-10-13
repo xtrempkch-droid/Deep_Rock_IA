@@ -83,7 +83,18 @@ Dispara em **todo push para `main` e em todo Pull Request**.
    `SHA256SUMS` do Ubuntu marca o modo binário com `*` e lista **todas** as
    point releases — nenhuma das duas coisas aparece numa fixture inventada de
    duas linhas.
-8. `make iso-dry-run-both` — dry-run dos DOIS caminhos (ubuntu e debian) **sem
+8. `make iso-repo-test` — download do repositório apt local, com `apt-cache` e
+   `apt-get` **substituídos por stubs**. Existe porque `apt-get download a b c`
+   aborta o **lote inteiro** quando um nome não tem candidato, e o `|| true`
+   engolia até 25 pacotes por lote — falha **dependente da release do host**,
+   logo impossível de pegar com um dry-run.
+9. `make iso-verify-test` — o `verify-iso.sh` tem de ser **distro-aware**.
+   Ele procurava o repositório em uso só no `/autoinstall.yaml`, e numa ISO
+   **Debian** (que usa preseed) isso reprovava uma ISO **correta** (run #10).
+10. `make ci-guards-test` — planta as violações numa cópia temporária e exige
+    que o job **falhe**. Existe porque seis guardas estavam na forma `! cmd`,
+    que o `set -e` ignora — nunca derrubaram nada.
+11. `make iso-dry-run-both` — dry-run dos DOIS caminhos (ubuntu e debian) **sem
    flags extras**, exatamente como o `make validate` local.
 
 ### Job `dry-run` (matriz: `xeon` e `ryzen`)
@@ -111,6 +122,7 @@ reais:
 | Guarda negativo **nunca** na forma `! cmd` | O `set -e` **ignora** o exit status de um comando invertido com `!`: o guarda detecta a violação e segue verde. **Seis** guardas deste arquivo estavam assim e nunca derrubaram nada |
 | `make ci-guards-test` existe, está no `validate` e o CI o chama | Fecha o buraco acima: planta **cada** violação numa cópia temporária e exige que o job falhe. Guarda que nunca reprovou não é guarda |
 | `make iso-repo-test` existe, está no `validate` e o CI o chama | O bug do repo apt era **dependente do ambiente** (só aparece com uma "isca" no fecho, que varia com a release do host) — por isso precisa de teste com stub, não de um dry-run |
+| `make iso-verify-test` existe, está no `validate` e o CI o chama | O `verify-iso.sh` tinha **viés de distro**: procurava o repo em uso só no autoinstall e reprovava uma ISO Debian correta (run #10). O guarda exige o marcador da preseed (`apt-setup/local0/repository`) no verificador |
 Este é o job que protege as regras do `AGENTS.md` de erosão:
 
 - Verifica que todos os **28 arquivos obrigatórios** existem.

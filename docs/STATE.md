@@ -1,10 +1,9 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-12 (a ISO **Ubuntu** não era gerada: era o `*`
-> do SHA256SUMS e, com `--iso-repo`, o `apt-get download` abortando lotes; ambos
-> corrigidos com testes de regressão. Também: 6 guardas do CI eram decorativos.
-> A ISO air-gapped segue pendente de BOOT em VM)
+> **Última atualização:** 2026-10-12 (runs #9 e #10 da ISO: falha intermitente de
+> rede no repo apt e **falso positivo do verificador no caminho Debian** — ambos
+> corrigidos com teste offline. A ISO air-gapped segue pendente de BOOT em VM)
 
 ---
 

@@ -1367,6 +1367,69 @@ o que dava a impressão de que o negativo funcionava.
 - **Commits:** `7a3d60d` (parte 1: a escolha da ISO) · `12145db` (parte 2: o repo apt + os guardas decorativos).
 
 ---
+### Sessão #20 — 2026-10-12 · 🏁 Os dois últimos erros da ISO (runs #9 e #10)
+
+- **Objetivo:** o dono reportou "erro iso #9 e iso #10". O passo de diagnóstico
+  criado na sessão #19 já existia, então a causa veio direto nas **anotações**.
+- **Feito:**
+  - **#9 (ubuntu):** `Pacote pedido está AUSENTE no repositório: git` — e **só
+    `git`**. O filtro de candidatos resolveu `gnupg`/`jq` (o mesmo bug da sessão
+    #19), então o que sobrou foi **outra** coisa: falha **intermitente de rede**
+    no meio do download, que é **indistinguível de "pacote não existe"** no log.
+    Corrigido com `Acquire::Retries` e uma **segunda tentativa só dos ausentes**
+    (`repo_missing_packages` + `check_repo_completeness` reescrita sobre ela):
+    custa **segundos** em vez de repetir 330 MB.
+  - **#10 (debian):** `verify-iso.sh` reprovou a ISO com **2 problema(s)**, um
+    deles *"o repositório está na mídia mas o autoinstall NÃO o usa"*. Era
+    **FALSO POSITIVO**: numa ISO **Debian** não existe `/autoinstall.yaml` (o
+    Debian usa **preseed**), e o verificador só olhava o autoinstall para decidir
+    se a fonte extra estava em uso. O repo **estava** na mídia e a preseed **o
+    usava** (`d-i apt-setup/local0/repository`). A checagem ficou
+    **distro-aware**.
+  - **Dependências implícitas do runner:** ao tentar reproduzir num container
+    `ubuntu:24.04` **limpo**, o build abortou em `openssl não encontrado` — o
+    workflow não instalava `openssl`, que existia no runner **por acaso**
+    (descobertos também `gzip` e `ca-certificates`). Passaram a ser explícitos.
+  - **Diagnóstico mais afiado:** o passo do `iso.yml` só capturava `[ERROR]`.
+    O `verify-iso.sh` reprova com `[FAIL]` — então a anotação que chegou era o
+    **sintoma** ("não passou na verificação"), sem dizer **o quê**. Agora captura
+    `[FAIL]`/`[erro]` e mostra os `[WARN]` (que dizem **qual** pacote falhou).
+  - **Teste novo:** `make iso-verify-test`
+    (`tests/test-verify-iso-repo-distro.sh`, 6 asserções): monta árvores mínimas
+    das **duas** distros e roda o verificador de verdade — sem xorriso, root,
+    rede ou Docker. Inclui o **negativo** (config sem a fonte extra → reprova) e
+    a **prova de regressão**: pega o verificador do `git` e exige que ele
+    **reprove a ISO Debian correta** (isto é, que o bug exista na versão antiga).
+- **Decisões:**
+  - **Reproduzir para achar a causa, não deduzir.** O container `ubuntu:24.04`
+    limpo entregou o `openssl` em segundos — e nada no repositório indicava isso.
+  - **No Docker, só o necessário.** O container parou antes de baixar a ISO de
+    3 GB (a máquina do dono é lenta e o disco estava em 79%): o que importava era
+    o **repo apt** e a **distro**, que eu consigo exercitar sem download.
+  - **Verificador com viés de distro é bug de projeto.** Ao escrever uma checagem
+    que compara **mídia × configuração**, pergunte **em qual base** ela faz
+    sentido — e cubra a outra. Foi o erro do `verify-iso.sh`.
+  - **Falha de rede não pode virar "não existe".** Foi o que transformou um 5xx
+    momentâneo em "Pacote pedido está AUSENTE: git". `Acquire::Retries` + retry
+    dirigido pelos ausentes.
+- **Problemas:**
+  - O `git` foi o **único** ausente: levou tempo até aceitar que não era o bug do
+    lote (já corrigido) e sim uma falha de rede.
+  - Reproduzir o build completo em container exige ~6 GB e dezenas de minutos — e
+    a máquina do dono não aguenta. **Parei no que dava para provar localmente.**
+- **Verificado:** `make validate` verde com **32 scripts** — `families 60/60`,
+  `iso-selection 13/13`, `iso-repo-filter 16/16`, `iso-verify-test 6/6`,
+  `ci-guards 16/16`; os 4 passos do job `project-rules` extraídos do workflow e
+  rodados com `bash -e` (como o CI roda) passam.
+- **NÃO feito / não testado:**
+  - 🔴 **A ISO continua nunca bootada.** Nada aqui prova a instalação: prova a
+    escolha da ISO, o download do repo, o verificador e os guardas.
+  - O `iso.yml` alterado **não foi executado** — o próximo passo real é rodar o
+    workflow com `distro=ubuntu` **e** `distro=debian`, `air_gapped=true`.
+- **Commits:** `(a preencher após o push)`.
+
+---
+
 
 
 ## 5. 🧵 Threads abertas (o que ficou no ar)
@@ -1391,7 +1454,10 @@ o que dava a impressão de que o negativo funcionava.
 | 🔴 **CI estava vermelho no `main`** | ✅ **Corrigido na sessão #18** (default que abortava + comando duplicado CI×make). Os runs verdes anteriores eram de antes das mudanças. |
 | 🔴 **A ISO Ubuntu não era gerada** | ✅ **Corrigido na sessão #19.** `exit code 22` = 404 do `curl`: o `SHA256SUMS` do Ubuntu marca o modo binário com `*` e o `*` ia para a URL. Teste de regressão: `make iso-select-test`. **Reproduzir no workflow `iso` para confirmar.** |
 | 🔴 **Guarda do CI decorativo (`! cmd`)** | ✅ **Corrigido na sessão #19 (2ª parte).** Seis guardas negativos nunca derrubaram o job (`set -e` ignora comando invertido com `!`) — convertidos para `if cmd; then exit 1; fi`, com meta-guarda e `make ci-guards-test`. |
-| 🔴 **Debian + `air_gapped=true`: causa DESCONHECIDA** | O run #6 gerou a ISO (**2046 MB**) e falhou no fim (`exit 1`), provavelmente na verificação automática; o run #7 (mesmo commit, **sem** payload: 943 MB) passou. O log não é legível de fora — **agora existe o passo de diagnóstico**, então reexecutar **diz o motivo**. Reproduzir com `air_gapped=true` e ler as **anotações**. |
+| ✅ **Debian + `air_gapped=true`: causa era FALSO POSITIVO** | **Resolvido (sessão #20).** O `verify-iso.sh` procurava o repo em uso **só no `/autoinstall.yaml`**, que **não existe** numa ISO Debian (que usa preseed) → reprovava uma ISO **correta** ("2 problema(s)"). Agora é **distro-aware**; `make iso-verify-test` prova os dois caminhos e **reprova o verificador antigo**. |
+| ✅ **Ubuntu: `git` ausente no repo apt** | **Resolvido (sessão #20).** Sobrou **só `git`** (o filtro resolveu `gnupg`/`jq`): falha **intermitente de rede**, indistinguível de "pacote não existe" no log. `Acquire::Retries` + **segunda tentativa só dos ausentes**. |
+| ⚠️ **Dependências implícitas do runner** | **Resolvido (sessão #20):** `openssl` (hash da senha), `gzip` (índice do repo) e `ca-certificates` (curl HTTPS) passaram a ser instalados explicitamente. Descobertos num container `ubuntu:24.04` limpo — dependência que existe no runner "por acaso" some quando o runner muda. |
+| **Rodar o workflow `iso` de novo (ubuntu e debian, `air_gapped=true`)** | É o **próximo passo real**: as três causas conhecidas estão fechadas. Se falhar de novo, as **anotações** dirão o motivo (agora capturam `[FAIL]` do verificador também). |
 | **PRs abertos para decidir** | **PR #2** (debian `13-slim` no `docker/`): ✅ **mesclado** em `63eebff` (o `main` remoto já está à frente). **PR #3** (bump de actions): ✅ **resolvido no `main`** (caminho B) — o `@v7` do `upload-artifact` foi aplicado direto, com guarda no CI; **pode fechar o PR**. |
 | **Gerar a ISO (passo 3 do checklist)** | Não roda nesta máquina (sem `xorriso`). Caminho prático: workflow `iso` no GitHub com `air_gapped: true`. Ver `docs/ISO.md` § 9.1. |
 | **Bootar em VM (passo 4 — o critério de conclusão)** | Precisa de `qemu`+KVM. Gere a ISO com `--serial-console` ou o `test-vm.sh` não vê o 1º boot. Ver `docs/ISO.md` § 9.2. |

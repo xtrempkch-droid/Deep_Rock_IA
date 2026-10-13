@@ -87,8 +87,16 @@ jobs:
           # No caminho debian precisamos de:
           #   isolinux -> isohdpfx.bin (boot híbrido BIOS+EFI)
           #   mtools   -> patch do grub.cfg dentro da efi.img (boot UEFI)
+          #
+          # `openssl` NÃO é opcional: o build o usa para gerar o hash da senha
+          # aleatória, e aborta sem ele ("openssl não encontrado"). Ele existe
+          # no runner por acaso — descoberto ao reproduzir o build num container
+          # `ubuntu:24.04` limpo. `gzip` (índice do repo apt) e `ca-certificates`
+          # (curl HTTPS) entram pelo mesmo motivo: dependência implícita do
+          # runner é dependência que some quando o runner muda.
           sudo apt-get install -y --no-install-recommends \
-            xorriso isolinux mtools curl coreutils yamllint
+            xorriso isolinux mtools curl coreutils yamllint \
+            openssl gzip ca-certificates
           xorriso --version | head -1
 
       - name: Lint e autoteste dos templates da ISO
@@ -191,19 +199,29 @@ jobs:
         if: failure()
         run: |
           log=/tmp/iso-build.log
+          # Padrão do que é "causa" num log do build. `[FAIL]` e `[erro]` estão
+          # aqui porque o verify-iso.sh reprova com eles (run #10): na primeira
+          # versão o grep só via `[ERROR]`, e a anotação que chegou foi só
+          # "A ISO não passou na verificação" — o SINTOMA, sem dizer O QUÊ.
+          PAT='\[ERROR\]|\[FAIL\]|\[erro\]|FALHOU|Traceback|No such file'
           {
             echo "## Diagnóstico do build da ISO"
             echo
             if [ ! -f "$log" ]; then
               echo "O build nao chegou a criar \`${log}\` (falhou antes de executar)."
             else
-              echo "### Linhas de ERRO"
+              echo "### Linhas de ERRO/FAIL"
               echo '```'
-              if grep -E '\[ERROR\]|FALHOU|Traceback|No such file' "$log" >/tmp/iso-erros.txt 2>/dev/null; then
+              if grep -E "$PAT" "$log" >/tmp/iso-erros.txt 2>/dev/null; then
                 cat /tmp/iso-erros.txt
               else
                 echo "(nenhuma linha de erro reconhecida)"
               fi
+              echo '```'
+              echo
+              echo "### Avisos (WARN) — dizem QUAL pacote/item falhou"
+              echo '```'
+              grep -F '[WARN ]' "$log" | tail -25 || echo "(nenhum)"
               echo '```'
               echo
               echo "### Últimas 40 linhas do log"
@@ -213,13 +231,12 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # Anotação (pública, sem token). As últimas linhas de erro são o que
-          # se precisa para diagnosticar sem acesso ao log do job.
+          # Anotação (pública, sem token): é o que se lê de fora do repositório.
           if [ -f "$log" ]; then
             while IFS= read -r linha; do
               [ -n "$linha" ] || continue
               echo "::error::${linha}"
-            done < <(grep -E '\[ERROR\]|FALHOU|Traceback|No such file' "$log" 2>/dev/null | tail -10 || true)
+            done < <(grep -E "$PAT" "$log" 2>/dev/null | tail -12 || true)
           fi
           exit 0
 
