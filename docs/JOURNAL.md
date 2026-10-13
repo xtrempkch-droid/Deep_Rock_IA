@@ -1426,7 +1426,7 @@ o que dava a impressão de que o negativo funcionava.
     escolha da ISO, o download do repo, o verificador e os guardas.
   - O `iso.yml` alterado **não foi executado** — o próximo passo real é rodar o
     workflow com `distro=ubuntu` **e** `distro=debian`, `air_gapped=true`.
-- **Commits:** `(a preencher após o push)`.
+- **Commits:** `274ad96` — `fix(iso): run #9 (git ausente por falha de rede) + run #10 (falso positivo do verificador)`.
 
 ---
 
