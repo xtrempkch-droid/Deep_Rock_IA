@@ -84,10 +84,13 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | **`llama-build.sh --source <dir|tar.gz>`** — compila de um fonte **local**, sem rede e sem `git`; registra a origem em `AI-CPU-OS-BUILD.txt`. É o primeiro passo da ISO air-gapped | 2026-10-12 | 2026-10-12 |
 | **O modelo `.gguf` vai na mídia** (`--iso-model auto|<caminho>|none`) + `late-command` copiando para `/opt/models` + `AI_MODEL_FILE` no `firstboot` + **`--model-file`** no papel `inference` (instala modelo local sem rede) | 2026-10-12 | 2026-10-12 |
 | **Repositório apt local na mídia** (`--iso-repo auto|DIR|none`): fecho de dependências, índice gerado com `dpkg-deb`, embutido em `/apt-repo` e usado como fonte EXTRA (Ubuntu: seção `sources` do curtin; Debian: `apt-setup/local0/*`); build recusa release diferente | 2026-10-12 | 2026-10-12 |
+| 🎉 **A ISO é GERADA e BOOTADA (Ubuntu)** — primeira vez: build `exit 0`, `verify-iso.sh` **PASS=41/FAIL=0**, `test-vm.sh` **exit 0** (instalou sozinha; 1º boot aplicou com `status=ok`, família `intel-haswell`, llama.cpp compilado do tarball da mídia). **8 bugs reais** corrigidos (`xorriso`, GRUB `--id`, repo no chroot do curtin, marcadores, SIGPIPE, aspas do `-find`) | 2026-10-13 | 2026-10-13 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em
-> hardware físico é o principal item de "Em Progresso".
+> hardware físico é o principal item de "Em Progresso". A **exceção** é a linha
+> acima (ISO), que foi **executada em VM**. A validação em hardware físico é o
+> principal item de "Em Progresso".
 
 ---
 
@@ -100,26 +103,30 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | Medição de baseline vs. pós-tuning com `llama-bench`        | 2026-10-07 | Depende dos dois itens acima para preencher `docs/STATE.md` |
 | Validar a Release `v0.2.0` (binários) e a imagem do GHCR no hardware alvo | 2026-10-07 | Primeiro uso real dos artefatos do CI |
 | Executar o protocolo `docs/VALIDATION.md` (blocos A–L) | 2026-10-07 | Roteiro preenchível pronto; **resultados pendentes** |
-| **🎯 Construir e bootar a ISO de instalação numa VM** (Bloco M) | 2026-10-07 | Entregável final; maior risco não validado do projeto |
-| **ISO em base Ubuntu Server** (`--distro ubuntu` + autoinstall/Subiquity) | 2026-10-12 | Implementada e validada no autoteste de templates; **nunca executada** contra uma ISO real |
+| ~~🎯 Construir e bootar a ISO de instalação numa VM~~ (Bloco M, Ubuntu) | 2026-10-07 | ✅ **FEITO na sessão #21** (2026-10-13): ISO gerada + `verify-iso` PASS=41 + `test-vm.sh` exit 0 (instalou + 1º boot aplicou). Ver `STATE.md` § 3.3 |
+| ~~ISO em base Ubuntu Server~~ (`--distro ubuntu` + autoinstall/Subiquity) | 2026-10-12 | ✅ **Executada contra uma ISO real (sessão #21).** |
+| 🔴 **ISO em base Debian** (`--distro debian` + preseed/`apt-setup/local0`) | 2026-10-12 | **Nunca executada** — é o que falta do caminho ISO |
+| 🔴 **ISO em HARDWARE FÍSICO** (Xeon e Ryzen) | 2026-10-13 | O caminho funciona em VM; falta no hardware alvo (Blocos A–O) |
 | **Validar a resolução de famílias em hardware real** (blocos N/O do `VALIDATION.md`) | 2026-10-12 | Testado só com nomes de CPU simulados |
-| ~~ISO air-gapped~~ | 2026-10-12 | ✅ **Concluída no código** (sessão #17): fonte, modelo e repositório na mídia. O 1º boot não precisa de rede. **Nada mais a implementar** — o que falta é executar (boot em VM). |
+| ✅ ~~ISO air-gapped~~ | 2026-10-12 | **Concluída no código E PROVADA (sessão #21):** o 1º boot compilou do tarball e usou modelo + repo local, sem rede. Resta um resíduo (UI do llama.cpp) — ver `ISO.md` § 6. |
 
 ---
 
 ## ⏳ Planejado
 
 ### Prioridade Alta
-- [ ] **🎯 Gerar as duas ISOs de verdade** (Ubuntu e Debian) numa máquina com
-      `xorriso` + rede, e rodar `make iso-verify` (o build já verifica sozinho).
-      É o passo que falta para sair de "escrito" para "existe".
-- [ ] **🎯 Bootar a ISO em VM** (`make iso-vm`) — é o critério de conclusão e o
-      maior risco não validado. O `iso/test-vm.sh` já automatiza a espera e o
-      julgamento; falta executá-lo.
-- [ ] **Validar o caminho `--serial-console`** num boot real (é o que permite ao
-      `test-vm.sh` enxergar o primeiro boot).
+- [ ] **🎯 Gerar e bootar o caminho DEBIAN** (`--distro debian`: preseed +
+      `apt-setup/local0` + `mtools`/`isolinux`) — o Ubuntu já foi provado (#21).
+- [x] **🎯 Gerar a ISO de verdade (Ubuntu)** e rodar o `verify-iso.sh` — ✅ #21.
+- [x] **🎯 Bootar a ISO em VM** (`iso/test-vm.sh`) — ✅ #21 (instalou + 1º boot).
+- [x] **Validar o caminho `--serial-console`** num boot real — ✅ #21 (marcadores
+      no console serial, com o fix do `/dev/console`).
 - [ ] **Validar o boot UEFI** (`make iso-vm VM_ARGS="--boot-mode uefi"`) e o
       `md5sum.txt` regenerado (Debian).
+- [ ] **Repetir a ISO em hardware físico** (Xeon E5-2680 v4 e Ryzen 5 3500X):
+      instalar, ver o 1º boot e medir. Bloco M do `VALIDATION.md`.
+- [ ] **Fechar o resíduo air-gapped** (download do UI do llama.cpp no build —
+      ver `ISO.md` § 6).
 - [ ] **Validar os blocos N e O do `VALIDATION.md`** — famílias em hardware
       real e ciclo `apply`/`revert` das mods.
 - [ ] **Atualizar o tutorial ao validar cada família em hardware** — ao fechar
@@ -184,6 +191,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 
 | Data       | Mudança                                                        |
 |------------|----------------------------------------------------------------|
+| 2026-10-13 | 🎉 **A ISO é gerada e bootada** (Ubuntu, VM com KVM, sessão #21): moveu "Em Progresso" → "Concluído". O que fica em aberto na ISO: caminho **Debian**, **UEFI** e **hardware físico**; e o resíduo air-gapped do UI do llama.cpp. |
 | 2026-10-07 | Criação inicial do roadmap junto com o repositório `0.1.0-alpha`. |
 | 2026-10-07 | Adicionado `docs/TUTORIAL.md` + diretriz de tutorial por marco/versão. |
 | 2026-10-07 | Adicionada a esteira de CI/CD (validate, build-llama, container), `Makefile` e `docker/`. |

@@ -21,6 +21,14 @@
 > **Versão coberta por este tutorial:** `0.2.0` — o marco de **CI/CD**. Esta
 > versão **não** adicionou validação de hardware: as métricas das seções
 > 7.6 e 8 continuam `pendente`, e nada foi executado nos dois CPUs alvo.
+>
+> 🆕 **Atualização de 2026-10-13 (sessão #21):** a **ISO de instalação** (o
+> entregável final) foi **gerada e bootada** numa VM com KVM — Ubuntu Server
+> 24.04, air-gapped: instalou sozinha e o **1º boot aplicou o ai-cpu-os**
+> (família detectada: `intel-haswell`), compilando o llama.cpp do tarball da
+> mídia **sem rede**. Detalhes em [`docs/STATE.md`](STATE.md) § 3.3. **O que
+> segue `pendente`:** medições de `llama-bench` (seções 7.6/8), o caminho
+> **Debian** da ISO, o **boot UEFI** e tudo em **hardware físico**.
 
 ---
 

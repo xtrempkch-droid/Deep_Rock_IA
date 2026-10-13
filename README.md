@@ -437,8 +437,10 @@ Como funciona, em três linhas:
 > a ISO basta-se: o **modelo**, os **pacotes** e a **fonte do llama.cpp** vêm
 > todos na mídia, e o primeiro boot compila localmente. Nada é baixado no destino.
 >
-> 💡 **Ainda assim, `docs/ISO.md` § 6 lista o que não foi validado** — e a ISO
-> **nunca foi bootada**. O checklist do § 9 tem o caminho completo para fechar.
+> 💡 **A ISO já foi gerada e bootada numa VM** (Ubuntu Server 24.04, sessão #21):
+> instalou sozinha e o 1º boot aplicou o ai-cpu-os, sem rede. O que ainda **não**
+> foi validado (`docs/ISO.md` § 6): o caminho **Debian**, o boot **UEFI** e tudo
+> em **hardware físico**. O checklist do § 9 tem o caminho completo.
 >
 > 💡 **A ISO APAGA o disco** indicado em `--disk`. Teste em máquina virtual
 > **primeiro**, sempre.

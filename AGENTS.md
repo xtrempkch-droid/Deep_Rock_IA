@@ -20,7 +20,7 @@ git pull --ff-only
 make ci            # lint + docs + dry-run (igual ao job 'validate')
 
 # 3. Saber o que já foi PROVADO e o que NÃO foi:
-#    validate ✅ · build-llama ✅ · container ✅ · /**iso ⚠️ nunca executado**
+#    validate ✅ · build-llama ✅ · container ✅ · /iso ✅ GERADA E BOOTADA (VM, #21)
 ```
 
 > **Regra de ouro:** não confie na memória — confie no **`docs/STATE.md` § 6
@@ -368,8 +368,28 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-12
-- **O que mudou:** **Os runs #9 e #10 da ISO — os dois erros finais (sessão #20).**
+- **Data:** 2026-10-13
+- **O que mudou:** 🎉 **A ISO foi GERADA e BOOTADA pela primeira vez — o
+  critério de conclusão do projeto (§ 1) foi cumprido.** Numa máquina com 24
+  vCPU + `/dev/kvm` + Docker (que destravou o que era "bloqueado por ambiente"),
+  a ISO **air-gapped** (fonte do llama.cpp + modelo + repositório apt na mídia)
+  foi construída **dentro de um container `ubuntu:24.04`** e **instalada numa VM
+  com KVM**: instalou sozinha, reiniciou e o **1º boot aplicou o ai-cpu-os**
+  (`status=ok`, família `intel-haswell` detectada no alvo), compilando o
+  llama.cpp **do tarball da mídia, sem rede**. `verify-iso.sh` **PASS=41/FAIL=0**;
+  `test-vm.sh` **exit 0**. No caminho, **8 bugs reais** só visíveis ao EXECUTAR
+  foram corrigidos: `xorriso` (`-rm --`, `-boot_image replay`, `-map` do
+  modelo/fonte/repo, aspas do `-find`), SIGPIPE no `verify-iso.sh`, **GRUB sem
+  `--id`** (a instalação automática **nunca** acontecia — subia a entrada
+  interativa), **repo apt declarado no apt do instalador** (o curtin roda
+  `apt-get update` num chroot sem `/cdrom` → agora o late-command carrega o repo
+  para o **alvo** `/opt/apt-repo`) e os **marcadores** (não saíam no console
+  serial). Ver `docs/STATE.md` § 3.3 e `docs/JOURNAL.md` sessão #21.
+  **Pendências:** caminho **Debian**, **UEFI**, **hardware físico** (Blocos
+  A–O) e um resíduo air-gapped (o build do llama.cpp ainda busca o UI do
+  HuggingFace). Regra 13 satisfeita **para o Ubuntu em VM** — não para Debian
+  nem hardware.
+- **Data anterior:** 2026-10-12 — **Os runs #9 e #10 da ISO (sessão #20).**
   O **#9 (ubuntu)** falhou com `Pacote pedido está AUSENTE: git` — **só `git`**: o
   filtro de candidatos resolveu `gnupg` e `jq`, e sobrou uma falha
   **intermitente de rede** (pega no meio do download, indistinguível de "pacote

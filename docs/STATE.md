@@ -1,9 +1,10 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-12 (runs #9 e #10 da ISO: falha intermitente de
-> rede no repo apt e **falso positivo do verificador no caminho Debian** — ambos
-> corrigidos com teste offline. A ISO air-gapped segue pendente de BOOT em VM)
+> **Última atualização:** 2026-10-13 (🎉 **a ISO FOI GERADA E BOOTADA** numa VM
+> com KVM: instalou sozinha, reiniciou e o 1º boot aplicou o ai-cpu-os — o
+> critério de conclusão do projeto foi cumprido. No caminho, 8 bugs reais só
+> visíveis ao EXECUTAR foram corrigidos. Ver § 3.3 e `docs/JOURNAL.md` sessão #21)
 
 ---
 
@@ -27,11 +28,15 @@
 |---------|---------------------------------|-----------------|---------------------------|
 | A       | Intel Xeon E5-2680 v4, 16 GB    | `intel-broadwell` / `inference` | ❌ **NÃO** |
 | B       | AMD Ryzen 5 3500X, 64 GB        | `amd-zen2` / `builder` | ❌ **NÃO** |
+| VM      | qemu/KVM, Xeon E5-2676 v3 (host) | `intel-haswell` / `inference` (auto) | ✅ **SIM** (2026-10-13) |
 
-> **Nada foi executado em hardware físico ainda.** Todos os scripts foram
-> escritos e revisados estaticamente (sintaxe `bash -n`, revisão de lógica),
-> mas **não validados em execução real**. Trate esta versão como esqueleto
-> funcional, não como release.
+> **Nada foi executado em hardware físico ainda** (Xeon E5-2680 v4 e Ryzen 5
+> 3500X). O que mudou: a **ISO foi bootada e instalada numa VM** (qemu+KVM) e o
+> **1º boot aplicou o ai-cpu-os** com a família `intel-haswell` detectada
+> corretamente (a CPU do host é um E5-2676 v3, Haswell-EP). O caminho
+> build → ISO → instalação offline → 1º boot está **provado**; o que falta é
+> rodar os Blocos A–O do `VALIDATION.md` **no hardware alvo** (medir desempenho,
+> confirmar o efeito dos ajustes).
 
 ---
 
@@ -60,8 +65,8 @@
 | `docker/Dockerfile`                   | ✅      | ⚠️ (buildx --check)| ❌                  |
 | `.github/workflows/*.yml`             | ✅      | ⚠️ (yamllint)      | ❌ (1º run pendente)|
 | `Makefile`                            | ✅      | ⚠️ (make -n/test)  | ❌                  |
-| `iso/build-iso.sh` (gerador da ISO)   | ✅      | ✅ shellcheck      | ❌ (**nunca executado**)|
-| `iso/preseed/*` (preseed, 1º boot)    | ✅      | ⚠️ (templating)    | ❌ (**nunca bootado**)|
+| `iso/build-iso.sh` (gerador da ISO)   | ✅      | ✅ shellcheck      | ✅ **executado (2026-10-13)** — ver § 3.3 |
+| `iso/preseed/*` (preseed, 1º boot)    | ✅      | ⚠️ (templating)    | ✅ **bootado em VM (Ubuntu)**; Debian/preseed ❌ |
 | `docs/ISO.md`                         | ✅      | ⚠️ (revisão manual)| ❌                  |
 | `docs/JOURNAL.md` (continuidade)      | ✅      | ⚠️ (revisão manual)| ☐ **em uso contínuo** |
 
@@ -104,11 +109,64 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 > só a **execução** poderia revelar — reforçando a regra: lint verde ≠ build
 > comprovado.
 
+### 3.3 🎉 A ISO gerada E bootada (2026-10-13) — o critério de conclusão foi cumprido
+
+Primeira vez que a ISO **existe** e **roda**, de ponta a ponta, numa máquina com
+`xorriso` + `qemu`/KVM (Ubuntu 26.04): construída **dentro de um container
+`ubuntu:24.04`** (resolve o "release de outra base" do repo apt), bootada numa VM
+com `-cpu host` (Xeon Haswell-EP).
+
+| Item | Resultado |
+|------|-----------|
+| Build da ISO (`--distro ubuntu`, air-gapped: fonte + modelo + repo) | ✅ **exit 0** |
+| `verify-iso.sh` (conteúdo) | ✅ **PASS=41 FAIL=0** |
+| `test-vm.sh` (boot + instalação + 1º boot) | ✅ **TESTVM_EXIT=0** |
+| Marcadores no console serial (late-command + firstboot) | ✅ **os dois encontrados** |
+| Instalação automática (sem perguntas) | ✅ |
+| Rebooting → 1º boot aplicou o ai-cpu-os | ✅ **`.firstboot-status: status=ok`** |
+| Papel/família detectados no alvo | ✅ `inference` / `intel-haswell` |
+| llama.cpp compilado **no alvo, sem rede** (do tarball da mídia) | ✅ `/opt/llama.cpp/build/bin/llama-server` |
+| Modelo embutido usado sem rede | ✅ `/opt/models/Qwen2.5-Coder-1.5B-…gguf` (1,1 GB) |
+| Tamanho / SHA256 da ISO | **5.568.126.112 B (5,2 GiB)** / `c59da4794f7c9aa9058668bd8b425b022bcda136563b7d080df5c59ef502322a` |
+| Tempo: build (cache quente) / instalação+1º boot | ~4 min / **~13 min** (24 vCPU do host, KVM) |
+
+**8 bugs reais, todos invisíveis até EXECUTAR** (nenhum era pego por lint/dry-run):
+
+1. `xorriso … -rm X -commit -end` — o `-rm` engolia `-commit`/`-end` como
+   caminhos → `SORRY` → **exit 32** com a ISO já escrita. Correção: `-rm X --`.
+2. `-boot_image any keep` não copia a imagem **UEFI oculta** do Ubuntu → a ISO
+   saía ~6 MB menor, o `efi.img` virava 1 bloco e o MBR protetor apontava além
+   do fim (exit 32). Correção: `-boot_image any replay`.
+3. O caminho Ubuntu mapeia só o que muda (`-map`): **faltavam** `/apt-repo`,
+   `/models` e `/llama-src.tar.gz` na ISO (o `--iso-repo auto` dizia "air-gapped"
+   com a mídia sem conteúdo). Correção: 3 `-map`.
+4. `verify-iso.sh`: o `xorriso` cita os caminhos de `-find` entre aspas simples →
+   comparação de igualdade quebrava → **408 falsos "repositório incompleto"**.
+5. `verify-iso.sh`: `printf … | grep -q` com `set -o pipefail` → SIGPIPE (141) →
+   falsos "a fonte não tem CMakeLists". Correção: here-string `<<<`.
+6. **GRUB**: `set default="ai-cpu-os-auto"` casa por **id** ou título, e a
+   `menuentry` **não tinha `--id`** → o GRUB caía na entrada 0 (interativa) e a
+   **instalação automática nunca acontecia**. Correção: `menuentry … --id`.
+7. **Repositório apt local**: o curtin roda `apt-get update` **dentro de um
+   chroot no alvo**, onde **`/cdrom` não existe** → `file:///cdrom/apt-repo`
+   derrubava o `apt-config` (exit 100). Correção: o repo vai para o **alvo**
+   (`/opt/apt-repo`) pelo late-command e é usado no 1º boot (fora do apt do
+   instalador). Também passou a gerar `Release`.
+8. **Marcadores**: o `log()` do late-command vai para o log do subiquity e o
+   firstboot logava só no journal → o `test-vm.sh` **nunca via** os marcadores.
+   Correção: repetir no `/dev/console` e `journal+console` no unit.
+
+> ⚠️ **O que isto NÃO prova:** desempenho, o efeito de cada ajuste e o
+> comportamento no Xeon/Ryzen reais (Blocos A–O do `VALIDATION.md`). E há um
+> resíduo air-gapped em investigação (§ 5.3).
+
 ---
 
 ## 4. Problemas conhecidos no momento
 
-1. **Nada validado em execução.** O maior risco atual é um erro de runtime
+1. **Risco em hardware físico não medido.** O caminho ISO foi provado em VM; o
+   que falta é executar os Blocos A–O em cada máquina real. Risco residual:
+   nome de pacote/ajuste que só o hardware alvo revela.
    que a revisão estática não pegou (ex.: nome de pacote, caminho).
 2. **Kernel cmdline não persiste até reboot.** `kernel-tuning.sh` escreve a
    orientação de `intel_idle.max_cstate=1`, mas a aplicação completa exige
@@ -135,10 +193,11 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 10. **A Release `v0.2.0` contém binários compilados para o runner do CI**
     (x86-64 genérico AVX2). Funcionam nos alvos, mas foram produzidos em
     outra CPU; o `llama-bench` de prova rodou lá, não no Xeon/Ryzen.
-11. **⚠️ A ISO nunca foi construída.** `iso/build-iso.sh` e os templates do
-    preseed foram escritos e validados apenas em `--dry-run`; gerar a ISO
-    exige `xorriso`, ausente no ambiente de desenvolvimento. É o maior risco
-    em aberto e o **critério de conclusão do projeto**.
+11. **✅ A ISO foi CONSTRUÍDA E BOOTADA (2026-10-13).** Ver § 3.3. O maior
+    risco em aberto **deixou de ser a geração** e passou a ser a validação em
+    **hardware físico** (Blocos A–O do `VALIDATION.md`). O caminho Ubuntu é o
+    validado; o **Debian/preseed continua não exercitado**. Resíduo air-gapped
+    em investigação (§ 5.3 do `JOURNAL.md`).
 12. **O boot UEFI da ISO é best-effort.** O patch do `grub.cfg` dentro da
     `efi.img` exige `mtools` e nunca foi testado. O caminho BIOS (isolinux)
     é o principal. Ver `docs/ISO.md` § 6.
@@ -149,15 +208,29 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 
 ## 5. Métricas de performance medidas
 
-> Nenhuma métrica real ainda. Preencher após rodar `llama-bench` nos dois
-> sistemas. Formato sugerido:
+> Nenhuma métrica de **inferência** real ainda (tokens/s). Preencher após rodar
+> `llama-bench` nos dois sistemas. Formato sugerido:
 
 | Sistema | Modelo                                | Threads | Antes (tok/s) | Depois (tok/s) | Δ     |
 |---------|---------------------------------------|---------|---------------|----------------|-------|
 | xeon    | Qwen2.5-Coder-1.5B-Q4_K_M             | 24      | *(pendente)*  | *(pendente)*   | —     |
 | ryzen   | Qwen2.5-Coder-1.5B-Q4_K_M             | 6       | *(pendente)*  | *(pendente)*   | —     |
 
-Tempo de build do llama.cpp: *(pendente)*
+### Métricas da ISO (2026-10-13, VM qemu/KVM)
+
+| Métrica | Valor |
+|---------|-------|
+| Tamanho da ISO (air-gapped: fonte + modelo + repo) | **5.568.126.112 B (5,2 GiB)** |
+| SHA256 | `c59da4794f7c9aa9058668bd8b425b022bcda136563b7d080df5c59ef502322a` |
+| ISO base | `ubuntu-24.04.5-live-server-amd64.iso` |
+| Tempo de build (cache quente; 1º build inclui ~4 GB de download) | ~4 min |
+| Instalação + 1º boot (4 vCPU, KVM, `-cpu host`) | **~13 min** |
+| Tamanho do alvo após 1º boot (qcow2) | ~6,3 GiB |
+| Repositório apt local embutido | 406 pacotes · 329 MB |
+| Modelo embutido | `Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf` (1,1 GB) |
+| Compilação do llama.cpp no alvo (do tarball, sem rede) | ✅ `/opt/llama.cpp/build/bin/llama-server` |
+
+Tempo de build do llama.cpp: *(pendente em hardware real)*
 
 ---
 
@@ -170,112 +243,57 @@ Tempo de build do llama.cpp: *(pendente)*
 `container` (imagem publicada no GHCR). A Release `ai-cpu-os v0.2.0` foi
 publicada com os binários `.tar.gz` dos dois perfis. Ver § 3.1.
 
-> 🎯 **O projeto termina quando a ISO existir, instalar e bootar.** O script
-> [`iso/build-iso.sh`](../iso/build-iso.sh) e o preseed estão escritos e
-> validados em `--dry-run`, mas **nenhuma ISO foi construída nem bootada**
-> (não há `xorriso` no ambiente de desenvolvimento). Isso é o **Bloco M** de
-> [`docs/VALIDATION.md`](VALIDATION.md) e o maior risco em aberto do projeto.
-> Passos: `make iso-lint` → `make iso-dry-run` → `make iso DISK=/dev/nvme0n1`
-> → bootar em VM. Ver **`docs/ISO.md`**.
+**Passo 1 — ✅ CONCLUÍDO E PROVADO (2026-10-13).** A **ISO foi gerada, bootada
+e instalada numa VM**, e o **1º boot aplicou o ai-cpu-os** (família detectada:
+`intel-haswell`). O critério de conclusão do projeto (§ 1 do `AGENTS.md`) foi
+cumprido. Ver **§ 3.3** para os números e os **8 bugs reais** que só a execução
+revelou. Reprodução:
+
+```bash
+# (a) gerar a ISO air-gapped DENTRO de um container 24.04 (resolve o
+#     "release do repo apt" e o root exigido pelo build-iso.sh):
+docker run --rm -v "$PWD":/work -w /work -e DEBIAN_FRONTEND=noninteractive \
+  ubuntu:24.04 bash -c 'apt-get update -qq && apt-get install -y -qq \
+    xorriso curl ca-certificates coreutils xz-utils tar gzip python3-yaml >/dev/null && \
+    bash iso/build-iso.sh --distro ubuntu --disk /dev/vda --serial-console \
+      --role auto --family auto --iso-source auto --iso-model auto \
+      --iso-repo auto --yes'
+
+# (b) bootar/instalar em VM (host com qemu + /dev/kvm):
+bash iso/test-vm.sh --iso iso/out/ai-cpu-os-ubuntu-<data>.iso \
+  --ram 6144 --cpus 4 --timeout-min 90 --keep --yes
+```
 
 > 📓 **Para retomar do zero (ou de outra sessão):** [`docs/JOURNAL.md`](JOURNAL.md)
 > — § 1 (retomada em 5 min), § 5 (threads abertas) e § 6 (armadilhas já
 > pisadas). Ao terminar qualquer sessão, **registre-a lá** (Regra 14 do `AGENTS.md`).
 
-> 📋 **Protocolo de testes pronto:** siga **[`docs/VALIDATION.md`](VALIDATION.md)**
-> — roteiro preenchível (blocos A–L: VM, detecção, build, tuning, servidor,
-> benchmark, Ryzen/registry/Gitea, imagem do GHCR, idempotência, reversão).
-> **Basta executar os blocos e trazer os resultados preenchidos** — depois eles
-> são consolidados aqui (§ 2/§ 3/§ 5/§ 6) e no `docs/TUTORIAL.md`.
+**Passo 2 (AGORA) — validar em HARDWARE FÍSICO (Xeon E5-2680 v4 e Ryzen 5 3500X).**
 
-**Passo 1 — ✅ CONCLUÍDO (implementado; não executado).** A variante **Ubuntu
-Server + autoinstall** está escrita: `iso/autoinstall/autoinstall.yaml`
-(config na raiz da ISO, ao lado de `casper/`), `--distro ubuntu|debian` com
-**ubuntu como padrão**, remontagem por `xorriso -indev/-outdev -map` (setores
-de boot preservados) e autoteste de templates (`--check-templates` / `make
-iso-yaml`) rodando no CI. Ver `docs/ISO.md` § 4.5.
+O que falta não é código: é rodar os blocos preenchíveis de
+[`docs/VALIDATION.md`](VALIDATION.md) **nas duas máquinas reais** e trazer os
+resultados. Prioridades:
 
-> ⚠️ **Implementado ≠ executado.** Nenhuma ISO foi gerada, instalada ou
-> bootada — em nenhuma das duas distros. Isso continua sendo o **Bloco M** de
-> [`docs/VALIDATION.md`](VALIDATION.md) e o maior risco em aberto.
+- **Bloco M** (ISO): repetir o passo 1 no Xeon/Ryzen e ver o efeito do tuning;
+  **gerar também `--distro debian`** (o caminho preseed **nunca foi testado**).
+- **Bloco N**: `bash families/resolve.sh`, `./detect-hardware.sh` e
+  `sudo ./build.sh --dry-run` em cada máquina.
+- **Bloco O**: `bash mods/apply.sh check` e `make mods-test`.
+- **Blocos A–L**: tuning, servidor, `llama-bench` (tokens/s), Ryzen/registry/Gitea.
+- ⚠️ **UEFI**: o boot UEFI da ISO nunca foi testado (`--boot-mode uefi` no
+  `test-vm.sh`; precisa de `ovmf`). Ver `docs/ISO.md` § 6.
 
-**Passo 1.1 (AGORA) — rodar os dois caminhos da ISO contra as ISOs reais.**
+**Passo 3 (dívida técnica nova, achada na execução):**
 
-Antes de qualquer VM: gerar de verdade, em uma máquina com `xorriso` e rede
-(o ambiente de desenvolvimento não tem `xorriso`). É barato e pega erro de
-layout/`xorriso` cedo. O `verify-iso.sh` roda sozinho no fim do build.
-
-```bash
-sudo apt install -y xorriso curl coreutils
-make iso-lint && make iso-yaml     # autoteste (templates + verificador)
-
-# 1) Ubuntu (padrão) — o caminho menos exercitado
-sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/vda \
-  --serial-console --keep-work
-
-# 2) Debian (legado)
-sudo bash iso/build-iso.sh --distro debian --disk /dev/vda \
-  --serial-console --keep-work
-
-# 3) Reforçar a verificação (o build já roda; aqui é explícito)
-make iso-verify ISO=iso/out/ai-cpu-os-ubuntu-<data>.iso DISK=/dev/vda
-```
-
-**Passo 1.2 — bootar em VM (o teste que importa).**
-
-```bash
-sudo apt install -y qemu-system-x86 qemu-utils
-make iso-vm ISO=iso/out/ai-cpu-os-ubuntu-<data>.iso
-# ou, direto: bash iso/test-vm.sh --iso <iso> --yes
-```
-
-O `test-vm.sh` procura dois marcadores no console serial:
-`[ai-cpu-os/iso-late] pós-instalação concluído` (o instalador **achou** a
-config) e `aplicação concluída com sucesso` (o primeiro boot aplicou).
-Detalhes em `docs/ISO.md` § 4.6 e Bloco M de `docs/VALIDATION.md`.
-> ⚠️ Não declare a ISO pronta sem bootar e instalar em VM.
-
-**Passo 1.3 — tornar a ISO AIR-GAPPED (decidido na sessão #14).**
-
-👉 O plano completo, com o estado de cada requisito, está em
-**`docs/ISO.md` § 3.1**. As decisões são: **a ISO deve funcionar sem internet**
-e **o llama.cpp é compilado no 1º boot** (nunca um binário pré-compilado — uma
-ISO por família reintroduziria o risco de `SIGILL`).
-
-```bash
-# Os 5 requisitos estão implementados. NÃO há pendência de código conhecida no
-# caminho da ISO — o que falta é EXECUTAR:
-make iso-dry-run ISO_ARGS="--iso-source auto --iso-model auto --iso-repo auto"
-make iso DISK=/dev/nvme0n1 ISO_ARGS="--serial-console"   # precisa de xorriso
-make iso-vm ISO=iso/out/ai-cpu-os-ubuntu-<data>.iso      # precisa de qemu
-```
-
-⚠️ **Limites práticos:** (a) `--iso-repo auto` exige a **mesma release** da ISO
-(esta máquina é 25.10, a ISO é 24.04) — buildar numa noble, usar `--iso-url` da
-sua release, ou `--iso-repo CAMINHO`; (b) o GitHub **recusa arquivo de Release
-acima de 2 GiB**, e a ISO air-gapped tem ~4,3–5 GB — por isso o CI gera a ISO
-leve por padrão e a air-gapped é para a sua máquina. Checklist completo em
-`docs/ISO.md` § 9.
-
-**Passo 2 — validar as camadas novas em hardware real.**
-
-Rodar `bash families/resolve.sh`, `./detect-hardware.sh` e
-`sudo ./build.sh --dry-run` em **cada** máquina alvo (Xeon E5-2680 v4 e Ryzen 5
-3500X) e preencher o **Bloco N** de `docs/VALIDATION.md`. Rodar também
-`bash mods/apply.sh check` e `make mods-test` (Bloco O).
-
-**Passo 3 — subir uma VM Ubuntu Server 24.04 e validar `detect-hardware.sh` +
-`build.sh --dry-run` + `mods/apply.sh apply --set system --dry-run`.** Numa VM,
-`--dry-run` mostra toda a sequência sem aplicar nada.
-
-```bash
-git clone <repo> && cd ai-cpu-os
-chmod +x build.sh detect-hardware.sh llama-build.sh tests/*.sh
-chmod +x mods/apply.sh mods/*/*.sh families/resolve.sh roles/*/*.sh
-bash -n build.sh && bash -n detect-hardware.sh && bash -n llama-build.sh
-./detect-hardware.sh || true          # FAMILY= e ROLE=
-sudo ./build.sh --dry-run
-```
+- **Resíduo air-gapped em investigação.** O `llama-build.sh` usa
+  `-DLLAMA_CURL=OFF` (runtime sem downloads), mas o build do llama.cpp ainda
+  tenta baixar o **UI** do HuggingFace (`-- UI: downloading … llama-ui …`) — o
+  download do `.sha256` falhou na VM e o build seguiu, então parece
+  **best-effort**; **confirmar** que a ISO é 100% offline (ex.: uma flag
+  `-DLLAMA_BUILD_UI=OFF`/`-DLLAMA_UI=OFF` conforme a versão do llama.cpp).
+  Ver `JOURNAL.md` § 5.3.
+- **Marcadores de teste:** agora o late-command/firstboot ecoam no console; se
+  o formato do console serial mudar, revisar `test-vm.sh` (marcadores) e o unit.
 
 **Passo 4 (ao fechar o marco de validação):** atualizar `docs/TUTORIAL.md`
 com o que passou a ser testado e com os números reais de `llama-bench`
@@ -299,6 +317,7 @@ Ao terminar qualquer tarefa:
 
 | Data       | Mudança                                                    |
 |------------|------------------------------------------------------------|
+| 2026-10-13 | 🎉 **A ISO foi gerada E bootada pela primeira vez** (VM qemu/KVM, Ubuntu 24.04): instalou sozinha, reiniciou e o 1º boot aplicou o ai-cpu-os (`status=ok`, família `intel-haswell`), com llama.cpp compilado no alvo sem rede. **8 bugs reais** só visíveis ao executar (xorriso `-rm`/`-boot_image`/`-map`, GRUB sem `--id`, apt do curtin em chroot sem `/cdrom`, marcadores fora do console, aspas do `-find`, SIGPIPE). Novo § 3.3. Ver `JOURNAL.md` sessão #21. |
 | 2026-10-07 | Criação do arquivo junto com o repositório `0.1.0-alpha`.   |
 | 2026-10-07 | Commit inicial `85a083e` realizado; 26 arquivos versionados. |
 | 2026-10-07 | Projeto publicado no GitHub (`main` + tag `v0.1.0-alpha`); adicionado `docs/TUTORIAL.md` e a diretriz de tutorial por marco. |

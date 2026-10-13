@@ -573,15 +573,17 @@ Leia isto **antes** de afirmar que algo funciona.
 | Casamento CPU → família | ✅ | ✅ corpus (~60 CPUs) | ⚠️ só nos 2 alvos |
 | Build do llama.cpp | ✅ | ✅ CI compila **e executa** (7 famílias em ~4 que rodam no CI) | ❌ |
 | Build **offline** (`--source`) | ✅ | ⚠️ `--dry-run` (dir + tarball) e extração real com ferramentas de build **simuladas**; **compilação real de um fonte do llama.cpp não executada** | ❌ |
-| Modelo **embutido na ISO** (`--iso-model`) | ✅ | ⚠️ validações de magic/tamanho (positivas e negativas), dry-runs nas duas distros e verificação da corrente de ponta a ponta com o `verify-iso.sh`; **nunca copiado nem usado num boot real** | ❌ |
-| Repositório apt **na mídia** (`--iso-repo`) | ✅ | ✅ **`apt` real aceitou** um repo montado pelo código do projeto, com resolução de dependência; `verify-iso.sh` reprova 5 modos de falha; índice gerado com `dpkg-deb` de verdade | ❌ (e ⚠️ o **aceite do instalador** — seção `sources`/`apt-setup` — é suposição documentada) |
-| Fonte **na mídia** (`--iso-source`) | ✅ | ✅ corrente exercitada num **sandbox**: `late-command.sh` real copiando + `llama-build.sh` real compilando do tarball (manifesto `Rede: não usada`); `verify-iso.sh` reprova tarball truncado/sem `CMakeLists.txt`/sem `ggml/` | ❌ (nunca num boot real) |
+| Modelo **embutido na ISO** (`--iso-model`) | ✅ | ✅ **validado num boot real (sessão #21)**: o `late-command` copiou para `/opt/models` e o 1º boot o usou via `AI_MODEL_FILE`, sem rede | ❌ (só na VM) |
+| Repositório apt **na mídia** (`--iso-repo`) | ✅ | ✅ **validado (sessão #21, era bug)**: a seção `sources` do Subiquity **não funciona** (o curtin roda `apt-get update` num chroot sem `/cdrom`); agora o late-command carrega o repo para o **alvo** (`/opt/apt-repo`) e o 1º boot o usa — sem rede. ⚠️ O caminho **Debian** (`apt-setup/local0/*`) segue **suposição** | ❌ (só na VM) |
+| Fonte **na mídia** (`--iso-source`) | ✅ | ✅ **validado num boot real (sessão #21)**: o llama.cpp foi compilado do tarball da mídia, sem rede (`/opt/llama.cpp/build/bin/llama-server`) | ❌ (só na VM) |
 | Ajustes de kernel (mods) | ✅ | ⚠️ só `--dry-run`/sintaxe | ❌ |
 | Revert das mods | ✅ | ⚠️ não exercitado de ponta a ponta | ❌ |
 | Serviço de IA (`ai-server`) | ✅ | ❌ | ❌ |
 | Papel `builder` (Docker/registry/Gitea) | ✅ | ❌ | ❌ |
-| ISO (conteúdo) | ✅ | ✅ `verify-iso.sh` (com teste negativo) | ❌ |
-| ISO (boot/instalação) | ✅ | ❌ **nunca executado** (sem qemu no dev) | ❌ |
+| ISO (conteúdo) | ✅ | ✅ `verify-iso.sh` (com teste negativo) — **na ISO real: PASS=41/FAIL=0** | ❌ |
+| ISO (boot/instalação, **Ubuntu**) | ✅ | ✅ **executado (sessão #21)**: `test-vm.sh` exit 0 — instalou sozinha e o 1º boot aplicou (`status=ok`, família `intel-haswell`) | ❌ (só na VM) |
+| ISO (boot/instalação, **Debian**) | ✅ | ❌ **nunca executado** | ❌ |
+| Boot **UEFI** da ISO | ✅ | ❌ nunca testado | ❌ |
 | GPU (qualquer backend) | ✅ | ❌ | ❌ |
 
 **Fonte da verdade atualizada:** `docs/STATE.md` § 2/§ 3 e a tabela por família
@@ -609,7 +611,7 @@ em `docs/FAMILIES.md` § 9.3. Se você melhorar qualquer linha desta tabela,
 | **`--iso-source`** | `auto` (baixa o tarball do llama.cpp e embute), `none` ou um `.tar.gz` seu. Sem ele, o 1º boot clonaria o GitHub. O `llama-build.sh` compila **do tarball** (extrai, trata o diretório de topo). |
 | **`AI_LLAMA_SOURCE`** | Variável de ambiente exportada pelo `firstboot.sh` com o caminho do tarball no alvo. É o padrão de `--source` no `llama-build.sh` (mesmo padrão do `AI_FAMILY`/`AI_MODEL_FILE`). |
 | **`--model-file` / `AI_MODEL_FILE`** | Instala um `.gguf` **local** (copiando para `/opt/models`), sem rede. É como o 1º boot da ISO usa o modelo que veio na mídia. |
-| **air-gapped** | Sem rede — nem na instalação, nem no 1º boot. Objetivo firmado da ISO (`docs/ISO.md` § 3.1): o **fonte** e o **modelo** já vão na mídia; o **toolchain** (repo apt local) ainda não. |
+| **air-gapped** | Sem rede — nem na instalação, nem no 1º boot. Objetivo firmado da ISO (`docs/ISO.md` § 3.1): o **fonte**, o **modelo** e o **toolchain** (repositório apt local) já vão na mídia, e o **1º boot foi provado sem rede** (sessão #21). |
 | **`AI-CPU-OS-BUILD.txt`** | Registro ao lado dos binários: família, `-march`, ISA, AVX-512, GPU, ref. |
 | **duas provas** | `verify-iso.sh` (conteúdo) × `test-vm.sh` (comportamento). Não se substituem. |
 | **conjunto de mods** | `system` (o que o `build.sh` aplica) ou `portable` (seguras, uma a uma). |
@@ -626,11 +628,12 @@ em `docs/FAMILIES.md` § 9.3. Se você melhorar qualquer linha desta tabela,
    portabilidade entre máquinas da mesma família. `--native` existe para quem
    compila na própria máquina.
 3. **GPU é opcional e não medida** — o projeto não afirma suporte a GPU.
-4. **Zero validação em hardware real** até a data desta revisão (ver § 11) —
-   é a lacuna maior e está declarada em todo lugar em que seria relevante.
+4. **Validação em hardware físico ainda zero** até a data desta revisão (ver § 11)
+   — é a lacuna maior. **A ISO, porém, já foi gerada e bootada em VM** (#21).
 5. **x86-64 apenas.**
-6. **A ISO não foi bootada.** É o critério de conclusão do projeto e o maior
-   risco em aberto.
+6. **A ISO foi bootada em VM (Ubuntu, sessão #21), mas não em hardware e não no
+   Debian.** É o critério de conclusão do projeto: satisfeito para o caminho
+   Ubuntu em VM; faltam Debian, UEFI e hardware físico.
 
 ---
 

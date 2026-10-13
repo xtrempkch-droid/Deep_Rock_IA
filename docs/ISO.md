@@ -150,8 +150,8 @@ Mesmo sendo mais demorado. As razões não são estéticas:
 |---|-----------|------|--------|
 | 1 | Fonte do llama.cpp **na mídia** | `llama-build.sh --source <tar.gz>` (não usa rede nem `git`) | ✅ **implementado** |
 | 2 | Nenhum `git clone` no 1º boot | `--iso-source auto\|<tarball>\|none` embute o tarball do llama.cpp; o late-command o leva a `/opt/llama-src.tar.gz`, o `firstboot.sh` exporta `AI_LLAMA_SOURCE` e o `llama-build.sh` compila **do tarball** (sem `git`, sem rede) | ✅ **implementado** |
-| 3 | Toolchain de build **na mídia** | `--iso-repo auto` monta um repositório apt local (índice `Packages.gz` gerado com `dpkg-deb`), adicionado como fonte **extra** | ✅ **implementado** |
-| 4 | Pacotes do instalador **na mídia** | O mesmo repositório cobre o `packages:` do autoinstall/preseed | ✅ **implementado** |
+| 3 | Toolchain de build **na mídia** | `--iso-repo auto` monta um repositório apt local (índice `Packages.gz` + `Release` gerados com `dpkg-deb`), que o **late-command carrega para o alvo** em `/opt/apt-repo` | ✅ **implementado e bootado** |
+| 4 | Pacotes do instalador **na mídia** | O mesmo repositório, carregado ao alvo — o 1º boot instala sem rede | ✅ **implementado e bootado** |
 | 5 | **Modelo** na mídia | `--iso-model auto\|<caminho>\|none` embute o `.gguf`; o late-command copia para `/opt/models` e o 1º boot usa via `AI_MODEL_FILE` | ✅ **implementado** |
 | 6 | O sistema saber que está offline | `OFFLINE=1` no `.iso-config` | ❌ **descartado** (ver nota) |
 
@@ -181,20 +181,31 @@ de ~1 GB é aceito em troca de uma ISO que funciona sozinha; a alternativa
 lógica vale para os pacotes do item 3/4: dentro de um orçamento de 8 GB, ~500 MB
 de `.deb` é o preço de uma instalação que não pede internet.
 
-**Por que o repositório local entra como fonte EXTRA (e não como `primary`):**
+**Como o repositório local é usado (MUDOU na sessão #21 — era BUG):**
 
-| Se fosse `primary` | Sendo fonte extra |
-|--------------------|-------------------|
-| O `sources.list` do sistema **instalado** apontaria para `file:///cdrom/...`, que deixa de existir quando a mídia sai — `apt update` quebrado no dia a dia. | O `primary` continua sendo o arquivo oficial: o alvo nasce com a configuração normal. |
-| Um repositório **incompleto** aborta a instalação. | Um repositório incompleto **degrada** (usa a rede, se houver) em vez de quebrar. |
+A ideia original era declarar o repositório como fonte **extra** do curtin
+(seção `sources` do autoinstall). **Isso não funciona.** Ao bootar a ISO de
+verdade, o curtin roda `apt-get update` **dentro de um chroot no alvo**, onde
+**`/cdrom` não está montado** — então `file:///cdrom/apt-repo` é inalcançável e
+o `apt-config` **aborta** com exit 100 ("does not have a Release file"). O
+repositório **estava** na mídia (com `Release`), mas o chroot não o via.
 
-A linha da fonte extra é removida do alvo no `late-command.sh` (ela morreria de
-qualquer forma), preservando o espelho oficial.
+Correção adotada: o **late-command.sh** copia o repositório da mídia para o
+**alvo** (`/opt/apt-repo`) e grava a fonte lá
+(`/etc/apt/sources.list.d/ai-cpu-os-local.list`). Assim:
 
-> ✅ **Os 5 requisitos estão implementados.** O único passo que ainda usava rede
-> era o `git clone` do llama.cpp no 1º boot — era o mais demorado. Com o tarball
-> na mídia, o **primeiro boot inteiro roda sem internet**: pacotes do repositório
-> local, modelo em `/opt/models`, fonte em `/opt/llama-src.tar.gz`.
+| Antes (bug) | Agora |
+|-------------|-------|
+| Fonte no apt do **instalador** (`file:///cdrom/...`), invisível no chroot → `apt-config` falha | Repo no **alvo** (`/opt/apt-repo`); o apt do instalador **não** o usa, e o instalador usa a rede (degradando, como planejado) |
+| O alvo nascia com uma fonte que morreria (mídia removida) | O alvo carrega o repo no disco — **o 1º boot instala sem rede**, e o `apt` funciona depois |
+| --- | O índice ganhou um arquivo **`Release`** (o apt exige, mesmo em repo flat vindo da mídia) |
+
+O `primary` continua sendo o espelho oficial (o alvo nasce com a configuração
+normal; com rede, ele também funciona).
+
+> ✅ **Os 5 requisitos estão implementados E o caminho foi bootado (sessão #21).**
+> O 1º boot inteiro rodou **sem rede**: o llama.cpp compilou do tarball da mídia,
+> o modelo veio de `/opt/models` e o repositório de `/opt/apt-repo`.
 >
 > ⚠️ **Um valor DEFAULT não pode quebrar o build.** Decisão registrada na
 > sessão #18: `--iso-repo` nasce `auto`, então qualquer pedido que não possa ser
@@ -202,34 +213,18 @@ qualquer forma), preservando o espelho oficial.
 > fatal fica reservado para **entrada do usuário** (`--iso-repo DIR` inexistente
 > ou sem `.deb`), que é corrigível.
 >
-> ⚠️ **Honestidade sobre o que foi provado.** O que está **verificado de verdade**:
-> o índice gerado é **aceito pelo próprio `apt`** (foi rodado `apt-get update`
-> contra um repositório montado pelo código do projeto, com resolução de
-> dependência entre dois pacotes de teste), o autoteste de templates passa nos
-> dois casos (com e sem repositório), e o `verify-iso.sh` **reprova** os cinco
-> modos de falha testados (índice corrompido, `.deb` ausente, `.deb` que é HTML
-> de erro, repo sem fonte no autoinstall, fonte no autoinstall sem repo).
->
-> A **corrente da fonte foi exercitada de ponta a ponta** num sandbox: o
-> `late-command.sh` **real** (com os caminhos redirecionados) copiou o tarball
-> para `/opt/llama-src.tar.gz` e gravou `LLAMA_SRC=` no `.iso-config`; e o
-> `llama-build.sh` **real**, com `AI_LLAMA_SOURCE` no ambiente, compilou do
-> tarball e registrou no manifesto `llama.cpp: tarball local llama-src.tar.gz` /
-> `Rede: não usada (fonte local)` — e, **sem** a variável, voltou a clonar
-> (provando que o comportamento offline é causado por ela, não por acaso).
-> O verificador reprova tarball truncado, tarball sem `CMakeLists.txt` e tarball
-> sem `ggml/`. **O que continua não provado:** nada disso aconteceu num boot
-> real — os scripts rodaram num sandbox com o sistema de arquivos redirecionado.
-> O que **não** foi provado: **nenhuma ISO foi gerada nem bootada**, então os
-> pontos que dependem do Subiquity/debian-installer (aceitar a seção `sources`,
-> montar a mídia em `/cdrom`, `apt-setup/local0/*`) são **suposições
-> documentadas**, com o sintoma de falha anotado abaixo. Ver § 6.
+> ⚠️ **Honestidade sobre o que foi provado.** Gerada e **bootada em VM**
+> (sessão #21): `verify-iso.sh` **PASS=41/FAIL=0**; `test-vm.sh` **exit 0** (a
+> ISO bootou, instalou sozinha e o 1º boot aplicou o ai-cpu-os). **O que
+> continua NÃO provado:** o caminho **Debian/preseed** (nunca executado), o
+> **boot UEFI**, e tudo em **hardware físico** (Blocos A–O do `VALIDATION.md`).
+> Resta também um resíduo do air-gapped em investigação (§ 6).
 >
 > ℹ️ **O CI consegue gerar a ISO de verdade** (tem `xorriso`): o workflow `iso`
 > baixa a ISO base, remasteriza e roda o `verify-iso.sh` no fim. Mas há um limite
 > prático: o GitHub **recusa arquivo de Release acima de 2 GiB**, e uma ISO com
-> modelo + repositório fica em ~4,3–5 GB. Por isso o padrão do CI é a ISO leve
-> (`air_gapped: false`) e o workflow **pula o upload** avisando quando a ISO
+> modelo + repositório fica em ~5,2 GB (medido). Por isso o padrão do CI é a ISO
+> leve (`air_gapped: false`) e o workflow **pula o upload** avisando quando a ISO
 > passa do limite. A ISO air-gapped completa é para ser gerada na sua máquina.
 
 > 💡 **Sintoma para procurar no primeiro teste em VM:** se o instalador reclamar
@@ -389,13 +384,26 @@ mesmo diretório que contém `casper/`. Escolhemos o segundo porque ele:
 mas só a forma "sem chave de topo" é válida em **22.04 e 24.04**. É escolha de
 compatibilidade entre os dois LTS.
 
-**c) Remontagem por `-indev/-outdev -map`, não por extração + mkisofs.** Em vez
+**c) Remontagem por `-indev/-outdev -map` + `-boot_image replay`, não por extração + mkisofs.** Em vez
 de extrair a árvore e remontar (como o caminho Debian faz), partimos da ISO
 oficial e apenas **sobrescrevemos** o que muda: `/boot/grub/grub.cfg`,
-`/autoinstall.yaml`, `/preseed/…` e `/ai-cpu-os`. Assim os setores de boot
-(El Torito BIOS, imagem EFI e MBR híbrido) ficam **byte a byte** iguais aos do
-Ubuntu — sem `mtools`, sem `isohdpfx.bin` e sem o risco de gerar uma ISO que não
-boota.
+`/autoinstall.yaml`, `/preseed/…`, `/ai-cpu-os`, `/models`,
+`/llama-src.tar.gz` e `/apt-repo`. Assim os setores de boot (El Torito BIOS,
+imagem EFI e MBR híbrido) ficam **byte a byte** iguais aos do Ubuntu — sem
+`mtools`, sem `isohdpfx.bin` e sem o risco de gerar uma ISO que não boota.
+
+> ⚠️ **Três pegadinhas do `xorriso` que só apareceram na 1ª ISO de verdade**
+> (sessão #21; detalhes no `JOURNAL.md` § 6):
+> 1. **`-boot_image any replay`** (e **não** `keep`): a imagem UEFI do Ubuntu é
+>    uma imagem El Torito **oculta** (fora da árvore ISO9660). O `keep` mantém a
+>    *referência* do catálogo, mas a imagem não é copiada → a ISO saía ~6 MB
+>    menor, o `efi.img` virava 1 bloco e o MBR protetor apontava além do fim
+>    (**exit 32**, e UEFI quebrado). O `replay` reexecuta o que o
+>    `-report_system_area cmd` propõe (re-anexa a partição EFI).
+> 2. **`-rm X --`** (`--` fecha a lista de caminhos): sem ele, o `-commit`/`-end`
+>    seguinte são lidos como caminhos a remover → `SORRY` → **exit 32**.
+> 3. **`-map` é seletivo**: o que fica no `stage` e não for mapeado **não entra**
+>    na ISO — foi assim que o modelo/fonte/repo sumiram na 1ª tentativa.
 
 O `md5sum.txt` original fica obsoleto com essas alterações e é **removido** na
 remontagem (o Subiquity não o usa no autoinstall).
@@ -505,15 +513,18 @@ root desabilitado); no Debian o root fica bloqueado por padrão.
 | Layout da ISO base | Ubuntu exige `casper/` (recusado com mensagem clara se não existir); Debian exige `isolinux/`. Outras ISOs falham de propósito em vez de gerar algo quebrado. |
 | Boot BIOS | Ubuntu: El Torito preservado do original. Debian: `isolinux` + `isohdpfx.bin`. **Não validado.** |
 | Boot UEFI | Ubuntu: imagem EFI preservada + patch do `grub.cfg` do UEFI. Debian: **best-effort** (tenta `EFI/*/grub.cfg`; se estiver dentro de `efi.img`, exige `mtools`). **Não validado.** |
-| **Rede no 1º boot** | ✅ **Não é mais necessária** (com os padrões de payload ligados): pacotes do repositório local, modelo em `/opt/models` e fonte em `/opt/llama-src.tar.gz` vêm todos da mídia. ⚠️ **Ainda assim, rede é usada se estiver disponível** para atualizar pacotes — e a rede **é obrigatória na máquina que GERA a ISO** (para baixar base, modelo, deps e fonte), ou use `--iso/--iso-model/--iso-repo/--iso-source` com arquivos locais. |
-| **Modelo na mídia** | ✅ Implementado: `--iso-model auto|<caminho>|none`. Um `.gguf` inválido é recusado **antes** de montar a ISO (magic `GGUF` + tamanho), e o verificador reprova modelo pequeno na mídia. ⚠️ **Nunca validado num boot real** — o `late-command` nunca copiou um modelo de verdade, e o `firstboot` nunca passou `AI_MODEL_FILE` num sistema instalado. |
-| **Repositório apt na mídia** | ✅ Implementado: `--iso-repo auto|<dir>|none` + validação de release. O índice gerado é **aceito pelo `apt`** (testado de verdade, com resolução de dependência) e o `verify-iso.sh` reprova os 5 modos de falha testados. ⚠️ **Não validado no instalador**: que o Subiquity aceite a seção `sources` e que o debian-installer honre `apt-setup/local0/*` são **suposições documentadas** — o primeiro teste em VM deve confirmar. |
-| **Fonte do llama.cpp na mídia** | ✅ Implementado: `--iso-source auto|<tarball>|none`. A corrente foi exercitada num sandbox (late-command real copiando + `llama-build.sh` real compilando do tarball, com o manifesto dizendo `Rede: não usada`). ⚠️ **Nunca rodou num boot real.** |
-| **Release da ISO × máquina de build** | `--iso-repo auto` só monta o repositório se a release **casar** com a da ISO. Quando não casa (esta máquina é 25.10, a ISO padrão é 24.04), ele **pula o repositório com aviso** e a ISO sai valendo, mas o alvo passa a precisar de rede. Saídas para ter o repo: buildar na release certa, `--iso-url` da sua release, ou `--iso-repo CAMINHO`. |
-| Tamanho | ~2,7 GB (Ubuntu) / ~700 MB (Debian) + espaço do projeto. |
+| **Rede no 1º boot** | ✅ **Não é necessária E foi provado (sessão #21)**: numa VM, o 1º boot compilou o llama.cpp do tarball da mídia e usou o modelo e o repositório local, sem rede. A rede **é usada** se estiver disponível (para atualizar pacotes) e é **obrigatória na máquina que GERA a ISO**. |
+| **Modelo na mídia** | ✅ Implementado (`--iso-model`) e **validado num boot real** (o `late-command` copiou para `/opt/models` e o `firstboot` usou via `AI_MODEL_FILE`, sem rede). |
+| **Repositório apt na mídia** | ✅ Implementado (`--iso-repo`) e **validado (era bug)**: a seção `sources` do Subiquity **não funciona** (o curtin roda `apt-get update` num chroot sem `/cdrom`). O repo é carregado ao alvo (`/opt/apt-repo`) pelo late-command e usado no 1º boot. ⚠️ O **Debian** (`apt-setup/local0/*`) segue **não testado**. |
+| **Fonte do llama.cpp na mídia** | ✅ Implementado (`--iso-source`) e **validado num boot real**: `/opt/llama.cpp/build/bin/llama-server` foi compilado do tarball, sem rede. |
+| **Resíduo air-gapped (a investigar)** | ⚠️ O `llama-build.sh` usa `-DLLAMA_CURL=OFF` (runtime), mas o **build** ainda tenta baixar o **UI** do llama.cpp do HuggingFace (`-- UI: downloading … llama-ui …`). Na VM o `.sha256` falhou e o build **seguiu** (parece *best-effort*). **Confirmar** que a ISO é 100% offline (provável flag `-DLLAMA_BUILD_UI=OFF`/`-DLLAMA_UI=OFF` conforme a versão). |
+| **Release da ISO × máquina de build** | `--iso-repo auto` só monta o repositório se a release casar com a da ISO. **Solução prática (sessão #21):** gere a ISO **dentro de um container da mesma release** (ex.: `docker run ubuntu:24.04 …`) — o `--iso-repo auto` passa a casar e o build não exige sudo no host. |
+| **Debian/preseed** | 🔴 **Nunca executado.** Só o caminho Ubuntu foi bootado. O Debian usa `mkisofs`/`isolinux`/`efi.img` (com `mtools`) e `apt-setup/local0/*` — nada disso foi exercitado. |
+| **Boot UEFI** | ⚠️ **Nunca testado.** O `-boot_image replay` restaurou a imagem EFI oculta do Ubuntu; falta bootar de fato com `--boot-mode uefi` (precisa de `ovmf`). |
+| Tamanho | **5,2 GiB medido** (air-gapped: base 4,1 GB + repo 329 MB + modelo 1,1 GB + fonte 37 MB). |
 | Assinatura | A ISO gerada **não é assinada**. Verifique o SHA256 que o script imprime. |
 | `md5sum.txt` | Debian: regenerado. Ubuntu: **removido** (ficaria obsoleto; o Subiquity não o usa). |
-| Efeito real das mods na ISO | O autoteste valida a *geração*; que sysctl/governor/C-states **funcionam** no alvo depende do Bloco O de `VALIDATION.md`. |
+| Efeito real das mods na ISO | O autoteste valida a *geração*; que sysctl/governor/C-states **funcionam** no alvo depende do Bloco O de `VALIDATION.md` (ainda em hardware físico). |
 
 ---
 
@@ -540,14 +551,14 @@ tudo por script, idempotente, auditável.
 
 | Prioridade | Item |
 |-----------|------|
-| 🔴 Alta | **Construir e bootar a ISO numa VM** (Bloco M do `VALIDATION.md`) — é o maior risco não validado do projeto. Com as ferramentas de § 4.6 o caminho é `make iso` (com `ISO_ARGS=--serial-console`) → `make iso-verify` → `make iso-vm`. |
-| 🔴 Alta | **Rodar o caminho Ubuntu contra uma ISO real**, para achar erro de layout/`xorriso` antes do teste em VM. |
-| ✅ Feito | **Os 5 requisitos do § 3.1 estão implementados:** fonte do llama.cpp (`--iso-source`), modelo (`--iso-model`) e repositório apt (`--iso-repo`) na mídia + o caminho offline do papel (`--model-file`). O 1º boot não precisa mais de rede. |
-| 🔴 Alta | **Bootar a ISO numa VM** (Bloco M) — é o que falta para declarar o projeto terminado. Não há mais nenhuma pendência de **código** conhecida no caminho da ISO. |
-| 🟡 Média | **Confirmar o aceite do instalador** para a fonte extra de apt (seção `sources` / `apt-setup/local0`) — é a única suposição não verificada do caminho offline. Sintoma: erro de assinatura, ou instalar mas pedir rede. |
+| ✅ **FEITO** | **Construir e bootar a ISO numa VM** (Bloco M) — **concluído na sessão #21** (Ubuntu, em VM com KVM). Ver § 9 e o `STATE.md` § 3.3. |
+| ✅ **FEITO** | **Rodar o caminho Ubuntu contra uma ISO real** — feito; os bugs de layout/`xorriso` que só apareciam aí foram corrigidos (`replay`, `-map`, `-rm --`, GRUB `--id`). |
+| ✅ **FEITO** | **Os 5 requisitos do § 3.1:** fonte, modelo e repositório na mídia; o 1º boot roda **sem rede** (provado). |
+| 🔴 Alta | **Rodar o caminho Debian (`--distro debian`)** — nunca executado. Precisa de `mkisofs`/`isolinux`/`mtools` e o `apt-setup/local0/*`. |
+| 🔴 Alta | **Validar a ISO em HARDWARE FÍSICO** (Xeon E5-2680 v4 e Ryzen 5 3500X): repetir instalação + 1º boot e medir (`llama-bench`). Blocos A–O do `VALIDATION.md`. |
+| 🟡 Média | **Fechar o resíduo air-gapped:** confirmar/desligar o download do **UI** do llama.cpp no build (ver § 6). |
 | 🟡 Média | **Testar o boot UEFI** (`make iso-vm VM_ARGS="--boot-mode uefi"`). |
 | 🟢 Baixa | **Testar a ISO no CI:** `validate` pode rodar `verify-iso.sh --dir` sobre a árvore do stage (já roda, via `make iso-yaml`). Um teste de VM no CI exigiria KVM e 30+ min — fica para runner self-hosted. |
-| ~~🟡 Média~~ | ~~Variante air-gapped~~ → **decidida e virou requisito** (linha 🔴 Alta acima). O que era "variante" agora é o caminho planejado. |
 | ❌ Descartado | **Variante com binário pré-compilado:** usar os `.tar.gz` da Release em vez de compilar no 1º boot. **Descartado na sessão #14** — seria mais rápido, mas exigiria uma ISO por família e reintroduziria o risco de portabilidade. Ver § 3.1. |
 | 💡 Ideia | **Assinatura da ISO** com `gpg` + publicação do SHA256 no release. |
 | 💡 Ideia | **Imagem de VM (qcow2)** via Packer, derivada da mesma lógica. |
@@ -573,13 +584,32 @@ que cada passo **prova** e onde ele roda.
 regressão cedo, mas a ISO pode estar quebrada com eles verdes. Só o passo 3
 cria o artefato, e só o passo 4 diz se ele **funciona**.
 
-### 9.1 O passo 3 nesta máquina não roda (e o CI resolve)
+> ✅ **Passos 3 e 4 CONCLUÍDOS no caminho Ubuntu (2026-10-13, sessão #21).** A
+> ISO foi gerada (build `exit 0`), aprovada pelo `verify-iso.sh`
+> (**PASS=41/FAIL=0**) e **bootada/instalada numa VM** (`test-vm.sh` `exit 0`; o
+> 1º boot aplicou o ai-cpu-os). Detalhes e os números em
+> [`docs/STATE.md`](STATE.md) § 3.3 e `JOURNAL.md` § 4 (sessão #21). **Pendentes:**
+> o caminho **Debian** (passo 3 e 4) e o **hardware real** (passo 5).
 
-O ambiente de desenvolvimento não tem `xorriso` nem `qemu`, e tem só 2
-núcleos. Por isso o **GitHub Actions é o caminho prático** para o passo 3:
+### 9.1 Gerando a ISO na sua máquina (container) ou no CI
+
+**Sem `xorriso`/`qemu` no host** (comum): `build-iso.sh` exige **root** + `xorriso`,
+e `--iso-repo auto` exige a **mesma release** da ISO. O caminho prático que
+resolve os dois: gerar a ISO **dentro de um container da mesma release** (root
+grátis + release casando):
 
 ```bash
-# No site do repositório: Actions → iso → Run workflow
+docker run --rm -v "$PWD":/work -w /work -e DEBIAN_FRONTEND=noninteractive \
+  ubuntu:24.04 bash -c 'apt-get update -qq && apt-get install -y -qq \
+    xorriso curl ca-certificates coreutils xz-utils tar gzip python3-yaml >/dev/null && \
+    bash iso/build-iso.sh --distro ubuntu --disk /dev/vda --serial-console \
+      --role auto --family auto --iso-source auto --iso-model auto \
+      --iso-repo auto --yes'
+```
+
+**Ou pelo CI** (Actions → `iso` → Run workflow):
+
+```bash
 #   distro: ubuntu (padrão) · role/family: auto · disk: /dev/vda
 #   air_gapped: true   ← para provar o caminho offline completo
 ```
@@ -589,8 +619,8 @@ O que o workflow faz: baixa a ISO base → instala `xorriso` → roda
 o `verify-iso.sh` → mede o tamanho → publica o resumo (com os WARN).
 
 > 🔴 **Limite que muda o plano: 2 GiB por arquivo de Release.** O GitHub
-> **recusa** anexar um arquivo maior que isso a uma Release, e uma ISO com
-> modelo + repositório fica em ~4,3–5 GB. Consequências:
+> **recusa** anexar um arquivo maior que isso a uma Release, e a ISO air-gapped
+> medida ficou em **5,2 GB**. Consequências:
 >
 > * o padrão do workflow é `air_gapped: false` (ISO leve, ~2,7 GB);
 > * com `air_gapped: true`, o CI **prova o caminho completo** (o
@@ -622,26 +652,32 @@ config) e `aplicação concluída com sucesso` (o 1º boot **aplicou**).
 
 | Sintoma na VM | Onde olhar |
 |---------------|------------|
-| O instalador faz perguntas | a config não chegou na ISO, ou o menu não a escolheu → `make iso-verify` |
-| Erro de **assinatura** de pacote | a fonte extra de apt (seção `sources` / `apt-setup/local0`) → § 3.1 |
-| Instala, mas o 1º boot pede rede | repositório incompleto → aumente `--iso-repo-packages` |
+| O instalador faz **perguntas** (Subiquity interativo) | o GRUB subiu a entrada errada: a `menuentry` precisa de `--id ai-cpu-os-auto` para o `set default` casar (era bug — § 4.5) |
+| **Silêncio total** no console serial (nem boot) | capture a tela por QMP (`screendump`) — pode ser o boot (BIOS/UEFI) quebrado por `xorriso` (§ 4.5) |
+| `apt-config` **exit 100** / "does not have a Release file" | o repo local foi declarado no apt do **instalador**; ele tem de ir para o **alvo** via late-command (§ 3.1) |
+| Erro de **assinatura** (Debian) | `apt-setup/local0/*` na preseed → § 3.1 |
+| Instala, mas o 1º boot **pede rede** | repositório incompleto → aumente `--iso-repo-packages` |
 | 1º boot trava/demora muito | é a compilação do llama.cpp; confira `/var/log/ai-cpu-os-firstboot.log` |
-| O `test-vm.sh` não vê nada do 1º boot | a ISO foi gerada **sem** `--serial-console` |
+| O `test-vm.sh` **não vê** os marcadores | a ISO foi gerada **sem** `--serial-console`, ou o processo loga só no journal (use `/dev/console` + `journal+console` — § 4.5/§ 6) |
 | Sobra de marcador `@@TOKEN@@` | bug no `build-iso.sh` → rode `make iso-verify` |
 
 ### 9.4 Antes de considerar a ISO "fechada"
 
-- [ ] `make validate` verde (local ou no CI)
-- [ ] ISO **gerada** (passo 3) — não basta o dry-run
-- [ ] `verify-iso.sh` aprovado sobre a ISO real (o build já roda)
-- [ ] ISO **bootada e instalada** numa VM (passo 4) — é o critério de conclusão
-- [ ] 1º boot aplicado, com `systemctl status ai-cpu-os-firstboot` e o log limpos
-- [ ] O **tamanho** e o **SHA256** anotados em `docs/STATE.md`
-- [ ] Sessão registrada no `docs/JOURNAL.md`
+- [x] `make validate` verde (local — feito na sessão #21 **e** no CI)
+- [x] ISO **gerada** (passo 3) — Ubuntu ✅; **Debian ❌**
+- [x] `verify-iso.sh` aprovado sobre a ISO real (`PASS=41/FAIL=0`)
+- [x] ISO **bootada e instalada** numa VM (passo 4, Ubuntu) — ✅ sessão #21
+- [x] 1º boot aplicado, `status=ok`
+- [x] O **tamanho** e o **SHA256** anotados em `docs/STATE.md` § 5
+- [x] Sessão registrada no `docs/JOURNAL.md` (#21)
+- [ ] **Repetir em hardware físico** (Xeon/Ryzen) — Bloco M do `VALIDATION.md`
+- [ ] **Caminho Debian** gerado e bootado
+- [ ] **Boot UEFI** testado
+- [ ] Fechar o **resíduo air-gapped** do UI do llama.cpp (§ 6)
 
 > ⚠️ **A Regra 13 do `AGENTS.md` é explícita:** não declare a ISO pronta sem
 > tê-la bootado e instalado em VM. Verificação de conteúdo **não** substitui
-> boot.
+> boot. (Feito para o **Ubuntu**; Ubuntu ≠ Debian ≠ hardware real.)
 
 ---
 
@@ -649,6 +685,7 @@ config) e `aplicação concluída com sucesso` (o 1º boot **aplicou**).
 
 | Data | Mudança |
 |------|---------|
+| 2026-10-13 | 🎉 **A ISO foi GERADA e BOOTADA pela primeira vez** (sessão #21): air-gapped, construída num container `ubuntu:24.04` e instalada numa VM com KVM. `verify-iso.sh` **PASS=41/FAIL=0**; `test-vm.sh` **exit 0** (instalou sozinha; o 1º boot aplicou o ai-cpu-os, `.firstboot-status=ok`, família `intel-haswell`; llama.cpp compilado do tarball da mídia). **8 bugs reais corrigidos:** `xorriso` (`-rm --`, `-boot_image replay`, `-map` do modelo/fonte/repo, aspas do `-find`), SIGPIPE no verificador, GRUB sem `--id` (→ instalação interativa), repo apt no chroot do curtin (→ carregar ao alvo `/opt/apt-repo` + `Release`), marcadores fora do console. Atualiza § 3.1, § 4.5, § 6, § 8, § 9 e este § 10. |
 | 2026-10-07 | Criação: `iso/build-iso.sh` + preseed + serviço de primeiro boot + este documento. Nada executado em ambiente real ainda. |
 | 2026-10-12 | **Variante Ubuntu (autoinstall/Subiquity) adicionada como base padrão** (`--distro ubuntu`), com `iso/autoinstall/autoinstall.yaml`, remontagem por `-indev/-outdev -map` (setores de boot preservados), `late-command.sh` compartilhado entre os dois instaladores (`AI_CURTIN=1`), flags `--role`/`--family` no lugar de `--profile` e autoteste de templates (`--check-templates` / `make iso-yaml`) rodando no CI. **Continuamos sem ter construído nem bootado nenhuma ISO.** |
 | 2026-10-12 | **Ferramentas de validação:** `iso/verify-iso.sh` (conteúdo, com modo `--dir` sem xorriso) e `iso/test-vm.sh` (boot real em qemu, com marcadores no console serial). `--serial-console` torna a instalação e o 1º boot observáveis sem tela. O build agora **verifica a ISO ao final** e o `make iso-yaml` roda o verificador **incluindo um teste negativo** (verificador que nunca falha não vale nada). |

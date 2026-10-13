@@ -9,7 +9,7 @@
 > [`docs/STATE.md`](STATE.md).
 > **Quando escrever:** **ao fim de TODA sessão de trabalho** (ver § 8).
 >
-> **Última entrada:** sessão **#18** (2026-10-12) — o CI **estava vermelho no `main`** (default que abortava); corrigido, repo limpo e guardas novos.
+> **Última entrada:** sessão **#21** (2026-10-13) — 🎉 a **ISO foi GERADA e BOOTADA** numa VM (KVM): instalou sozinha e o 1º boot aplicou o ai-cpu-os (`status=ok`, família `intel-haswell`). **8 bugs reais** só visíveis ao executar. Ver § 4.
 
 ---
 
@@ -30,14 +30,20 @@ git pull --ff-only        # ou: git fetch && git status
 make ci                   # lint + docs + dry-run (igual ao CI 'validate')
 git log --oneline -12     # os últimos passos dados
 
-# 3. Ver o que o CI já provou (verde) e o que NÃO foi provado
-#    - validate      ✅ verde
-#    - build-llama   ✅ verde (compila e roda de verdade)
-#    - container     ✅ verde (imagem no GHCR)
-#    - iso           ⚠️ NUNCA executado
+# 3. Ver o que já foi provado (verde) e o que NÃO foi provado
+#    - validate         ✅ verde
+#    - build-llama      ✅ verde (compila e roda de verdade)
+#    - container        ✅ verde (imagem no GHCR)
+#    - ISO (sessão #21) ✅ GERADA e BOOTADA em VM (KVM) — instalou + 1º boot OK
+#    - ISO: Debian/preseed 🔴 NUNCA executado · hardware físico 🔴 NUNCA
 ```
 
 **Depois disso**, vá para a "Próxima ação imediata" em `docs/STATE.md` § 6.
+
+> 🎉 **A ISO existe e roda (2026-10-13).** O critério de conclusão do projeto
+> (uma ISO que instala sozinha e aplica o ai-cpu-os no 1º boot) **foi cumprido
+> numa VM**. O que falta é repetir em **hardware físico** (Xeon/Ryzen) e no
+> caminho **Debian**. Ver `STATE.md` § 3.3.
 
 > ⚠️ **Regra de ouro da retomada:** não confie na memória — confie no
 > `STATE.md` § 6. Ele é reescrito ao fim de cada sessão justamente para isto.
@@ -50,13 +56,33 @@ Isto evita perder tempo (re)descobrindo o que já se sabe sobre **esta** máquin
 
 | Item | Situação | Consequência |
 |------|----------|--------------|
-| Máquina | Notebook AMD A4-3300M, 2 núcleos, Ubuntu 25.10 | **Compilar o llama.cpp localmente é inviável** (~40 min+, testado até 32 min sem terminar). Use o CI. |
-| `shellcheck` | ✅ em `~/.local/bin` (instalado via `pip install --user shellcheck-py`) | `make shellcheck` funciona |
-| `yamllint` | ✅ (instalado via `pip install --user yamllint`) | `make yaml` funciona |
-| `jq`, `make`, `git`, `docker` | ✅ | ok |
-| `xorriso`, `mtools` | ❌ **ausentes** | **Não é possível gerar a ISO aqui.** Use `make iso-dry-run` (só simula). |
+| Máquina (atual, sessão #21) | **24 vCPU** (Xeon E5-2676 v3), **14 GB RAM**, 790 GB livres, Ubuntu **26.04**, `/dev/kvm` ✅, Docker ✅ | **Tudo que era "bloqueado por ambiente" foi destravado**: gerar/bootar a ISO, compilar o llama.cpp. Ver § 4, sessão #21. |
+| Máquina (antiga) | Notebook AMD A4-3300M, 2 núcleos | Compilar era inviável — por isso o CI compilava. |
+| `shellcheck`/`yamllint`/`xorriso`/`qemu` | ❌ no host; ✅ via `docker run ubuntu:24.04` | `make validate`/ISO rodam **dentro do container** (`apt-get install -y shellcheck yamllint xorriso make python3-yaml`). |
 | `gh` (GitHub CLI) | ❌ ausente e sem token | Não dá para disparar/consultar workflows por CLI. Use o **navegador** ou a **API pública**. |
 | API do GitHub (sem token) | 60 req/h | **Nunca faça polling agressivo** — ativa a "abuse detection" e bloqueia por minutos. Ver § 6. |
+| `sudo` no host | pede senha | Prefira o **container** (root grátis) para o que exige root (`build-iso.sh`, `apt`). |
+
+### Receita: rodar a esteira e a ISO nesta máquina (sem sudo no host)
+
+```bash
+# 1) make validate + verificação (num container com as ferramentas)
+docker run --rm -v "$PWD":/work -w /work ubuntu:24.04 bash -c \
+ 'apt-get update -qq && apt-get install -y -qq make shellcheck yamllint xorriso \
+   curl python3-yaml gzip coreutils >/dev/null && make validate'
+
+# 2) gerar a ISO air-gapped (container 24.04 = base da ISO + root)
+docker run --rm -v "$PWD":/work -w /work -e DEBIAN_FRONTEND=noninteractive \
+ ubuntu:24.04 bash -c 'apt-get update -qq && apt-get install -y -qq \
+   xorriso curl ca-certificates coreutils xz-utils tar gzip python3-yaml >/dev/null && \
+   bash iso/build-iso.sh --distro ubuntu --disk /dev/vda --serial-console \
+     --role auto --family auto --iso-source auto --iso-model auto \
+     --iso-repo auto --yes'
+
+# 3) bootar/instalar em VM (qemu do HOST, com /dev/kvm)
+bash iso/test-vm.sh --iso iso/out/ai-cpu-os-ubuntu-<data>.iso \
+  --ram 6144 --cpus 4 --timeout-min 90 --keep --yes
+```
 
 ### Como o CI é verificado daqui (sem `gh`)
 
@@ -1430,6 +1456,80 @@ o que dava a impressão de que o negativo funcionava.
 
 ---
 
+### Sessão #21 — 2026-10-13 · 🎉 A ISO é GERADA e BOOTADA (o critério de conclusão)
+
+- **Objetivo:** retomar o projeto numa máquina **melhor** que o notebook (24 vCPU,
+  `/dev/kvm`, Docker, 790 GB livres, rede) — o que destrava as três threads que
+  estavam "bloqueadas por ambiente" (§ 5.1 antigo). Fazer o **passo 3 + passo 4**
+  do checklist: gerar a ISO air-gapped e bootá-la/instalar numa VM.
+- **Feito (o caminho TODO executado, a primeira vez na vida do projeto):**
+  - **Gerada a ISO** dentro de um container `ubuntu:24.04` (resolve o *release
+    mismatch* do repo apt — esta máquina é 26.04 — e o `root` que o `build-iso.sh`
+    exige). Air-gapped: **fonte do llama.cpp + modelo + repositório apt** na mídia.
+  - Descoberto (no container) que o runner não tinha `make`/`shellcheck`; nada que
+    afete o produto.
+  - **`make validate` verde** (num container com as ferramentas): `families 60/60`,
+    `iso-selection 13/13`, `iso-repo-filter 16/16`, `verify-repo-distro 5/5`,
+    `ci-guards 16/16`, `iso-dry-run-both` OK.
+  - **ISO verificada** (`verify-iso.sh`): **PASS=41 FAIL=0**.
+  - **ISO bootada e instalada numa VM** (qemu + KVM, `-cpu host` = Xeon
+    Haswell-EP) e o **1º boot aplicou** o ai-cpu-os: `test-vm.sh` →
+    **`TESTVM_EXIT=0`**, os **dois marcadores** no console serial, e
+    `.firstboot-status: status=ok`, `Concluído (papel 'inference', família
+    'intel-haswell')`, `llama-server`/`llama-cli` compilados do tarball, modelo
+    em `/opt/models`, repo em `/opt/apt-repo`.
+- **Decisões / achados que exigem AÇÃO (8 bugs reais, todos só visíveis ao EXECUTAR):**
+  1. `xorriso … -rm X -commit -end`: o `-rm` engole `-commit`/`-end` como
+     caminhos → `SORRY` → **exit 32** com a ISO já escrita. Fix: `-rm X --`.
+  2. `-boot_image any keep` **não copia a imagem UEFI oculta** do Ubuntu → ISO
+     ~6 MB menor, `efi.img` de 1 bloco, MBR protetor além do fim (exit 32).
+     Fix: `-boot_image any replay` (re-anexa a partição EFI via `imported_iso`).
+  3. O caminho Ubuntu mapeia só o que muda (`-map`): **faltavam** `/apt-repo`,
+     `/models` e `/llama-src.tar.gz` na ISO. Fix: 3 `-map`.
+  4. `verify-iso.sh`: `xorriso -find` cita caminhos entre **aspas simples** →
+     igualdade quebrava → **408 falsos** "repositório incompleto". Fix: helper
+     `xfind` que tira as aspas.
+  5. `verify-iso.sh`: `printf … | grep -q` com `set -o pipefail` → **SIGPIPE
+     (141)** → falsos "fonte não tem CMakeLists". Fix: here-string `<<<`.
+  6. **GRUB**: `set default="ai-cpu-os-auto"` casa por **id** ou título, e a
+     `menuentry` **não tinha `--id`** → o GRUB caía na entrada **0** (a
+     interativa) e a instalação automática **nunca acontecia**. Fix: `--id`.
+     (O verificador só fazia `grep`, casando com o próprio `set default`.)
+  7. **Repositório apt local**: o curtin roda `apt-get update` **dentro de um
+     chroot no alvo**, onde **`/cdrom` não existe** → `file:///cdrom/apt-repo`
+     derrubava o `apt-config` (**exit 100**, "does not have a Release file").
+     Fix: o repo vai para o **alvo** (`/opt/apt-repo`) pelo late-command e é
+     usado no 1º boot; o `sources` do autoinstall não o declara mais; e o índice
+     ganhou `Release`.
+  8. **Marcadores**: o `log()` do late-command vai para o log do subiquity e o
+     firstboot logava só no **journal** → o `test-vm.sh` **nunca via** os
+     marcadores (era o teste que "não via nada"). Fix: eco no `/dev/console` e
+     `StandardOutput=journal+console`.
+  - Também: `build.sh` repassava `--yes` ao `smoke-test.sh`, que não o aceitava
+    ("Argumento desconhecido") — corrigido (era ruído não-fatal, mas agora limpo).
+  - `test-vm.sh`: `-boot d` + `-no-reboot` matavam o 1º boot (o instalador
+    reinicia). Fix: `-boot order=c,once=d`, sem `-no-reboot`.
+- **Problemas:**
+  - Depurar o "não boota" sem tela: resolvido com **screenshot do framebuffer via
+    QMP** (`screendump`) + OCR (`tesseract` em container) + **console serial
+    bidirecional** (`-serial unix:`) para logar na VM e ler `journalctl`.
+  - O serial do subiquity **não** traz a saída do curtin; o erro real estava no
+    `journalctl` (`curtin.util.ProcessExecutionError`, exit 100).
+- **Verificado:** build **exit 0** + `verify-iso.sh` **PASS=41/FAIL=0** +
+  `test-vm.sh` **exit 0** + `.firstboot-status: status=ok` (login na VM
+  instalada) + `make validate` verde.
+- **NÃO feito / não testado:**
+  - 🔴 **Debian/preseed nunca executado** (só o caminho Ubuntu foi bootado).
+  - 🔴 **Boot UEFI nunca testado** (`--boot-mode uefi`).
+  - 🔴 **Hardware físico** (Xeon E5-2680 v4 e Ryzen 5 3500X) — Blocos A–O.
+  - ⚠️ **Resíduo air-gapped em investigação** (§ 5.3): o build do llama.cpp
+    ainda tenta baixar o **UI** do HuggingFace (parece best-effort; o `.sha256`
+    falhou e o build seguiu).
+- **Commits:** *(ver `git log`)* — `fix(iso): a ISO é gerada e bootada pela
+  primeira vez` + docs.
+
+---
+
 
 
 ## 5. 🧵 Threads abertas (o que ficou no ar)
@@ -1437,14 +1537,20 @@ o que dava a impressão de que o negativo funcionava.
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,
 > *decidido mas não feito* ou *em dúvida*.
 
-### 5.1 Bloqueado por ambiente (não dá para fazer nesta máquina)
+### 5.1 Bloqueado por ambiente
+
+> ✅ **DESTRAVADO na sessão #21.** O ambiente mudou: uma máquina com **24 vCPU,
+> `/dev/kvm`, `qemu`, Docker, 790 GB livres e rede**. Como `build-iso.sh` exige
+> root e `xorriso` (ausente no host), a ISO foi gerada **dentro de um container
+> `ubuntu:24.04`** (root grátis + resolve o *release mismatch* do repo apt) e
+> bootada no **qemu do host** (com `/dev/kvm`). **Gerar e bootar a ISO não é
+> mais bloqueio.**
 
 | Thread | Bloqueio |
 |--------|----------|
-| Gerar e bootar a ISO | Falta `xorriso`/`qemu`. *Solução:* `sudo apt install -y xorriso qemu-system-x86 qemu-utils curl`, ou rodar o workflow `iso` no GitHub. (No caminho **Ubuntu** não é preciso `mtools`: a remontagem por `-indev/-outdev -map` preserva os setores de boot da ISO oficial.) |
-| Validar em hardware real | Falta acesso físico ao Xeon e ao Ryzen. |
-| Medir tokens/s (`llama-bench`) | Depende do item acima. |
-| Compilar o llama.cpp localmente | CPU fraca (2 núcleos) — use os binários da Release `v0.2.0` ou o CI. |
+| **Validar em hardware real** | Ainda falta acesso físico ao Xeon E5-2680 v4 e ao Ryzen 5 3500X (Blocos A–O do `VALIDATION.md`). |
+| **Medir tokens/s (`llama-bench`)** | Depende do item acima. |
+| ~~Gerar e bootar a ISO~~ | ✅ **Feito na sessão #21** (VM com KVM). Ver § 4, sessão #21. |
 
 ### 5.2 Decidido, mas ainda não executado
 
@@ -1459,21 +1565,22 @@ o que dava a impressão de que o negativo funcionava.
 | ⚠️ **Dependências implícitas do runner** | **Resolvido (sessão #20):** `openssl` (hash da senha), `gzip` (índice do repo) e `ca-certificates` (curl HTTPS) passaram a ser instalados explicitamente. Descobertos num container `ubuntu:24.04` limpo — dependência que existe no runner "por acaso" some quando o runner muda. |
 | **Rodar o workflow `iso` de novo (ubuntu e debian, `air_gapped=true`)** | É o **próximo passo real**: as três causas conhecidas estão fechadas. Se falhar de novo, as **anotações** dirão o motivo (agora capturam `[FAIL]` do verificador também). |
 | **PRs abertos para decidir** | **PR #2** (debian `13-slim` no `docker/`): ✅ **mesclado** em `63eebff` (o `main` remoto já está à frente). **PR #3** (bump de actions): ✅ **resolvido no `main`** (caminho B) — o `@v7` do `upload-artifact` foi aplicado direto, com guarda no CI; **pode fechar o PR**. |
-| **Gerar a ISO (passo 3 do checklist)** | Não roda nesta máquina (sem `xorriso`). Caminho prático: workflow `iso` no GitHub com `air_gapped: true`. Ver `docs/ISO.md` § 9.1. |
-| **Bootar em VM (passo 4 — o critério de conclusão)** | Precisa de `qemu`+KVM. Gere a ISO com `--serial-console` ou o `test-vm.sh` não vê o 1º boot. Ver `docs/ISO.md` § 9.2. |
-| ⚠️ **Limite de 2 GiB por arquivo de Release** | A ISO air-gapped (~4,3–5 GB) **não pode** ser anexada a uma Release. O CI pula o upload e avisa. Distribuição: pendrive/`scp`, runner self-hosted, ou outro host + SHA256 na Release. |
-| **Aceite do instalador para o repo local** | A seção `sources` (Subiquity) e `apt-setup/local0/*` (debian-installer) são **suposições documentadas** — não foram vistos funcionando. Sintoma a procurar: erro de assinatura; ou instalar mas pedir rede (repo incompleto). |
+| **Gerar a ISO (passo 3 do checklist)** | ✅ **FEITO na sessão #21** — build **exit 0**, `verify-iso.sh` **PASS=41/FAIL=0**. Ver `STATE.md` § 3.3. |
+| **Bootar em VM (passo 4 — o critério de conclusão)** | ✅ **FEITO na sessão #21** — `test-vm.sh` **exit 0** (instalou + 1º boot aplicou). Ainda falta **hardware físico** e o caminho **Debian**. |
+| ⚠️ **Limite de 2 GiB por arquivo de Release** | A ISO air-gapped (~5,2 GB) **não pode** ser anexada a uma Release. O CI pula o upload e avisa. Distribuição: pendrive/`scp`, runner self-hosted, ou outro host + SHA256 na Release. |
+| ✅ **Aceite do instalador para o repo local** | **RESOLVIDO (sessão #21) — era BUG.** A `sources` (Subiquity) **não funciona**: o curtin roda `apt-get update` num **chroot no alvo** (sem `/cdrom`) → `apt-config` exit 100. Agora o repo é **carregado para o alvo** (`/opt/apt-repo`) pelo late-command. (O `apt-setup/local0` do Debian segue **não testado**.) |
 | **PR #1 do Dependabot** | ✅ **mesclado** em 2026-10-09 (verificado pela API: `merged: true`). |
-| **Bloco M** (`VALIDATION.md`) | Roteiro da ISO pronto; nenhuma execução ainda. |
-| **Blocos A–L** (`VALIDATION.md`) | Idem — nenhum resultado preenchido. |
+| **Bloco M** (`VALIDATION.md`) | ✅ **EXECUTADO no caminho Ubuntu em VM (sessão #21)**; falta o Debian e o hardware real. |
+| **Blocos A–L** (`VALIDATION.md`) | Idem — nenhum resultado preenchido (hardware físico). |
 | **`md5sum.txt` da ISO** | Gerado pelo script, mas **nunca validado** por um instalador real. |
-| **Boot UEFI da ISO** | Implementado como *best-effort* (precisa de `mtools`); **não testado**. |
+| **Boot UEFI da ISO** | ⚠️ **não testado.** O `-boot_image replay` (sessão #21) restaurou a imagem EFI oculta do Ubuntu; falta o Debian (`mtools`) e o boot UEFI de fato. |
 
-### 5.3 Dúvidas em aberto (requerem decisão sua)
+### 5.3 Dúvidas em aberto / dívida técnica (requerem decisão sua)
 
 | Dúvida | Contexto |
 |--------|----------|
-| — (nenhuma em aberto) | Todas as dúvidas de arquitetura registradas até aqui foram respondidas. As pendências são de **execução**, não de decisão: gerar/bootar a ISO, montar o repo apt local, medir em hardware. |
+| ⚠️ **O build do llama.cpp ainda busca o UI na rede?** | Achado na sessão #21: `llama-build.sh` usa `-DLLAMA_CURL=OFF` (runtime sem downloads), mas o **build** tentou baixar o **UI** do HuggingFace (`-- UI: downloading … llama-ui … dist.tar.gz`); o `.sha256` falhou na VM e o build **seguiu** → parece *best-effort*. **Confirmar** que a ISO é 100% offline (talvez uma flag `-DLLAMA_BUILD_UI=OFF`/`-DLLAMA_UI=OFF` conforme a versão do llama.cpp). Não bloqueou o teste, mas contraria a Regra 13-b se for obrigatório. |
+| **Distribuir a ISO air-gapped (5,2 GB > 2 GiB da Release)** | Caminhos: pendrive/`scp`, runner self-hosted, ou publicar fora + SHA256 na Release. Decisão de infraestrutura, não de código. |
 
 > ✅ **Resolvido na sessão #15:** o **modelo `.gguf` vai na mídia** ("um pouco
 > maior não é um problema"). Implementado de ponta a ponta: `--iso-model` →
@@ -1554,6 +1661,16 @@ o que dava a impressão de que o negativo funcionava.
 | Bug **dependente do ambiente** que passa local e falha remoto | O fecho de dependências na minha máquina (25.10) não tinha pacote virtual; o runner (24.04) tinha — e só lá o lote morria. Nada no meu ambiente indicava o problema | Quando o sintoma é "local passa, remoto falha", desconfie de **entrada do ambiente** (release, versão de pacote, locale) e mude o teste para **injetar** essa entrada (stub/fixture) em vez de tentar adivinhar |
 | Assumir que "seis guardas verdes" significa seis guardas funcionando | O job passava verde com todos eles decorativos: nada distinguia "regra respeitada" de "regra não verificada" | Para cada guarda novo, **plante a violação** e confirme que falha. Automatize isso (é o `make ci-guards-test`) |
 | Polling em laço com `curl` contra a API do GitHub | Um laço de 25–30 iterações **esgota a cota anônima** (60 req/h) e você fica cego exatamente na hora de ler o resultado. Sintoma: JSON sem a chave esperada (`KeyError: 'workflow_runs'`) | Espere por **turnos** em vez de repetir `curl`; ou peça ao dono para olhar a página Actions. Trate chave ausente como **erro**, não como “sem runs” |
+| `xorriso`: opção que **engole** as seguintes como argumento | `-rm X -commit -end`: a lista de `-rm` come `-commit` e `-end` como *caminhos* → `SORRY: Cannot find path '-commit'` → **exit 32** com a ISO já escrita (o sintoma é uma ISO válida em disco + rc≠0) | Termine a lista com `--`: `-rm X -- -commit -end`. Vale para toda opção que aceita `[***]` de caminhos |
+| `xorriso -boot_image any keep` num ISO com **imagem El Torito oculta** (Ubuntu) | O `keep` mantém a *referência*, mas a imagem EFI **oculta** (fora da árvore ISO9660) não é copiada: a ISO sai ~6 MB menor, o `efi.img` vira 1 bloco e o MBR protetor aponta além do fim → **exit 32** + UEFI quebrado | Use `-boot_image any replay` (reexecuta o `-report_system_area cmd`: re-anexa a partição EFI via `--interval:imported_iso`) |
+| Remontar ISO por `-map` **seletivo** e esquecer arquivos | O caminho Ubuntu mapeia só o que muda; o que fica no `stage` (modelo, fonte, repo) **não** entra na ISO — e o `verify-iso.sh` acusou "air-gapped sem conteúdo" | Ao adicionar algo à mídia, **acrescente o `-map`** correspondente; rode `verify-iso.sh` (ele pega) |
+| `xorriso -find` **cita os caminhos entre aspas simples** | `'/apt-repo/x.deb'` não casa com `x.deb` numa comparação de igualdade → **408 falsos** "repositório incompleto" (só no modo `--iso`; o `--dir` usa `find` e não tem aspas) | Remova as aspas do resultado (`sed -e "s/^'//" -e "s/'$//"`); teste os dois modos |
+| `printf … \| grep -q` com `set -o pipefail` (entrada > buffer do pipe) | O `grep -q` sai no 1º match, o `printf` leva **SIGPIPE (141)** e o pipeline "falha" → o `if` cai no else. Falsos "a fonte não tem CMakeLists". Já tinha acontecido com `find \| head` | Use **here-string**: `grep -qE … <<<"$VAR"`. (Ou `grep` sem `-q`, que lê tudo.) Vale para qualquer lista > ~64 KB |
+| `set default="<id>"` no GRUB sem `menuentry … --id <id>` | O `set default` casa por **id** OU **título**; sem o `--id` não acha, cai na entrada **0** (a interativa) e a instalação automática **nunca acontece** — sem erro, só o instalador interativo | Sempre par `set default="X"` + `menuentry "…" --id X`. E o verificador tem de checar o `--id`, não só a string (senão casa com o próprio `set default`) |
+| Declarar `file:///cdrom/...` como fonte **no apt do instalador** | O curtin roda `apt-get update` **dentro de um chroot no alvo**, onde **`/cdrom` não está montado** → `file:///cdrom/apt-repo` é inalcançável → `apt-config` **exit 100** ("does not have a Release file"), mesmo com o repo e o `Release` na mídia | Carregue o repo para o **alvo** (o late-command copia `/cdrom/apt-repo` → `/opt/apt-repo`) e aponte a fonte lá; o apt do instalador **não** o usa |
+| Julgar um teste pela **saída do serial** quando o processo loga no **journal** | O `test-vm.sh` julga por marcadores no console serial, mas o `log()` do late-command vai para o log do subiquity e o firstboot logava só no journal → **nenhum marcador** aparecia e o teste parecia não ver nada (embora a instalação estivesse certa) | Faça o marcador sair **no `/dev/console`** (`printf … > /dev/console`) e use `StandardOutput=journal+console` no unit. Confirme com `--serial-console` |
+| Depurar boot de VM **sem tela** | "a VM não boota" sem pista nenhuma: serial vazio. A causa (GRUB subindo a entrada errada) só apareceu com a **tela** | Capture o framebuffer por **QMP** (`screendump`) e leia com OCR (`tesseract` em container); e use **serial bidirecional** (`-serial unix:`) para logar na VM e ver `journalctl` — o serial do subiquity **não** traz a saída do curtin |
+| `-boot d` **+** `-no-reboot` num teste de instalação | O instalador **reinicia** ao terminar e o `-no-reboot` encerra o qemu → o 1º boot (o teste que importa) nunca acontece | `-boot order=c,once=d` (1º boot do CD, depois do disco), **sem** `-no-reboot` |
 
 ---
 
@@ -1617,6 +1734,7 @@ Ao **fim de cada sessão**, faça nesta ordem:
 
 | Data | Mudança |
 |------|---------|
+| 2026-10-13 | Sessão #21 — 🎉 **a ISO é GERADA e BOOTADA.** Numa máquina com 24 vCPU + KVM + Docker, a ISO air-gapped foi construída (container `ubuntu:24.04`), verificada (`PASS=41`) e **bootada numa VM** (instalou sozinha; o 1º boot aplicou o ai-cpu-os, família `intel-haswell`). **8 bugs reais** só visíveis ao executar. § 5.1 deixa de ser "bloqueado"; § 5.2 marca o repo local como **bug resolvido** (o apt do curtin roda em chroot sem `/cdrom`); § 5.3 ganha o resíduo do UI do llama.cpp; § 6 ganha 11 armadilhas novas. |
 | 2026-10-07 | Criação — diário de continuidade (sessões #1–#8), inventário do ambiente, threads abertas e armadilhas. |
 | 2026-10-12 | Sessões #9–#13 (famílias → ISO Ubuntu → ferramentas de validação → Zen 3/4 + GPU → documentação por público). Corrigido o marcador "Última entrada" do topo (estava parado em #7) e a lista de marcadores do § 7 (era `@@PROFILE@@`, removido na refatoração). |
 | 2026-10-12 | Sessão #14 — fechadas as duas dúvidas de arquitetura da ISO (**air-gapped = sim**; **compilar no 1º boot > binário pré-colado**). Item 1 dos requisitos implementado (`--source`). Nova dúvida aberta: o modelo vai na mídia? |

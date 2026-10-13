@@ -687,6 +687,44 @@ sudo systemctl disable --now ai-server
 > ⚠️ **Faça tudo em VM.** A ISO **apaga o disco** indicado em `--disk`.
 > Só depois de validar em VM use em hardware real.
 
+### M.0 ✅ RESULTADO EXECUTADO — sessão #21 (2026-10-13), caminho Ubuntu
+
+> **Este bloco foi EXECUTADO pela primeira vez.** Ubuntu Server 24.04
+> air-gapped, gerado num container `ubuntu:24.04` e instalado numa **VM com
+> KVM** (`-cpu host`, host Xeon E5-2676 v3). Toolchain do host: `xorriso` 1.5.6
+> + `qemu` 8.2 (container) / 10.2 (host).
+
+| Passo (M.1–M.5) | Resultado |
+|-----------------|-----------|
+| `make iso-lint` / autoteste de templates | ✅ |
+| `verify-iso.sh` sobre a ISO real | ✅ **PASS=41 FAIL=0** |
+| Build da ISO (`--role auto --family auto --serial-console` + fonte/modelo/repo) | ✅ **exit 0** |
+| Download da ISO base + SHA256 | ✅ (`ubuntu-24.04.5-live-server-amd64.iso`) |
+| Caminho **offline** (fonte/modelo/repo na mídia) | ✅ usado no 1º boot, sem rede |
+| `test-vm.sh` (boot + instalação + 1º boot) | ✅ **exit 0**, 2 marcadores |
+| Instalação automática (sem perguntas) | ✅ |
+| `.firstboot-status` no alvo | ✅ **`status=ok`** |
+| Papel/família detectados no alvo | ✅ `inference` / `intel-haswell` |
+| llama.cpp compilado no alvo (do tarball) | ✅ `/opt/llama.cpp/build/bin/llama-server` |
+| Modelo/instalação no alvo | ✅ `/opt/models/…gguf`, `/opt/apt-repo` |
+| Tamanho / SHA256 da ISO | 5,2 GiB / `c59da479…` (ver `STATE.md` § 5) |
+| Tempo (4 vCPU) | instalação+1º boot ~13 min |
+
+> ✅ **O que isto prova:** a ISO **existe**, **boota**, **instala sozinha** e o
+> **1º boot aplica**. O critério de conclusão do projeto foi cumprido **para o
+> caminho Ubuntu, em VM**.
+>
+> 🔴 **O que NÃO foi feito neste bloco:**
+> - **Debian/preseed** (`--distro debian`) — M.2/M.4/M.5 **não executados**.
+> - **Hardware físico** (Xeon E5-2680 v4 e Ryzen 5 3500X) — o passo 5.
+> - **Boot UEFI** (`--boot-mode uefi`).
+> - Medição de tokens/s (`llama-bench`) no alvo.
+>
+> **8 bugs reais** foram achados/corrigidos para chegar até aqui (xorriso
+> `-rm --`/`-boot_image replay`/`-map`; GRUB `--id`; repo apt no chroot do
+> curtin; marcadores; SIGPIPE; aspas do `-find`). Detalhes: `JOURNAL.md` § 4
+> (sessão #21) e `STATE.md` § 3.3.
+
 ### M.1 Preparar a máquina de build (Debian/Ubuntu com xorriso)
 
 ```bash
