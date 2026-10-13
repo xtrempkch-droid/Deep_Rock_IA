@@ -217,6 +217,11 @@ Ele mostra o que vai fazer e **pergunta antes de continuar**. Ao final:
 **Alguma coisa pediu reinício?** Se ele avisou isso, reinicie — é o ajuste da
 linha de boot, e só vale depois do reboot.
 
+> **Não quer o serviço de IA?** Rode com outro papel:
+> `sudo ./build.sh --role builder` (máquina de compilar e hospedar
+> registry/Gitea). Ou, se você quer só uma melhoria pontual e não o sistema
+> todo, veja a **seção 8**.
+
 ### Passo 5 — Testar
 
 ```bash
@@ -233,9 +238,6 @@ sudo systemctl restart ai-server
 
 Isso baixa o **Qwen2.5-Coder-1.5B** (~1,1 GB), pequeno de propósito: serve para
 testar o caminho inteiro rápido.
-
-> **Não quer o serviço de IA?** Use `--role builder` (máquina de compilar e
-> hospedar registry/Gitea) ou leia a seção 8 para aplicar só melhorias pontuais.
 
 ---
 
