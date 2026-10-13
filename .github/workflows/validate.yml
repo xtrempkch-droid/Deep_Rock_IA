@@ -95,6 +95,25 @@ jobs:
           set -euo pipefail
           make iso-select-test
 
+      # O download do repositório apt local (`--iso-repo`), com `apt-cache` e
+      # `apt-get` SUBSTITUÍDOS por stubs. Existe porque o CI falhou com
+      # "Pacote pedido está AUSENTE: gnupg/jq/git": `apt-get download a b c`
+      # ABORTA O LOTE INTEIRO quando um dos nomes não tem candidato, e o
+      # `|| true` engolia até 25 pacotes por lote. Sem rede, sem apt real.
+      - name: ISO (repositório apt local — filtro e fallback)
+        run: |
+          set -euo pipefail
+          make iso-repo-test
+
+      # Prova que os guardas do próprio job REALMENTE derrubam o job, plantando
+      # cada violacao numa COPIA temporaria. Existe porque SEIS guardas estavam
+      # na forma `! grep`, que o `set -e` ignora quando o comando e invertido
+      # com `!` — eles nunca derrubavam nada.
+      - name: Guardas do CI (prova por violação plantada)
+        run: |
+          set -euo pipefail
+          make ci-guards-test
+
       # O template do autoinstall NÃO é YAML válido enquanto tem @@TOKENS@@ (o
       # `@` é indicador reservado do YAML), então ele não entra no yamllint
       # acima. Este passo substitui os tokens e valida o YAML RESULTANTE —
@@ -191,8 +210,11 @@ jobs:
             roles/builder/build-runner.sh
             tests/smoke-test.sh
             tests/test-iso-selection.sh
+            tests/test-iso-repo-filter.sh
+            tests/test-ci-guards.sh
             tests/fixtures/SHA256SUMS.ubuntu-24.04
             tests/fixtures/SHA256SUMS.debian-13
+            tests/fixtures/apt-cache-policy.txt
           )
           fail=0
           for f in "${required[@]}"; do
@@ -284,7 +306,14 @@ jobs:
           grep -q 'docs/GPU.md' llama-build.sh
           grep -q 'GPU.md' AGENTS.md
           grep -q 'GPU' detect-hardware.sh
-          ! grep -q -- '--gpu auto' llama-build.sh
+          # Guarda negativo na forma `if`, NUNCA na forma `! cmd`: com `set -e`
+          # o bash IGNORA o status de um comando invertido com `!` (esta na doc
+          # do `set`), entao `! grep ...` jamais derrubava este job. Descoberto
+          # na marra: SEIS guardas negativos deste arquivo eram decorativos.
+          if grep -q -- '--gpu auto' llama-build.sh; then
+            echo "::error file=llama-build.sh::voltou o '--gpu auto': GPU tem de ser EXPLICITA (Regra 12-c)"
+            exit 1
+          fi
           # O teste do casamento CPU → família precisa continuar existindo:
           # é o único que exercita Zen 3/Zen 4 sem o hardware.
           grep -q 'families-matrix.txt' tests/test-families.sh
@@ -348,6 +377,20 @@ jobs:
           # entao renomear a funcao passaria batido. Testado com caso positivo.
           grep -q '^pick_iso_entry()' iso/build-iso.sh
           grep -q '^normalize_iso_name()' iso/build-iso.sh
+          # O filtro de candidatos e o fallback um-a-um do download do repo
+          # apt. O `-n 25` sozinho (ou `|| true` cru) e o que perdia 25
+          # pacotes por lote em silencio — nao pode voltar.
+          grep -q '^packages_with_candidate()' iso/build-iso.sh
+          grep -q 'iso-repo-test' Makefile
+          grep -q 'validate:.*iso-repo-test' Makefile
+          grep -q 'make iso-repo-test' .github/workflows/validate.yml
+          grep -q 'ci-guards-test' Makefile
+          grep -q 'validate:.*ci-guards-test' Makefile
+          grep -q 'make ci-guards-test' .github/workflows/validate.yml
+          if grep -q 'xargs -r -n 25' iso/build-iso.sh; then
+            echo "::error file=iso/build-iso.sh::lote sem fallback: um nome ruim perde 25 pacotes"
+            exit 1
+          fi
           # A fixture PRECISA manter o marcador binario `*` — e ele que
           # reproduz o 404. `-F` para deixar explicito que e texto literal
           # (em BRE o `*` so e especial depois de um atomo, mas um leitor
@@ -356,7 +399,10 @@ jobs:
           # Versoes de actions alinhadas: o iso.yml ficou preso em @v4 enquanto
           # o resto do repo ja estava em @v6/@v7 (o bump do Dependabot nao o
           # alcancou). Nada de actions/* em major antigo.
-          ! grep -qE 'uses: actions/[a-z-]+@v[1-4]$' .github/workflows/*.yml
+          if grep -qE 'uses: actions/[a-z-]+@v[1-4]$' .github/workflows/*.yml; then
+            echo "::error::actions/* em major antigo (@v1..@v4) — alinhe com o resto do repo"
+            exit 1
+          fi
           # `upload-artifact` fixado no v7: o repo padronizou nele (runtime
           # node24; o v7 e ADITIVO — novo parametro OPCIONAL `archive:false`
           # para upload direto de arquivo unico, default `name:`/`path:`
@@ -367,15 +413,29 @@ jobs:
           # positivo e POR ARQUIVO de proposito: contar `*.yml` incluiria este
           # proprio validate.yml, que CITA a string dentro do comando — a
           # contagem ficaria inflada e a perda de UM dos dois passaria.
-          ! grep -qE 'actions/upload-artifact@v[1-6]' .github/workflows/*.yml
+          if grep -qE 'actions/upload-artifact@v[1-6]' .github/workflows/*.yml; then
+            echo "::error::upload-artifact abaixo do v7 — o repo padronizou no v7 (runtime node24)"
+            exit 1
+          fi
           grep -q 'uses: actions/upload-artifact@v7' .github/workflows/build-llama.yml
           grep -q 'uses: actions/upload-artifact@v7' .github/workflows/iso.yml
           # E o atalho proibido continua proibido: nunca embutir binário
           # pré-compilado do llama.cpp (exigiria 1 ISO por família).
-          ! grep -q -- '--prebuilt' iso/build-iso.sh
+          if grep -q -- '--prebuilt' iso/build-iso.sh; then
+            echo "::error file=iso/build-iso.sh::'--prebuilt' volta a ser proibido (Regra 13-b)"
+            exit 1
+          fi
           # Instrução COPY de verdade (o Dockerfile CITA esse comando num
           # comentário didático — por isso ancoramos no início da linha).
-          ! grep -qE '^COPY[[:space:]]+.*build/bin' docker/Dockerfile
+          if grep -qE '^COPY[[:space:]]+.*build/bin' docker/Dockerfile; then
+            echo "::error file=docker/Dockerfile::COPY build/bin (RPATH -> exit 127): use cmake --install"
+            exit 1
+          fi
+          # META-GUARDA: proibe a forma que NAO derruba o job.
+          if grep -nE '^[[:space:]]*! ' .github/workflows/*.yml; then
+            echo "::error::guarda na forma '! cmd' nao derruba o job (set -e ignora cmd invertido)"
+            exit 1
+          fi
           # O diário de continuidade é o que permite retomar sem perder nada
           # (Regra 14): precisa continuar existindo e com as seções-chave.
           grep -qi 'retomada em 5 minutos' docs/JOURNAL.md

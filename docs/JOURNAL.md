@@ -1290,10 +1290,74 @@ reproduzível por um alvo do `make`.
   `families-test` (60/60) e `iso-select-test` (13/13). O passo de diagnóstico do
   `iso.yml` foi **extraído e executado**, e emite as anotações certas. URLs
   conferidas à mão: `curl -sIL` → **200** sem o `*` e **404** com ele.
-- **NÃO feito / não testado:**
-  - **A ISO ainda não foi gerada nem bootada** — o conserto prova a escolha da
-    ISO e a montagem da URL, **não** a remasterização (não há `xorriso` aqui).
-    O próximo passo é rodar o workflow `iso` com `distro=ubuntu`.
+**2ª parte — o CI voltou a falhar e o motivo era OUTRO (o passo de diagnóstico
+funcionou e entregou a causa):**
+
+```
+[ERROR] Pacote pedido está AUSENTE no repositório: gnupg
+[ERROR] Pacote pedido está AUSENTE no repositório: jq
+[ERROR] Pacote pedido está AUSENTE no repositório: git
+[ERROR] Repositório incompleto — o alvo precisaria de rede.
+```
+
+- **Causa MEDIDA:** `apt-get download a b c` **aborta o LOTE INTEIRO** se UM dos
+  nomes não tiver candidato — não baixa nem os válidos:
+
+  ```
+  apt-get download git PACOTE-QUE-NAO-EXISTE jq   →  rc=100, ZERO arquivos
+  ```
+
+  O fecho do `apt-cache depends --recurse` inclui pacotes **virtuais**, e quais
+  são **depende da release do host**. O script baixava em lotes de 25 com
+  `|| true`, então cada lote com a isca perdia até 25 pacotes **em silêncio**. Os
+  três "ausentes" eram só os **pedidos** que caíram no lote da isca. Na minha
+  máquina o fecho não tinha isca — por isso passava local (bug **dependente do
+  ambiente**, o pior tipo).
+- **Correção:** `packages_with_candidate()` descarta os nomes sem candidato
+  **antes** de baixar (barato e resolve o caso comum); o lote que **mesmo assim**
+  falhar é refeito **um a um** (isola a falha no nome ruim); os nomes que
+  falharam são **reportados** no log (o `|| true` mudo acabou).
+  Lote de 25 vs 1-a-1 foi **medido** (5× de diferença) antes de escolher:
+  31s vs 155s para 60 pacotes — daí manter lote com fallback, não `-n 1` puro.
+- **Teste:** `make iso-repo-test` (`tests/test-iso-repo-filter.sh`, 13
+  asserções) — reproduz o caso **offline**, com `apt-get` e `apt-cache`
+  substituídos por stubs, e cobre filtro, fallback, degrade e a fixture real do
+  `apt-cache policy`. **Verificado contra o código antigo:** com o código
+  anterior o teste mostra `obtido: ''` (o lote inteiro perdido) — é o bug do CI
+  reproduzido.
+
+**🔴 E um achado MAIOR, ao testar os guardas:**
+
+Ao plantar a violação `xargs -r -n 25` para conferir o guarda novo, o passo
+**não reprovou** — com o `grep` achando a violação:
+
+```
+grep rc=0 (achou a violação)   →   step4 rc=0 (NÃO reprovou)
+```
+
+O `set -e` do bash **ignora o exit status de um comando invertido com `!`**
+(está na doc do `set`). Ou seja: **SEIS guardas negativos deste repositório eram
+DECORATIVOS** — detectavam a violação e não derrubavam nada. Os testes que eu
+fizera antes "reprovavam" por causa do guarda **positivo** que vinha logo depois,
+o que dava a impressão de que o negativo funcionava.
+
+- **Correção:** todos os seis convertidos para
+  `if cmd; then echo "::error::..."; exit 1; fi` (ganho extra: a **anotação** diz
+  o que regrediu, em vez de só o código de saída); meta-guarda que proíbe a forma
+  `! cmd` nos workflows; e o teste **`make ci-guards-test`**
+  (`tests/test-ci-guards.sh`, 14 casos) que planta **cada** violação numa
+  **cópia temporária** e exige que o job falhe — inclusive um caso de árvore
+  suja, que **pegou uma linha de teste que eu havia deixado no repositório**.
+- **Armadilha nova (a pior do dia):** o meu script de prova anterior mutava a
+  árvore real e o `restore` dele não cobria um dos arquivos — deixou uma isca no
+  `validate.yml`. O teste novo roda em cópia e detectou. Teste que mexe no
+  workspace precisa de cópia ou de backup completo.
+
+**NÃO feito / não testado:**
+  - **A ISO ainda não foi gerada nem bootada** — os consertos provam a escolha da
+    ISO, a montagem da URL e o download do repo, **não** a remasterização (não há
+    `xorriso` aqui). O próximo passo é rodar o workflow `iso` com
+    `distro=ubuntu` e `air_gapped=true`.
   - **O `iso.yml` alterado não foi executado.**
   - 🔴 **Caminho Debian + `air_gapped=true` continua quebrado e SEM CAUSA
     CONHECIDA:** o run #6 gerou a ISO (2046 MB) e falhou no fim (`exit 1`),
@@ -1326,6 +1390,7 @@ reproduzível por um alvo do `make`.
 | **Nada de código no caminho da ISO** | ✅ Os 5 requisitos do § 3.1 do `docs/ISO.md` estão implementados. **Não há pendência de implementação conhecida** — falta EXECUTAR (ver abaixo). |
 | 🔴 **CI estava vermelho no `main`** | ✅ **Corrigido na sessão #18** (default que abortava + comando duplicado CI×make). Os runs verdes anteriores eram de antes das mudanças. |
 | 🔴 **A ISO Ubuntu não era gerada** | ✅ **Corrigido na sessão #19.** `exit code 22` = 404 do `curl`: o `SHA256SUMS` do Ubuntu marca o modo binário com `*` e o `*` ia para a URL. Teste de regressão: `make iso-select-test`. **Reproduzir no workflow `iso` para confirmar.** |
+| 🔴 **Guarda do CI decorativo (`! cmd`)** | ✅ **Corrigido na sessão #19 (2ª parte).** Seis guardas negativos nunca derrubaram o job (`set -e` ignora comando invertido com `!`) — convertidos para `if cmd; then exit 1; fi`, com meta-guarda e `make ci-guards-test`. |
 | 🔴 **Debian + `air_gapped=true`: causa DESCONHECIDA** | O run #6 gerou a ISO (**2046 MB**) e falhou no fim (`exit 1`), provavelmente na verificação automática; o run #7 (mesmo commit, **sem** payload: 943 MB) passou. O log não é legível de fora — **agora existe o passo de diagnóstico**, então reexecutar **diz o motivo**. Reproduzir com `air_gapped=true` e ler as **anotações**. |
 | **PRs abertos para decidir** | **PR #2** (debian `13-slim` no `docker/`): ✅ **mesclado** em `63eebff` (o `main` remoto já está à frente). **PR #3** (bump de actions): ✅ **resolvido no `main`** (caminho B) — o `@v7` do `upload-artifact` foi aplicado direto, com guarda no CI; **pode fechar o PR**. |
 | **Gerar a ISO (passo 3 do checklist)** | Não roda nesta máquina (sem `xorriso`). Caminho prático: workflow `iso` no GitHub com `air_gapped: true`. Ver `docs/ISO.md` § 9.1. |
@@ -1417,6 +1482,11 @@ reproduzível por um alvo do `make`.
 | `source` de um script que declara variáveis **`readonly`** | `REPO_ROOT: readonly variable` → o teste morre no `source` (2ª vez: a primeira foi `FAMILIES_DIR`) | Use nomes que não colidam (`TEST_DIR`, `TEST_ROOT`) no consumidor; ao criar `readonly` num script feito para ser carregado, prefira nomes **específicos** do domínio |
 | Confundir um passo de CI **consequente** com um segundo bug | No run #6 **dois** passos ficaram vermelhos: o build e o *relatório*. O relatório falhava por `cat` de um `.sha256` que só existe se o build passou — era **eco**, não causa | Ao ver N passos vermelhos, procure o **primeiro** na lista: quase sempre os seguintes são consequência. Faça relatórios **tolerantes a falha** (`2>/dev/null || echo ...`) |
 | Diagnóstico que só existe no **log do job** | O log exige token (403): de fora do repositório era **impossível** saber por que a ISO falhou | Faça os passos de falha emitirem **anotações** (`::error::`) e um resumo no `$GITHUB_STEP_SUMMARY` — anotações são **públicas** |
+| **Guarda negativo na forma `! cmd`** | O `set -e` **ignora** o exit status de um comando invertido com `!` (está na doc do `set`). O guarda **detecta** a violação e o job fica **verde** — seis guardas do `validate.yml` estavam assim e nunca derrubaram nada. Pior: um guarda positivo logo depois "reprova", dando a impressão de que o negativo funciona | Use `if cmd; then echo "::error::..."; exit 1; fi`. E **prove** com o teste: plante a violação e exija que o job falhe (`make ci-guards-test`). Guarda que nunca reprovou não é guarda |
+| Script de prova que **muta a árvore de trabalho** sem restaurar tudo | O `restore` do meu script de teste não cobria um dos arquivos e deixou uma isca (`! grep -q foo bar`) no `.github/workflows/validate.yml` — que só apareceu porque o teste novo roda numa **cópia** e reprovou a árvore limpa | Teste/prova que precisa mexer em arquivos: faça numa **cópia** (`tar -C src --exclude=.git -cf - . \| tar -C dst -xf -`), ou faça backup **de tudo** e restaure com `trap ... EXIT` |
+| Ferramenta que **aborta o lote inteiro** quando um argumento falha | `apt-get download git PACOTE-QUE-NAO-EXISTE jq` → rc=100 e **ZERO** arquivos: `git` e `jq` perdidos como dano colateral. Em lotes de 25 com `\|\| true`, cada lote perdia até 25 pacotes **em silêncio** | Nunca junte N itens num comando "tudo ou nada": isole (1 a 1) ou **filhe os itens ruins antes** (`apt-cache policy` → candidato) e refaça o lote que falhar um a um |
+| Bug **dependente do ambiente** que passa local e falha remoto | O fecho de dependências na minha máquina (25.10) não tinha pacote virtual; o runner (24.04) tinha — e só lá o lote morria. Nada no meu ambiente indicava o problema | Quando o sintoma é "local passa, remoto falha", desconfie de **entrada do ambiente** (release, versão de pacote, locale) e mude o teste para **injetar** essa entrada (stub/fixture) em vez de tentar adivinhar |
+| Assumir que "seis guardas verdes" significa seis guardas funcionando | O job passava verde com todos eles decorativos: nada distinguia "regra respeitada" de "regra não verificada" | Para cada guarda novo, **plante a violação** e confirme que falha. Automatize isso (é o `make ci-guards-test`) |
 | Polling em laço com `curl` contra a API do GitHub | Um laço de 25–30 iterações **esgota a cota anônima** (60 req/h) e você fica cego exatamente na hora de ler o resultado. Sintoma: JSON sem a chave esperada (`KeyError: 'workflow_runs'`) | Espere por **turnos** em vez de repetir `curl`; ou peça ao dono para olhar a página Actions. Trate chave ausente como **erro**, não como “sem runs” |
 
 ---

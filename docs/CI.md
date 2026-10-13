@@ -107,6 +107,10 @@ reais:
 | `iso-dry-run-both` existe no `Makefile`, está no `validate` e o CI **chama** esse alvo | Um comando duplicado entre CI e `make` deixou passar a regressão do `--iso-repo auto`, que quebrou o `validate` no GitHub com o `make validate` local verde |
 | Nenhum `actions/*` em major antigo (`@v1..@v4`) | O `iso.yml` ficou preso em `@v4` enquanto o resto do repo já estava em `@v6`/`@v7` — o bump do Dependabot não o alcançou |
 | `upload-artifact` em `@v7` nos **dois** workflows que o usam | Sobrou um `@v6` no `main` porque o PR #3 do Dependabot trazia o bump e o alinhamento do `iso.yml` copiou o major vizinho. O guarda é **negativo e positivo**: ficou **negativo** (`@v1..@v6` reprova, varrendo todos os `*.yml`) e **positivo por arquivo** (`build-llama.yml` **e** `iso.yml`, um `grep` para cada). O positivo **não** pode contar `*.yml`: o próprio `validate.yml` cita a string dentro do comando e a contagem ficaria inflada — a perda de um dos dois passaria despercebida |
+| Download do repo apt **sem** `xargs -r -n 25` | `apt-get download a b c` aborta o **lote inteiro** quando um nome não tem candidato: um pacote virtual no fecho custava até 25 pacotes por lote, em silêncio (o `|| true` engolia). O script usa `packages_with_candidate` + fallback um-a-um |
+| Guarda negativo **nunca** na forma `! cmd` | O `set -e` **ignora** o exit status de um comando invertido com `!`: o guarda detecta a violação e segue verde. **Seis** guardas deste arquivo estavam assim e nunca derrubaram nada |
+| `make ci-guards-test` existe, está no `validate` e o CI o chama | Fecha o buraco acima: planta **cada** violação numa cópia temporária e exige que o job falhe. Guarda que nunca reprovou não é guarda |
+| `make iso-repo-test` existe, está no `validate` e o CI o chama | O bug do repo apt era **dependente do ambiente** (só aparece com uma "isca" no fecho, que varia com a release do host) — por isso precisa de teste com stub, não de um dry-run |
 Este é o job que protege as regras do `AGENTS.md` de erosão:
 
 - Verifica que todos os **28 arquivos obrigatórios** existem.

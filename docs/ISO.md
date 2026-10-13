@@ -316,6 +316,32 @@ Quem guarda isso é `make iso-select-test`, que roda as **mesmas funções**
 contra `SHA256SUMS` reais em `tests/fixtures/` (sem rede). Ver
 [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) § "ISO / Remasterização".
 
+#### Como os `.deb` do repositório local são baixados (`--iso-repo auto`)
+
+O fecho de dependências vem de `apt-cache depends --recurse` e é baixado com
+`apt-get download`. Duas armadilhas já custaram uma sessão cada:
+
+1. **`apt-get download a b c` aborta o LOTE INTEIRO** se um dos nomes não tiver
+   candidato (pacote virtual, que **varia com a release do host**): não baixa
+   nem os que são válidos. Medido:
+
+   ```
+   apt-get download git PACOTE-QUE-NAO-EXISTE jq   →  rc=100, ZERO arquivos
+   ```
+
+2. Baixar em **lotes de 25** (com `|| true`) é 5× mais rápido que um a um
+   (medido), mas transformava a armadilha acima em perda silenciosa de **até 25
+   pacotes por lote**. Os "pedidos ausentes" que o build reportava eram só a
+   ponta: o resto do fecho sumia sem aviso.
+
+Hoje o script faz as duas coisas: `packages_with_candidate()` descarta os nomes
+sem candidato **antes** de baixar (rápido, barato, resolve o caso comum) e o
+lote que **mesmo assim** falhar é refeito **um a um** (isola a falha no nome
+ruim, sem perder os vizinhos), com os nomes que falharam **reportados** no log.
+
+Quem guarda isso é `make iso-repo-test`, que reproduz o caso inteiro **offline**
+(com `apt-cache`/`apt-get` substituídos por stubs) — inclusive o modo lote.
+
 ### 4.4 Testar numa VM **antes** de qualquer máquina real
 
 ```bash

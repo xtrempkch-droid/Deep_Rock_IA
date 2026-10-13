@@ -197,7 +197,9 @@ ai-cpu-os/
     ├── test-families.sh    # Casamento CPU → família (corpus; sem hardware)
     ├── families-matrix.txt # ~60 modelos reais → família esperada
     ├── test-iso-selection.sh # Escolha da ISO oficial no SHA256SUMS (sem rede)
-    └── fixtures/           # SHA256SUMS REAIS (Ubuntu 24.04, Debian 13)
+    ├── test-iso-repo-filter.sh # Repo apt: filtro + fallback (stubs; sem rede)
+    ├── test-ci-guards.sh   # Prova que os guardas do CI REPROVAM (cópia temp.)
+    └── fixtures/           # SHA256SUMS REAIS + saída REAL do apt-cache policy
 ```
 
 ---
@@ -217,6 +219,8 @@ ai-cpu-os/
 | **Entender as famílias de CPU / adicionar uma** | **`families/README.md`**, **`docs/FAMILIES.md`** |
 | **Testar o casamento CPU → família sem ter o hardware** | **`tests/test-families.sh`**, **`tests/families-matrix.txt`** |
 | **Testar a escolha da ISO oficial (sem rede)** | **`tests/test-iso-selection.sh`**, **`tests/fixtures/`** |
+| **Testar o repo apt local (filtro + fallback, sem rede)** | **`tests/test-iso-repo-filter.sh`** |
+| **Saber se um guarda do CI reprova de verdade** | **`tests/test-ci-guards.sh`** |
 | **Usar uma GPU (opcional, explícito)** | **`docs/GPU.md`**, `bash llama-build.sh --gpu-check` |
 | **Aprender o projeto do zero (passo a passo explicado)** | **`docs/TUTORIAL.md`**        |
 | Como o CI compila/valida o sistema     | `.github/workflows/`, `docs/CI.md`, `Makefile` |
@@ -382,6 +386,20 @@ Estas regras são **obrigatórias**:
   mas falhou na verificação final — **causa ainda não identificada** (o log do
   run #6 não é legível de fora). Reexecutar agora diz o motivo, por causa do
   passo de diagnóstico.
+- **Data anterior:** 2026-10-12 — **A ISO Ubuntu + `air_gapped=true` não era gerada (sessão #19, 2ª parte).**
+  O passo de diagnóstico que criei na 1ª parte funcionou e entregou a causa:
+  `Pacote pedido está AUSENTE no repositório: gnupg/jq/git`. Causa **medida**:
+  `apt-get download a b c` **aborta o lote inteiro** quando um dos nomes não tem
+  candidato — e o script baixava em lotes de 25 com `|| true`, perdendo até 25
+  pacotes por lote em silêncio. Corrigido com `packages_with_candidate()`
+  (descarta virtuais antes de baixar) + fallback um-a-um no lote que falha +
+  **reportar** os nomes que falharam. Teste novo `make iso-repo-test` (13
+  asserções, offline, com stubs de `apt-get`/`apt-cache`). **E um achado maior:
+  SEIS guardas negativos do CI estavam na forma `! cmd`, que o `set -e`
+  IGNORA** — nunca derrubaram nada. Todos convertidos para
+  `if cmd; then exit 1; fi`, mais meta-guarda proibindo a forma antiga e o teste
+  `make ci-guards-test` (14 casos), que planta cada violação numa cópia
+  temporária e exige que o job falhe.
 - **Data anterior:** 2026-10-12 — **Limpeza + CI consertado (sessão #18).** O CI
   estava **vermelho no `main`** e ninguém tinha visto: o `--iso-repo auto`
   (default) abortava no caminho Debian e derrubava o passo "ISO (dry-run dos

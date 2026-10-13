@@ -952,6 +952,39 @@ build_repo_index() {
   return 0
 }
 
+# ---------------------------------------------------------------------------
+# Filtrar nomes SEM candidato antes de baixar
+# ---------------------------------------------------------------------------
+# POR QUE ISSO EXISTE (medido, sessão #19): `apt-get download a b c` **ABORTA O
+# LOTE INTEIRO** se UM dos nomes não tiver candidato — não baixa nem os que são
+# perfeitamente válidos. Medido na máquina de desenvolvimento:
+#
+#     apt-get download git PACOTE-QUE-NAO-EXISTE jq   →  rc=100, ZERO arquivos
+#
+# com `git` e `jq` perdidos como dano colateral.
+#
+# O fecho do `apt-cache depends --recurse` inclui pacotes **virtuais** (sem
+# candidato), e QUAIS são depende da release do host. No runner (Ubuntu 24.04)
+# havia pelo menos um, e foi ele que fez o CI falhar com "Pacote pedido está
+# AUSENTE no repositório: gnupg/jq/git" — três pacotes sem nada de errado, que
+# estavam no mesmo lote da isca. O `|| true` engolia o resto em silêncio.
+#
+# `LC_ALL=C` é obrigatório: no locale pt-BR o rótulo é "Candidato:" e o parser
+# não acharia nada (e devolveria lista vazia).
+packages_with_candidate() {
+  local nomes="$1"
+  [[ -n "$nomes" ]] || return 0
+  # shellcheck disable=SC2086
+  LC_ALL=C apt-cache policy $nomes 2>/dev/null | awk '
+    /^[^[:space:]]/ { nome = $1; sub(/:$/, "", nome); next }
+    /^[[:space:]]+Candidate: / {
+      if ($2 == "(none)") next
+      if (nome != "") print nome
+      next
+    }
+  '
+}
+
 # Baixa os .deb (pacotes + fecho de dependências) para o diretório final.
 download_repo_packages() {
   local dir="$1" list="$2" out
@@ -959,7 +992,7 @@ download_repo_packages() {
   # Fecho de dependências. `--no-*` desliga o que não é necessário para o
   # pacote FUNCIONAR (recomendados/sugeridos/quebras), que só engordariam a
   # mídia. Pre-Depends é mantido: omiti-lo quebraria instalações.
-  out="$(apt-cache depends --recurse --no-recommends --no-suggests \
+  out="$(LC_ALL=C apt-cache depends --recurse --no-recommends --no-suggests \
            --no-conflicts --no-breaks --no-replaces --no-enhances \
            $list 2>/dev/null \
          | grep -E '^[a-zA-Z0-9][a-zA-Z0-9+._-]*$' | sort -u)"
@@ -967,17 +1000,57 @@ download_repo_packages() {
   [[ -n "$out" ]] \
     || { log_error "Não consegui calcular as dependências (apt-cache vazio)."; return 1; }
 
-  log_info "Fecho de dependências: $(printf '%s\n' "$out" | wc -l) pacotes (pedidos: $(printf '%s' "$list" | wc -w))"
+  local n_bruto; n_bruto="$(printf '%s\n' "$out" | wc -l)"
+
+  # Tira os nomes sem candidato ANTES de baixar (ver packages_with_candidate).
+  local filtrado; filtrado="$(packages_with_candidate "$out")"
+  if [[ -z "$filtrado" ]]; then
+    # Degrada, não quebra (Regra 13-a): se a saída do apt-cache policy não for
+    # o que o parser espera, seguimos com o fecho inteiro — o fallback um-a-um
+    # lá embaixo ainda protege contra a isca.
+    log_warn "O filtro de candidatos não devolveu nada; não vou descartar o fecho."
+    log_warn "(Um nome virtual no meio ainda é tolerado pelo fallback um-a-um.)"
+    filtrado="$out"
+  else
+    local n_filtrado; n_filtrado="$(printf '%s\n' "$filtrado" | wc -l)"
+    if (( n_filtrado < n_bruto )); then
+      log_info "Fecho: ${n_bruto} nomes, ${n_filtrado} com candidato ($(( n_bruto - n_filtrado )) virtual/ausente descartado antes do download)."
+    fi
+  fi
+
+  log_info "Fecho de dependências: $(printf '%s\n' "$filtrado" | wc -l) pacotes (pedidos: $(printf '%s' "$list" | wc -w))"
   log_info "Baixando os .deb em ${dir} (isto pode demorar)…"
 
   mkdir -p "$dir/pool"
-  # Em lotes: um pacote virtual (sem candidato) faz o apt-get falhar, e em lote
-  # único isso abortaria o download dos demais.
-  printf '%s\n' "$out" \
-    | xargs -r -n 25 sh -c 'cd "$0" && apt-get download "$@"' "$dir/pool" \
-    >/dev/null 2>&1 || true
+
+  local -a arr=()
+  mapfile -t arr <<< "$filtrado"
+  local total=${#arr[@]} i=0 falhas=0
+  local -a falhados=()
+
+  # Lotes de 25 (medido: 5× mais rápido que 1-a-1) com fallback um-a-um no lote
+  # que falhar, para que a perda fique restrita ao nome realmente ruim.
+  while (( i < total )); do
+    local lote=( "${arr[@]:i:25}" )
+    if ! ( cd "$dir/pool" && apt-get download "${lote[@]}" >/dev/null 2>&1 ); then
+      local p
+      for p in "${lote[@]}"; do
+        ( cd "$dir/pool" && apt-get download "$p" >/dev/null 2>&1 ) \
+          || { falhas=$(( falhas + 1 )); falhados+=( "$p" ); }
+      done
+    fi
+    i=$(( i + 25 ))
+  done
 
   local got; got="$(find "$dir/pool" -name '*.deb' -type f | wc -l)"
+  # NÃO engolir a falha em silêncio (era o que o `|| true` fazia): sem isto o
+  # dano colateral ficava invisível e só reaparecia como "pacote pedido ausente".
+  if (( falhas > 0 )); then
+    log_warn "${falhas} pacote(s) do fecho não puderam ser baixados:"
+    local j
+    for j in "${falhados[@]:0:10}"; do log_warn "  - ${j}"; done
+    if (( falhas > 10 )); then log_warn "  (mostrando 10 de ${falhas})"; fi
+  fi
   log_info "${got} .deb baixados."
   return 0
 }

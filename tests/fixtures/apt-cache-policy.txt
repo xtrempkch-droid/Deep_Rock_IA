@@ -1,0 +1,40 @@
+git:
+  Installed: 1:2.51.0-1ubuntu1
+  Candidate: 1:2.51.0-1ubuntu1
+  Version table:
+ *** 1:2.51.0-1ubuntu1 500
+        500 http://archive.ubuntu.com/ubuntu questing/main amd64 Packages
+        100 /var/lib/dpkg/status
+jq:
+  Installed: 1.8.1-3ubuntu1.1
+  Candidate: 1.8.1-3ubuntu1.1
+  Version table:
+ *** 1.8.1-3ubuntu1.1 500
+        500 http://archive.ubuntu.com/ubuntu questing-updates/main amd64 Packages
+        500 http://security.ubuntu.com/ubuntu questing-security/main amd64 Packages
+        100 /var/lib/dpkg/status
+     1.8.1-3ubuntu1 500
+        500 http://archive.ubuntu.com/ubuntu questing/main amd64 Packages
+gnupg:
+  Installed: 2.4.8-2ubuntu2.1
+  Candidate: 2.4.8-2ubuntu2.1
+  Version table:
+ *** 2.4.8-2ubuntu2.1 500
+        500 http://archive.ubuntu.com/ubuntu questing-updates/main amd64 Packages
+        500 http://archive.ubuntu.com/ubuntu questing-updates/main i386 Packages
+        500 http://security.ubuntu.com/ubuntu questing-security/main amd64 Packages
+        500 http://security.ubuntu.com/ubuntu questing-security/main i386 Packages
+        100 /var/lib/dpkg/status
+     2.4.8-2ubuntu2 500
+        500 http://archive.ubuntu.com/ubuntu questing/main amd64 Packages
+        500 http://archive.ubuntu.com/ubuntu questing/main i386 Packages
+mail-transport-agent:
+  Installed: (none)
+  Candidate: (none)
+  Version table:
+libopenblas-dev:
+  Installed: (none)
+  Candidate: 0.3.30+ds-3
+  Version table:
+     0.3.30+ds-3 500
+        500 http://archive.ubuntu.com/ubuntu questing/universe amd64 Packages

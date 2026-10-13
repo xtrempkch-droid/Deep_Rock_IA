@@ -33,7 +33,7 @@ SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
 .PHONY: help lint bashn shellcheck python yaml docs validate dry-run apply \
         build mods mods-check mods-test families families-test gpu-check \
         iso iso-dry-run iso-dry-run-both iso-lint iso-yaml iso-verify iso-vm \
-        iso-select-test docker docker-check ci clean
+        iso-select-test iso-repo-test ci-guards-test docker docker-check ci clean
 
 help: ## Lista os alvos disponíveis
 	@printf '\n%balvos disponíveis:%b\n\n' '\033[36m' '\033[0m'
@@ -72,7 +72,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test iso-select-test iso-dry-run-both ## Lint + docs + famílias + escolha da ISO + dry-run (2 caminhos)
+validate: lint docs families-test iso-select-test iso-repo-test ci-guards-test iso-dry-run-both ## Lint + docs + famílias + testes de ISO + guardas + dry-run
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -149,6 +149,12 @@ iso-lint: ## Verifica os scripts da ISO e valida templates + ferramentas
 
 iso-select-test: ## Prova a escolha da ISO oficial (SHA256SUMS reais; sem rede)
 	@bash tests/test-iso-selection.sh
+
+iso-repo-test: ## Prova o download do repo apt local (stubs; sem rede nem apt real)
+	@bash tests/test-iso-repo-filter.sh
+
+ci-guards-test: ## Prova que os guardas do CI REALMENTE derrubam o job (cópia temporária)
+	@bash tests/test-ci-guards.sh
 
 docker: ## Constrói a imagem de runtime localmente
 	@docker build -f docker/Dockerfile -t $(IMAGE) .

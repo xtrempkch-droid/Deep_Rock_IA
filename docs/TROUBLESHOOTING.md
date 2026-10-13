@@ -264,6 +264,53 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 - **Solução:** já corrigida: os padrões são **ancorados** e a escolha é a de
   **maior versão** (`sort -V | tail -1`), não a primeira.
 
+### `Pacote pedido está AUSENTE no repositório: X` (com `--iso-repo auto`)
+
+- **Sintoma:** o build morre no fim com uma lista de pacotes "ausentes" — e
+  alguns deles são pacotes banais (`gnupg`, `jq`, `git`) que **existem** no
+  Ubuntu.
+- **Causa:** `apt-get download a b c` **aborta o LOTE INTEIRO** se UM dos nomes
+  não tiver candidato — não baixa nem os válidos. Medido:
+
+  ```
+  apt-get download git PACOTE-QUE-NAO-EXISTE jq   →  rc=100, ZERO arquivos
+  ```
+
+  O fecho do `apt-cache depends --recurse` inclui pacotes **virtuais** (sem
+  candidato), e **quais são depende da release do host**: no runner do CI havia
+  pelo menos um, e o script baixava em lotes de 25 com `|| true` — então cada
+  lote que continha a isca perdia até 25 pacotes em silêncio. Os três
+  "ausentes" eram só os **pedidos** que caíram no lote da isca; o resto do
+  fecho era perdido sem aviso.
+- **Por que só apareceu no CI:** na máquina de desenvolvimento não havia isca
+  nenhuma no fecho, então o download funcionava. É um bug **dependente do
+  ambiente** — o que o torna pior.
+- **Solução:** já corrigida em `iso/build-iso.sh`:
+  `packages_with_candidate()` descarta nomes sem candidato **antes** de baixar,
+  e o lote que falha mesmo assim é refeito **um a um** (o `apt-get` não derruba
+  o vizinho), com os nomes que falharam **reportados** no log.
+- **Teste que guarda isso:** `make iso-repo-test` — reproduz o caso inteiro
+  offline, com `apt-get`/`apt-cache` substituídos por stubs.
+
+---
+
+## CI / Guardas
+
+### Plantei a violação e o guarda do CI não reprovou
+
+- **Sintoma:** você altera o arquivo para violar a regra de propósito, roda o
+  job `project-rules` e ele passa verde.
+- **Causa:** o guarda está escrito na forma `! grep -q X arquivo`. O `set -e` do
+  bash **ignora o exit status de um comando invertido com `!`** (está na doc do
+  `set`: *"...or if the command's return value is being inverted with !"*). O
+  guarda **detecta** a violação e **não faz nada** — segue para o próximo
+  comando. Seis guardas deste repositório estavam assim.
+- **Como detectar:** `make ci-guards-test` planta cada violação numa cópia
+  temporária e **exige** que o job falhe. Ele também detecta a forma proibida
+  (meta-guarda) e uma árvore de trabalho suja.
+- **Solução:** escreva guardas negativos como
+  `if cmd; then echo "::error::..."; exit 1; fi`.
+
 ---
 
 ## Geral

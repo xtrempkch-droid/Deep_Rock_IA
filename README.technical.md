@@ -135,9 +135,11 @@ ai-cpu-os/
 ├── tests/
 │   ├── smoke-test.sh       # verificação pós-build (no alvo)
 │   ├── test-families.sh    # casamento CPU → família (sem hardware)
-│   ├── families-matrix.txt # ~60 CPUs reais → família esperada
 │   ├── test-iso-selection.sh # escolha da ISO oficial no SHA256SUMS
-│   └── fixtures/           # SHA256SUMS reais (Ubuntu 24.04, Debian 13)
+│   ├── test-iso-repo-filter.sh # repo apt: filtro + fallback (stubs)
+│   ├── test-ci-guards.sh   # os guardas do CI reprovam mesmo?
+│   ├── fixtures/           # SHA256SUMS reais + saída real do apt-cache
+│   └── families-matrix.txt # ~60 CPUs reais → família esperada
 │
 ├── docker/                 # Dockerfile + exemplo de compose
 ├── docs/                   # ver a tabela do § 0
@@ -259,6 +261,8 @@ $EDITOR families/amd-zen5/family.conf     # ver template abaixo
 bash build.sh --list-families             # apareceu?
 bash tests/test-families.sh               # não quebrou o corpus?
 bash tests/test-iso-selection.sh          # a escolha da ISO oficial ainda está certa?
+bash tests/test-iso-repo-filter.sh        # o repo apt não perde lote em silêncio?
+bash tests/test-ci-guards.sh              # os guardas do CI reprovam mesmo?
 ```
 
 `family.conf` mínimo:
@@ -407,6 +411,8 @@ make ci              # validate + dry-run
 make iso-yaml        # autoteste das ferramentas da ISO (com teste negativo)
 bash tests/test-families.sh
 bash tests/test-iso-selection.sh     # escolha da ISO oficial (sem rede)
+bash tests/test-iso-repo-filter.sh   # repo apt: filtro e fallback (sem rede)
+bash tests/test-ci-guards.sh         # os guardas do CI reprovam? (cópia temporária)
 ```
 
 > **Sem `gh`/token, a API do GitHub é limitada a 60 req/h.** Não faça polling
@@ -459,11 +465,24 @@ Esta seção é um **playbook**. Todos os itens abaixo aconteceram de verdade.
 | Sintoma | Causa raiz | Como detectar |
 |---|---|---|
 | Instalador pergunta tudo | Config não chegou na ISO, ou o menu não a escolheu | `make iso-verify ISO=...` (confere `/autoinstall.yaml` e a entrada de boot) |
+| `exit code 22` no `build-iso.sh` | É código do **`curl`** (HTTP ≥ 400 sob `-f`), não do script. Caso real: o `SHA256SUMS` do Ubuntu marca o modo binário com `*` e o `*` ia para a URL → **404** | A URL sai no log (`Baixando <url>`); confirme com `curl -sIL -o /dev/null -w '%{http_code}'` |
+| `Pacote pedido está AUSENTE no repositório: X` | `apt-get download a b c` **aborta o lote inteiro** se um nome não tiver candidato (pacote virtual). O `|| true` engolia até 25 pacotes por lote | `make iso-repo-test` reproduz o caso offline |
+| Um guarda do CI "não reprova" quando você planta a violação | Guarda na forma `! cmd`: o `set -e` **ignora** o status de comandos invertidos com `!` | `make ci-guards-test` planta as violações e exige que o job falhe |
 | `test-vm.sh` "não vê nada" do 1º boot | Faltou `--serial-console` no build (o `console=ttyS0` não entrou no sistema instalado) | O próprio script avisa; gere a ISO com a flag |
 | `yamllint` reprova o template do autoinstall | O `@` de `@@TOKEN@@` é reservado no YAML — **esperado** | Use `make iso-yaml` (valida o arquivo **substituído**) |
 | `xorriso -map` reclama de um caminho | Arquivo opcional inexistente na ISO base | Confira a extração em `prepare_ubuntu` (ex.: `/EFI/boot/grub.cfg`) |
 
-### 8.5 Fluxo de trabalho (evita retrabalho)
+### 4.5 Guardas do CI
+
+| Invariante | Por quê |
+|---|---|
+| Guarda negativo **nunca** na forma `! cmd` | O `set -e` ignora o exit status de um comando invertido com `!` — o guarda **existe, detecta e não derruba nada**. Seis guardas deste repo estavam assim. Use `if cmd; then echo "::error::..."; exit 1; fi`. |
+| Todo guarda tem de ser **provado** | `make ci-guards-test` planta cada violação numa cópia temporária e exige que o job falhe. Guarda que nunca reprovou não é guarda. |
+| Guarda por `grep` de nome solto é fraco | `grep 'funcao'` casa `funcao_velha`. Ancore na definição (`^funcao()`). |
+| Não **contar** ocorrências varrendo `*.yml` | O próprio `validate.yml` cita os padrões dentro dos comandos; a contagem infla e a perda de um arquivo passa batido. Prefira uma asserção por arquivo. |
+| Todo comando do CI é um **alvo do Makefile**, e o CI **chama o alvo** | Comando duplicado diverge: foi assim que o `validate` ficou vermelho no `main` por duas sessões com o `make validate` local verde. |
+
+### 4.6 Fluxo de trabalho (evita retrabalho)
 
 - **`grep` sem arquivo no terminal bloqueia a sessão** (lê `stdin`). Sempre dê
   um arquivo ou um `path`.
