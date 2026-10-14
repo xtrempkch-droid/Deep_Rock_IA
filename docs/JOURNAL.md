@@ -1599,7 +1599,7 @@ o que dava a impressão de que o negativo funcionava.
   - `iso/write-pendrive.sh` (`--list`) foi exercitado nesta máquina (reconheceu
     e **recusou** o disco interno corretamente), mas o hardware do dono não tem
     pendrive plugado.
-- **Commits:** `(a preencher após o push)`.
+- **Commits:** `3692771` — `feat(iso): gravar a ISO num PENDRIVE — o passo final, com 9 travas`.
 
 ---
 
