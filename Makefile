@@ -39,7 +39,9 @@ SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
         build mods mods-check mods-test families families-test gpu-check \
         iso iso-dry-run iso-dry-run-both iso-lint iso-yaml iso-verify iso-vm \
         pendrives pendrive pendrive-test \
-        iso-select-test iso-repo-test iso-verify-test ci-guards-test docker docker-check ci clean
+        iso-select-test iso-repo-test iso-verify-test ci-guards-test \
+        pendrive pendrives pendrive-test iso-check iso-check-test \
+        docker docker-check ci clean
 
 help: ## Lista os alvos disponíveis
 	@printf '\n%balvos disponíveis:%b\n\n' '\033[36m' '\033[0m'
@@ -78,7 +80,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-dry-run-both ## Lint + docs + famílias + testes de ISO + guardas + dry-run
+validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-check-test iso-dry-run-both ## Lint + docs + famílias + testes de ISO + guardas + dry-run
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -162,6 +164,16 @@ pendrive: ## Grava a ISO num pendrive (DEVICE=/dev/sdX) — APAGA o dispositivo!
 
 pendrive-test: ## Prova as travas do gravador de pendrive (sem root nem device)
 	@bash tests/test-write-pendrive.sh
+
+iso-check: ## Confere uma ISO BAIXADA (sem xorriso, sem root): make iso-check ISO=...
+	@if [ -z "$(ISO)" ]; then \
+	  echo "Defina a ISO: make iso-check ISO=~/Downloads/ai-cpu-os-ubuntu.iso"; \
+	  exit 1; \
+	fi
+	@bash iso/check-iso.sh --iso "$(ISO)" $(ISO_CHECK_ARGS)
+
+iso-check-test: ## Prova a conferência de ISO baixada (fixtures; sem xorriso)
+	@bash tests/test-check-iso.sh
 
 iso-lint: ## Verifica os scripts da ISO e valida templates + ferramentas
 	@bash -n iso/build-iso.sh iso/verify-iso.sh iso/test-vm.sh iso/write-pendrive.sh \

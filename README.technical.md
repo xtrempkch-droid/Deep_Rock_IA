@@ -126,6 +126,7 @@ ai-cpu-os/
 │   ├── verify-iso.sh       # prova o CONTEÚDO (--iso ou --dir)
 │   ├── test-vm.sh          # prova o COMPORTAMENTO (qemu + console serial)
 │   ├── write-pendrive.sh   # grava num pendrive (9 travas; o passo mais perigoso)
+│   ├── check-iso.sh        # confere uma ISO BAIXADA sem xorriso (dd/od/sha256)
 │   ├── autoinstall/autoinstall.yaml   # config do Ubuntu (padrão)
 │   └── preseed/            # templates compartilhados + legado Debian
 │       ├── ai-cpu-os.cfg       # (só Debian)
@@ -141,6 +142,7 @@ ai-cpu-os/
 │   ├── test-verify-iso-repo-distro.sh # verificador distro-aware (autoinstall × preseed)
 │   ├── test-ci-guards.sh   # os guardas do CI reprovam mesmo?
 │   ├── test-write-pendrive.sh # as travas do pendrive (alvo = ARQUIVO)
+│   ├── test-check-iso.sh   # conferência de ISO baixada (fixtures byte a byte)
 │   ├── fixtures/           # SHA256SUMS reais + saída real do apt-cache
 │   └── families-matrix.txt # ~60 CPUs reais → família esperada
 │
@@ -267,6 +269,7 @@ bash tests/test-iso-selection.sh          # a escolha da ISO oficial ainda está
 bash tests/test-iso-repo-filter.sh        # o repo apt não perde lote em silêncio?
 bash tests/test-verify-iso-repo-distro.sh # o verificador entende as duas distros?
 bash tests/test-ci-guards.sh              # os guardas do CI reprovam mesmo?
+bash tests/test-check-iso.sh              # a conferência de ISO baixada acerta?
 ```
 
 `family.conf` mínimo:
@@ -418,6 +421,7 @@ bash tests/test-iso-selection.sh     # escolha da ISO oficial (sem rede)
 bash tests/test-iso-repo-filter.sh   # repo apt: filtro e fallback (sem rede)
 bash tests/test-verify-iso-repo-distro.sh # verificador distro-aware (sem xorriso)
 bash tests/test-ci-guards.sh         # os guardas do CI reprovam? (cópia temporária)
+bash tests/test-check-iso.sh         # conferência de ISO baixada (sem xorriso)
 ```
 
 > **Sem `gh`/token, a API do GitHub é limitada a 60 req/h.** Não faça polling
@@ -476,6 +480,8 @@ Esta seção é um **playbook**. Todos os itens abaixo aconteceram de verdade.
 | A ISO **Debian** é reprovada pelo verificador, mas está correta | O `verify-iso.sh` procurava o repo em uso **só no autoinstall** — que não existe no Debian (que usa preseed). Falso positivo | `make iso-verify-test` roda o verificador nas duas distros, e falha se voltar o viés |
 | `openssl não encontrado` no build da ISO | Dependência **implícita do runner**: o build usa `openssl passwd -6` e o workflow não o instalava. Descobri num container `ubuntu:24.04` limpo | O workflow agora instala `openssl`, `gzip` e `ca-certificates` |
 | O run da ISO falha **depois** de gerar a ISO, com `exit 127` | Uma mensagem de aviso tinha a linha partida: a 2ª linha virava **comando solto** (`command not found`). Só aparecia com ISO > 2 GiB (o caso air-gapped) | Monte a mensagem numa **variável**; nunca deixe string solta no `run: \|` |
+| A ISO air-gapped é gerada mas **não dá para baixar** | O mesmo booleano gateava artifact **e** Release. O limite de 2 GiB é de **asset de Release**; artifact não tem esse limite (só nº por job e perda de permissões) | O artifact sobe **sempre**; só a Release é gateada (`release_too_big`). Há guarda no CI |
+| Baixei o artifact e o arquivo **não é uma ISO** | O navegador entrega o artifact, que é um **`.zip`** — renomeou para `.iso` não resolve | `make iso-check ISO=...` detecta (falta a assinatura `CD001`) e diz para descompactar |
 | `test-vm.sh` "não vê nada" do 1º boot | Faltou `--serial-console` no build (o `console=ttyS0` não entrou no sistema instalado) | O próprio script avisa; gere a ISO com a flag |
 | `yamllint` reprova o template do autoinstall | O `@` de `@@TOKEN@@` é reservado no YAML — **esperado** | Use `make iso-yaml` (valida o arquivo **substituído**) |
 | `xorriso -map` reclama de um caminho | Arquivo opcional inexistente na ISO base | Confira a extração em `prepare_ubuntu` (ex.: `/EFI/boot/grub.cfg`) |

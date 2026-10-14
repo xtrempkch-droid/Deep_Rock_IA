@@ -353,6 +353,52 @@ escolhe o arquivo e o marcador pela `--distro`, e o modo de falha que ela existe
 para pegar (config **sem** a fonte extra → instalação dependente de rede)
 continua coberto nos dois caminhos. Quem guarda é `make iso-verify-test`.
 
+### 4.3.1 Não tenho `xorriso` (ou a máquina é modesta)
+
+Gerar a ISO exige `xorriso`, ~6 GB livres e paciência: ela baixa a base
+(~2,6 GB), o modelo (~1,1 GB, se `--iso-model auto`) e os pacotes, e remasteriza.
+Numa máquina modesta isso não roda — **e não precisa**: quem gera a ISO pode ser
+**outra máquina**.
+
+Caminho completo, sem instalar nada pesado na sua:
+
+```bash
+# 1. Navegador: Actions → workflow "iso" → Run workflow
+#    (escolha ubuntu/debian; marque air_gapped para a ISO que se basta)
+
+# 2. Baixe o artifact da execução (o .zip) e EXTRAIA — dentro está o .iso
+#    e o .iso.sha256. (Renomear o .zip para .iso não funciona.)
+
+# 3. Confira o arquivo baixado (não precisa de xorriso, nem de root):
+make iso-check ISO=~/Downloads/ai-cpu-os-ubuntu.iso
+
+# 4. Grave no pendrive:
+make pendrives
+sudo make pendrive DEVICE=/dev/sdb
+```
+
+O `iso/check-iso.sh` responde às três perguntas que importam **antes** de
+gravar, usando só `dd`/`od`/`sha256sum`:
+
+| Confere | Como |
+|---|---|
+| Está íntegro? | tamanho plausível + **SHA256** (lê o `.sha256` baixado ao lado) |
+| É ISO 9660? | assinatura **`CD001`** no setor 16 (LBA 16) |
+| É **deste** projeto e boota? | **Volume ID** `AI_CPU_OS_*` + assinatura de boot **MBR `0x55AA`** |
+
+> ✅ **Não é substituto do `verify-iso.sh`** — e os dois são complementares:
+> aquele abre a ISO e confere o **conteúdo** (config, projeto embutido,
+> marcadores, repositório apt), e para isso precisa de `xorriso`. Este prova
+> apenas que **o arquivo chegou inteiro e é o arquivo certo**.
+
+> ⚠️ **O artifact do GitHub é um `.zip`.** Se você gravar o artifact direto num
+> pendrive, ele **não boota**. O `make iso-check` detecta exatamente isso (falta
+> o `CD001`) e a mensagem diz para descompactar.
+
+> 🔓 **Acesso:** o download do artifact pelo navegador exige estar logado no
+> GitHub (é o seu repositório). O `artifact-url` que o próprio workflow expõe
+> (`${{ steps.upload.outputs.artifact-url }}`) também exige sessão.
+
 ### 4.4 Testar numa VM **antes** de qualquer máquina real
 
 ```bash

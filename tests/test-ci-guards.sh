@@ -166,6 +166,12 @@ planta "o pendrive deixar de conferir a assinatura CD001" iso/write-pendrive.sh 
   sed_ 's|CD001|XXXXX|g' iso/write-pendrive.sh
 planta "o teste do pendrive esquecer que o alvo e um ARQUIVO" tests/test-write-pendrive.sh \
   sed_ 's|ARQUIVO|ALVO|g' tests/test-write-pendrive.sh
+planta "o conferidor de ISO esquecer a assinatura CD001" iso/check-iso.sh \
+  sed_ 's|CD001|XXXXX|g' iso/check-iso.sh
+planta "tirar iso-check-test do validate" Makefile \
+  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-dry-run-both|' Makefile
+planta "o artifact da ISO voltar a ser gateado pela Release" .github/workflows/iso.yml \
+  sed_ 's|steps.size.outputs.release_too_big|steps.size.outputs.too_big|' .github/workflows/iso.yml
 
 echo
 if [[ $FAIL -eq 0 ]]; then

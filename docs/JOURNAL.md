@@ -1602,6 +1602,67 @@ o que dava a impressão de que o negativo funcionava.
 - **Commits:** `3692771` — `feat(iso): gravar a ISO num PENDRIVE — o passo final, com 9 travas`.
 
 ---
+### Sessão #23 — 2026-10-14 · 📥 A ISO volta a ser BAIXÁVEL (+ conferência sem xorriso)
+
+- **Objetivo:** o dono pediu "uma ferramenta adicional onde o usuário possa ou
+  não criar um arquivo ISO para usar com outros programas", e avisou que está
+  numa **máquina limitada**. Praticamente: ele **não tem `xorriso`**, então não
+  consegue gerar a ISO aqui — e sem ISO não há pendrive.
+- **Feito:**
+  - 🔴 **Achado grave:** o workflow gateava o **artifact** pelo limite de
+    **2 GiB** — que é de **asset de Release**. O mesmo booleano (`too_big`)
+    decidia os dois canais, então a ISO air-gapped (~4 GB) era **gerada e
+    descartada**, e quem não tem `xorriso` ficava **sem nenhum caminho** para
+    obter o arquivo. Agora só a Release é gateada (`release_too_big`) e o
+    artifact **sobe sempre**. Guarda no CI contra a regressão.
+  - **`iso/check-iso.sh`** + `make iso-check ISO=…` — confere uma ISO **baixada**
+    com `dd`/`od`/`sha256sum`, **sem `xorriso` e sem root**: tamanho plausível,
+    SHA256 (lê o `.sha256` ao lado sozinho), assinatura **`CD001`** no setor 16,
+    **Volume ID** `AI_CPU_OS_*` e assinatura de boot (**MBR `0x55AA`**).
+  - **`tests/test-check-iso.sh`** (20 asserções) com fixtures construídas **byte
+    a byte** (`python3`), cobrindo os modos de falha reais: **artifact `.zip`
+    renomeado** para `.iso` (o erro mais comum do caminho), download truncado,
+    1 byte corrompido, Volume ID de outra origem e ausência de assinatura de
+    boot. `make ci-guards-test` passou a provar os guardas novos (22 casos).
+- **Decisões:**
+  - **Medir o limite, não assumir.** Fui ao README oficial do
+    `upload-artifact` em vez de confiar no comentário que eu mesmo tinha escrito
+    antes: os limites documentados para artifacts são **número por job** e
+    **perda de permissões** — **não existe 2 GiB** para artifact. O comentário
+    antigo estava errado e custava o entregável.
+  - **Canal certo para cada limite.** 2 GiB é limite de **Release**; artifact é
+    para artefato de execução. Gatear os dois pelo mesmo número foi o bug.
+  - **Complementar, não duplicar.** `check-iso.sh` **não** reimplementa o
+    `verify-iso.sh`: ele usa ferramentas de base e responde a outra pergunta
+    ("o arquivo chegou inteiro e é o certo?" × "o conteúdo está certo?"). A
+    divisão está escrita nos dois cabeçalhos para ninguém fundir os dois.
+  - **Exit code 2 = erro de uso; 1 = a ISO tem problema.** Quem scripta em cima
+    precisa distinguir "você digitou o caminho errado" de "o download está
+    ruim".
+  - **Sem token, sem mágica.** Baixar artifact exige estar logado (o
+    `artifact-url` também). Então a ferramenta **não** tenta automatizar o
+    download com credenciais: ela confere o que você baixou e **diz o próximo
+    comando**. Automação que exige segredo do usuário não entra aqui.
+- **Problemas:**
+  - **O `name:` do passo com `:` solto quebrou o YAML** (`mapping values are not
+    allowed here`) — precisa de aspas. Erro barato, mas o `yamllint` pegou.
+  - Coloquei `if-no-files-found` **fora do `with:`** (não é parâmetro de passo):
+    corrigido antes de validar. É o tipo de erro que só aparece no run.
+- **Verificado:** `make validate` verde com **36 scripts** — families 60/60,
+  iso-selection 13/13, iso-repo-filter 16/16, verify-repo-distro 6/6,
+  ci-guards **22/22**, write-pendrive 16/16 e **check-iso 20/20**.
+- **NÃO feito / não testado:**
+  - 🔴 **Nada disso foi executado contra um artifact real do GitHub.** O
+    `check-iso.sh` foi provado com fixtures byte a byte (inclusive um `.zip`
+    fingindo de `.iso`), mas **nenhum download de verdade** passou por ele.
+  - A correção do gate do artifact **ainda vai rodar** num run novo; até lá, a
+    prova é a documentação oficial + o guarda.
+  - Continua: nenhum **pendrive físico** gravado; caminho **Debian**, **UEFI** e
+    **hardware físico** sem validação.
+- **Commits:** `(a preencher após o push)`.
+
+---
+
 
 
 
@@ -1639,6 +1700,7 @@ o que dava a impressão de que o negativo funcionava.
 | ⚠️ **Dependências implícitas do runner** | **Resolvido (sessão #20):** `openssl` (hash da senha), `gzip` (índice do repo) e `ca-certificates` (curl HTTPS) passaram a ser instalados explicitamente. Descobertos num container `ubuntu:24.04` limpo — dependência que existe no runner "por acaso" some quando o runner muda. |
 | **Rodar o workflow `iso` de novo (ubuntu e debian, `air_gapped=true`)** | É o **próximo passo real**: as três causas conhecidas estão fechadas. Se falhar de novo, as **anotações** dirão o motivo (agora capturam `[FAIL]` do verificador também). |
 | **PRs abertos para decidir** | **PR #2** (debian `13-slim` no `docker/`): ✅ **mesclado** em `63eebff` (o `main` remoto já está à frente). **PR #3** (bump de actions): ✅ **resolvido no `main`** (caminho B) — o `@v7` do `upload-artifact` foi aplicado direto, com guarda no CI; **pode fechar o PR**. |
+| ✅ **Obter a ISO numa máquina SEM `xorriso`** | **Existe (sessão #23):** artifact do CI sobe **sempre** (o limite de 2 GiB é da Release) e `make iso-check ISO=…` confere o arquivo baixado (tamanho, SHA256, `CD001`, Volume ID, boot). ⚠️ **Ainda não exercitado contra um artifact real** — a prova foi com fixtures byte a byte. |
 | ✅ **Pendrive bootável (o passo final)** | **Existe (sessão #22):** `iso/write-pendrive.sh` com 9 travas + `make pendrive-test` (16 asserções). ⚠️ **Nenhum pendrive FÍSICO foi gravado ainda** — as travas e o `dd`→`cmp` foram provados contra um **arquivo**. |
 | **Gerar a ISO (passo 3 do checklist)** | ✅ **FEITO na sessão #21** — build **exit 0**, `verify-iso.sh` **PASS=41/FAIL=0**. Ver `STATE.md` § 3.3. |
 | **Bootar em VM (passo 4 — o critério de conclusão)** | ✅ **FEITO na sessão #21** — `test-vm.sh` **exit 0** (instalou + 1º boot aplicou). Ainda falta **hardware físico** e o caminho **Debian**. |

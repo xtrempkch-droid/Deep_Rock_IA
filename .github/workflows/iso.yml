@@ -131,14 +131,22 @@ jobs:
           ls -la "$iso"
           sha256sum "$iso" | tee "$iso.sha256"
 
-      - name: Tamanho da ISO (limite de 2 GiB para Release)
+      - name: Tamanho da ISO (limite de 2 GiB — só para a Release)
         id: size
         if: always()
         run: |
           set -euo pipefail
           iso="iso/out/ai-cpu-os-${ISO_DISTRO}.iso"
+          # ATENÇÃO: o limite de 2 GiB vale para ASSET DE RELEASE, não para
+          # ARTIFACT. A primeira versão desta checagem derivava o artifact do
+          # mesmo booleano, e o resultado era cruel: a ISO air-gapped (~4 GB)
+          # era gerada e DEPOIS descartada — o usuário sem `xorriso` não tinha
+          # como obtê-la. Hoje só a Release é gateada; o artifact sobe sempre.
+          # (Fonte: README do actions/upload-artifact — os limites documentados
+          # para artifacts são número por job e perda de permissões; o de 2 GiB
+          # é de Release assets.)
           if [ ! -f "$iso" ]; then
-            echo "too_big=false" >> "$GITHUB_OUTPUT"
+            echo "release_too_big=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           bytes=$(stat -c %s "$iso")
@@ -146,7 +154,7 @@ jobs:
           # 2 GiB = 2147483648 bytes. O GitHub recusa arquivo de Release
           # acima disso, e o upload falharia DEPOIS de 10+ minutos de build.
           if [ "$bytes" -ge 2147483648 ]; then
-            echo "too_big=true" >> "$GITHUB_OUTPUT"
+            echo "release_too_big=true" >> "$GITHUB_OUTPUT"
             # ATENÇÃO: nada de string solta. A versão anterior quebrava a
             # mensagem no meio, e a segunda linha virava um COMANDO
             # inexistente -> `command not found` -> exit 127 -> o passo (e o
@@ -156,11 +164,11 @@ jobs:
             # yamllint) SEM quebra de linha por `\`, que exigiria indentação e
             # quebraria o bloco YAML do `run: |`.
             msg="ISO com ${mb} MB: acima do limite de 2 GiB por arquivo de Release."
-            msg+=" Upload pulado -- gere esta ISO na sua maquina."
+            msg+=" A Release e pulada, MAS O ARTIFACT SOBE (e baixavel)."
             echo "::warning::${msg}"
           else
-            echo "too_big=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::ISO com ${mb} MB: dentro do limite de 2 GiB."
+            echo "release_too_big=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ISO com ${mb} MB: dentro do limite de 2 GiB da Release."
           fi
 
       - name: Relatório no resumo da execução
@@ -250,9 +258,11 @@ jobs:
           exit 0
 
       - uses: actions/upload-artifact@v7
-        # Artefato de varios GB consome a cota da conta, e o canal certo
-        # para distribuicao (Release) tem limite de 2 GiB por arquivo.
-        if: steps.size.outputs.too_big != 'true'
+        # SOBE SEMPRE — inclusive a ISO air-gapped de ~4 GB. Para quem nao tem
+        # `xorriso` na maquina (a maioria), o artifact e o UNICO caminho para
+        # obter o arquivo: baixa pelo navegador, confere com `make iso-check`
+        # e grava com `make pendrive`. O limite de 2 GiB e da Release, nao do
+        # artifact (ver o passo anterior).
         with:
           name: ai-cpu-os-iso-${{ env.ISO_DISTRO }}
           path: |
@@ -262,7 +272,7 @@ jobs:
           compression-level: 0   # já é uma ISO comprimida
 
       - name: Anexar à Release (apenas em tags)
-        if: startsWith(github.ref, 'refs/tags/') && steps.size.outputs.too_big != 'true'
+        if: startsWith(github.ref, 'refs/tags/') && steps.size.outputs.release_too_big != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

@@ -480,6 +480,41 @@ O que a ferramenta faz por você, além de gravar:
 > (Rufus, balenaEtcher, Ventoy, `dd`). O importante é apontar para o
 > **dispositivo** (ex.: `/dev/sdb`), não para uma partição dele.
 
+### Não tenho `xorriso` (ou a máquina é fraca) — como eu faço?
+
+Gerar a ISO precisa de `xorriso`, ~6 GB livres e paciência: ela baixa a base
+(~2,6 GB), o modelo (~1,1 GB) e os pacotes, e remasteriza. Numa máquina modesta
+isso não rola — **e não precisa**: quem gera a ISO pode ser **outra máquina**.
+
+Caminho completo, sem instalar nada de pesado na sua:
+
+```bash
+# 1. Gere a ISO no GitHub Actions (navegador): Actions → workflow "iso" →
+#    Run workflow → escolha ubuntu/debian e marque air_gapped se quiser
+#    a ISO que se basta (fonte + modelo + pacotes na mídia).
+
+# 2. Baixe o artifact dessa execução (o .iso E o .iso.sha256) e confira:
+make iso-check ISO=~/Downloads/ai-cpu-os-ubuntu.iso
+
+# 3. Grave no pendrive:
+make pendrives                          # o que está plugado?
+sudo make pendrive DEVICE=/dev/sdb      # grava (pede confirmação)
+```
+
+O `make iso-check` é a checagem que faz sentido numa máquina sem `xorriso`:
+
+| O que confere | Por quê |
+|---|---|
+| Tamanho plausível | Pega download truncado |
+| **SHA256** (lê o `.sha256` baixado ao lado) | Pega download corrompido |
+| Assinatura **`CD001`** | Prova que é ISO 9660 — **o modo de falha mais comum** é o navegador entregar o *artifact* (um `.zip`) em vez do `.iso` |
+| **Volume ID** `AI_CPU_OS_*` | Prova que é uma ISO **deste projeto**, e não outra imagem baixada por engano |
+| Assinatura de boot (**MBR 0x55AA**) | Avisa se a ISO provavelmente não boota por BIOS |
+
+> ✅ Ele **não substitui** o `verify-iso.sh` (que abre a ISO e confere o
+> conteúdo — precisa de `xorriso`). São complementares: um prova que **o
+> arquivo chegou inteiro**; o outro, que **o conteúdo está certo**.
+
 ---
 
 ## 11. Usar uma GPU (opcional)

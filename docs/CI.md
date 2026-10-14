@@ -44,8 +44,15 @@ O que ele faz, em ordem:
    linhas de erro do log e as publica como **anotações** — que são públicas.
    Antes disso, diagnosticar de fora do repositório era impossível (os logs de
    job exigem token), e foi assim que um `exit code 22` custou uma sessão.
-7. Em **tags**, anexa a ISO (+ `.sha256`) à Release; em qualquer execução, deixa
-   como **artefato** (7 dias).
+   O padrão inclui `[FAIL]`/`[erro]` do `verify-iso.sh` — não só `[ERROR]`.
+7. Publica a ISO como **artifact** — **sempre**, inclusive a air-gapped de
+   ~4 GB. É o **único** caminho de quem não tem `xorriso`, e o limite de 2 GiB
+   é de **asset de Release**, não de artifact (os limites documentados do
+   `upload-artifact` são número por job e perda de permissões).
+8. Em **tags**, anexa a ISO (+ `.sha256`) à Release — **só se couber** nos
+   2 GiB. Acima disso a Release é pulada com aviso e o artifact continua sendo
+   a via de distribuição.
+
 
 **Sobre o disco do preseed:** o CI usa `/dev/vda` como placeholder (existe em
 VMs com virtio). Isso é **deliberadamente seguro**: se alguém instalar essa ISO
@@ -91,10 +98,14 @@ Dispara em **todo push para `main` e em todo Pull Request**.
 9. `make iso-verify-test` — o `verify-iso.sh` tem de ser **distro-aware**.
    Ele procurava o repositório em uso só no `/autoinstall.yaml`, e numa ISO
    **Debian** (que usa preseed) isso reprovava uma ISO **correta** (run #10).
-10. `make ci-guards-test` — planta as violações numa cópia temporária e exige
+10. `make iso-check-test` — a conferência de uma ISO **baixada**
+    (`iso/check-iso.sh`), construída sobre fixtures byte a byte. Existe para a
+    máquina que **não tem `xorriso`**: valida tamanho, SHA256, a assinatura
+    `CD001`, o Volume ID e a assinatura de boot — sem privilégio e sem rede.
+11. `make ci-guards-test` — planta as violações numa cópia temporária e exige
     que o job **falhe**. Existe porque seis guardas estavam na forma `! cmd`,
     que o `set -e` ignora — nunca derrubaram nada.
-11. `make iso-dry-run-both` — dry-run dos DOIS caminhos (ubuntu e debian) **sem
+12. `make iso-dry-run-both` — dry-run dos DOIS caminhos (ubuntu e debian) **sem
    flags extras**, exatamente como o `make validate` local.
 
 ### Job `dry-run` (matriz: `xeon` e `ryzen`)
@@ -120,6 +131,8 @@ reais:
 | `upload-artifact` em `@v7` nos **dois** workflows que o usam | Sobrou um `@v6` no `main` porque o PR #3 do Dependabot trazia o bump e o alinhamento do `iso.yml` copiou o major vizinho. O guarda é **negativo e positivo**: ficou **negativo** (`@v1..@v6` reprova, varrendo todos os `*.yml`) e **positivo por arquivo** (`build-llama.yml` **e** `iso.yml`, um `grep` para cada). O positivo **não** pode contar `*.yml`: o próprio `validate.yml` cita a string dentro do comando e a contagem ficaria inflada — a perda de um dos dois passaria despercebida |
 | Download do repo apt **sem** `xargs -r -n 25` | `apt-get download a b c` aborta o **lote inteiro** quando um nome não tem candidato: um pacote virtual no fecho custava até 25 pacotes por lote, em silêncio (o `|| true` engolia). O script usa `packages_with_candidate` + fallback um-a-um |
 | Guarda negativo **nunca** na forma `! cmd` | O `set -e` **ignora** o exit status de um comando invertido com `!`: o guarda detecta a violação e segue verde. **Seis** guardas deste arquivo estavam assim e nunca derrubaram nada |
+| O `artifact` da ISO **não** é gateado pelo limite da Release | O mesmo booleano gateava os dois, e a ISO air-gapped (~4 GB) era gerada e **descartada** — quem não tem `xorriso` ficava sem nenhum caminho. O limite de 2 GiB é de asset de Release |
+| `make iso-check-test` existe, está no `validate` e o CI o chama | O conferidor de ISO baixada existe porque a máquina de desenvolvimento **não tem `xorriso`**; sem teste, o modo de falha mais comum (o navegador entregar o `.zip` em vez do `.iso`) voltaria a passar despercebido |
 | `make ci-guards-test` existe, está no `validate` e o CI o chama | Fecha o buraco acima: planta **cada** violação numa cópia temporária e exige que o job falhe. Guarda que nunca reprovou não é guarda |
 | `make iso-repo-test` existe, está no `validate` e o CI o chama | O bug do repo apt era **dependente do ambiente** (só aparece com uma "isca" no fecho, que varia com a release do host) — por isso precisa de teste com stub, não de um dry-run |
 | `make iso-verify-test` existe, está no `validate` e o CI o chama | O `verify-iso.sh` tinha **viés de distro**: procurava o repo em uso só no autoinstall e reprovava uma ISO Debian correta (run #10). O guarda exige o marcador da preseed (`apt-setup/local0/repository`) no verificador |

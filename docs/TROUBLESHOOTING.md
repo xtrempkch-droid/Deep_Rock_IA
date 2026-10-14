@@ -365,6 +365,38 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 
 ---
 
+## Baixar a ISO do CI
+
+### Baixei a ISO e o `check-iso` diz que não é ISO 9660
+
+- **Sintoma:** `make iso-check ISO=arquivo.iso` reprova com
+  *"não é uma ISO 9660: esperava CD001"*.
+- **Causa:** **o artifact do GitHub é um `.zip`.** Você baixou o artifact, não
+  a ISO: o arquivo dentro dele é que é a imagem. Renomear para `.iso` **não**
+  resolve — o conteúdo continua sendo um zip.
+- **Solução:** descompacte o artifact e use o `.iso` de dentro:
+  `unzip ai-cpu-os-iso-ubuntu.zip`. O `make iso-check` explica isso na própria
+  mensagem de erro, justamente porque é o erro mais comum do caminho.
+
+### `make iso-check` diz que o SHA256 divergiu
+
+- **Causa:** download interrompido, ou você editou/renomeou o arquivo (o
+  `.sha256` mudou de linha de base). Como o SHA256 é do **conteúdo**, qualquer
+  alteração de um byte denuncia.
+- **Solução:** baixe de novo o `.iso` **e** o `.iso.sha256` juntos, e rode o
+  check sobre o par novo. **Não grave** um arquivo com SHA256 divergente.
+
+### A ISO air-gapped não aparece para download
+
+- **Causa:** era uma limitação **do projeto**, já corrigida: o mesmo booleano
+  gateava o artifact **e** a Release, e o limite de 2 GiB (que é de **asset de
+  Release**) escondia a ISO de ~4 GB. O artifact **não** tem esse limite.
+- **Solução:** atualize o `main` e rode o workflow de novo — o artifact sobe
+  sempre. Se você estiver numa versão antiga e precisar da ISO agora, gere na
+  sua máquina (precisa de `xorriso`).
+
+---
+
 ## CI / Guardas
 
 ### Plantei a violação e o guarda do CI não reprovou

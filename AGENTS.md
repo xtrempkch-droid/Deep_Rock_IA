@@ -142,6 +142,7 @@ ai-cpu-os/
 │   ├── verify-iso.sh       # Verifica o CONTEÚDO da ISO (ou de uma árvore: --dir)
 │   ├── test-vm.sh          # Boota a ISO em qemu e espera instalação + 1º boot
 │   ├── write-pendrive.sh   # 🎯 Grava a ISO num PENDRIVE (o passo mais perigoso)
+│   ├── check-iso.sh        # Confere uma ISO BAIXADA sem xorriso (dd/od/sha256)
 │   ├── autoinstall/        # Templates do Ubuntu (Subiquity/autoinstall)
 │   │   └── autoinstall.yaml # Config de instalação automática (padrão)
 │   └── preseed/            # Templates compartilhados + os do Debian (legado)
@@ -202,6 +203,7 @@ ai-cpu-os/
     ├── test-verify-iso-repo-distro.sh # Verificador distro-aware (autoinstall × preseed)
     ├── test-ci-guards.sh   # Prova que os guardas do CI REPROVAM (cópia temp.)
     ├── test-write-pendrive.sh # Travas do pendrive (gravando num ARQUIVO)
+    ├── test-check-iso.sh   # Conferência de ISO baixada (fixtures byte a byte)
     └── fixtures/           # SHA256SUMS REAIS + saída REAL do apt-cache policy
 ```
 
@@ -233,6 +235,7 @@ ai-cpu-os/
 | **Validar a ISO (conteúdo, sem bootar)** | **`iso/verify-iso.sh`**, `docs/ISO.md` § 4.6 |
 | **Testar a ISO de verdade (boot em VM)** | **`iso/test-vm.sh`**, `docs/VALIDATION.md` Bloco M |
 | **Gravar a ISO num PENDRIVE (bootável)** | **`iso/write-pendrive.sh`**, `make pendrives` / `make pendrive` |
+| **Conferir uma ISO baixada sem ter xorriso** | **`iso/check-iso.sh`**, `make iso-check ISO=…` |
 | **Entender a variante Ubuntu (autoinstall)** | **`iso/autoinstall/autoinstall.yaml`**, **`docs/ISO.md`** § 4.5 |
 | **Retomar/continuar depois de um tempo parado** | **`docs/JOURNAL.md`** (§ 1 retomada, § 5 threads abertas) |
 | Scripts principais                     | `build.sh`, `detect-hardware.sh`, `llama-build.sh` |
@@ -372,7 +375,22 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-14
-- **O que mudou:** **O passo final existe: `iso/write-pendrive.sh` (sessão #22).**
+- **O que mudou:** **A ISO volta a ser BAIXÁVEL + conferência sem `xorriso` (sessão #23).**
+  O workflow gateava o **artifact** pelo limite de **2 GiB**, que é de **asset de
+  Release** (os limites documentados do `upload-artifact` são número por job e
+  perda de permissões). Resultado cruel: a ISO air-gapped (~4 GB) era gerada e
+  **descartada**, e quem não tem `xorriso` — a máquina de desenvolvimento é
+  assim — ficava **sem nenhum caminho** para obter o arquivo. Agora só a Release
+  é gateada (`release_too_big`) e o artifact sobe **sempre**, com guarda no CI.
+  Entrou **`iso/check-iso.sh`** + `make iso-check ISO=…`: confere uma ISO
+  **baixada** com `dd`/`od`/`sha256sum` (tamanho, SHA256, assinatura `CD001`,
+  Volume ID `AI_CPU_OS_*`, assinatura de boot) — **sem `xorriso` e sem root**,
+  complementando (não substituindo) o `verify-iso.sh`, que prova o **conteúdo**.
+  Teste `make iso-check-test` (20 asserções, fixtures byte a byte) cobrindo os
+  modos de falha reais, inclusive o mais comum: o navegador entregar o
+  **artifact (`.zip`)** em vez do `.iso`. `make ci-guards-test` passou a
+  **provar** os guardas novos (22 casos).
+- **Data anterior:** 2026-10-14 — **O passo final existe: `iso/write-pendrive.sh` (sessão #22).**
   `make pendrives` lista os candidatos (só removíveis) e
   `sudo make pendrive DEVICE=/dev/sdX` grava com **9 travas** — recusa o disco
   que contém `/`, recusa não-removível sem `--allow-internal`, exige **disco

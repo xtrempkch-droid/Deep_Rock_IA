@@ -114,7 +114,14 @@ jobs:
         run: |
           set -euo pipefail
           make iso-verify-test
-
+      # O `iso/check-iso.sh` existe para quem NAO tem xorriso (a maquina do
+      # dono e assim): confere uma ISO BAIXADA com dd/od/sha256sum. As fixtures
+      # cobrem os modos de falha reais, inclusive o mais comum de todos: o
+      # navegador entregar o ARTIFACT (zip) em vez do .iso.
+      - name: ISO (conferencia de ISO baixada, sem xorriso)
+        run: |
+          set -euo pipefail
+          make iso-check-test
       # O gravador de pendrive é o passo mais PERIGOSO do projeto (`dd` num
       # dispositivo). As travas que impedem apontar para o disco errado são
       # testadas aqui, sem root, sem device e sem escrever nada.
@@ -169,7 +176,8 @@ jobs:
           chmod +x build.sh detect-hardware.sh llama-build.sh \
                    mods/apply.sh mods/*/*.sh families/resolve.sh \
                    roles/*/*.sh roles/inference/shell-ia.py tests/*.sh \
-                   iso/verify-iso.sh iso/test-vm.sh iso/write-pendrive.sh
+                   iso/verify-iso.sh iso/test-vm.sh iso/write-pendrive.sh \
+                   iso/check-iso.sh
 
       - name: detect-hardware.sh
         run: ./detect-hardware.sh
@@ -212,6 +220,7 @@ jobs:
             iso/autoinstall/autoinstall.yaml
             iso/verify-iso.sh iso/test-vm.sh
             iso/write-pendrive.sh
+            iso/check-iso.sh
             families/resolve.sh families/_base/family.conf
             families/intel-haswell/family.conf families/intel-broadwell/family.conf
             families/intel-skylake-avx512/family.conf families/generic/family.conf
@@ -233,6 +242,7 @@ jobs:
             tests/test-ci-guards.sh
             tests/test-verify-iso-repo-distro.sh
             tests/test-write-pendrive.sh
+            tests/test-check-iso.sh
             tests/fixtures/SHA256SUMS.ubuntu-24.04
             tests/fixtures/SHA256SUMS.debian-13
             tests/fixtures/apt-cache-policy.txt
@@ -411,6 +421,22 @@ jobs:
           grep -q 'iso-verify-test' Makefile
           grep -q 'validate:.*iso-verify-test' Makefile
           grep -q 'make iso-verify-test' .github/workflows/validate.yml
+          grep -q 'iso-check-test' Makefile
+          grep -q 'validate:.*iso-check-test' Makefile
+          grep -q 'make iso-check-test' .github/workflows/validate.yml
+          # O conferidor de ISO baixada NAO pode passar a exigir xorriso: e
+          # justamente a ausencia dele que faz o script existir.
+          grep -q 'CD001' iso/check-iso.sh
+          grep -q 'AI_CPU_OS' iso/check-iso.sh
+          # O ARTIFACT sobe SEMPRE: o limite de 2 GiB e de ASSET DE RELEASE,
+          # nao de artifact. Na versao anterior o mesmo booleano gateava os
+          # dois, e a ISO air-gapped (~4 GB) era gerada e DESCARTADA — quem
+          # nao tem xorriso ficava sem nenhum caminho para obter o arquivo.
+          if grep -q 'steps.size.outputs.too_big' .github/workflows/iso.yml; then
+            echo "::error::artifact gateado pelo limite da Release (air-gapped ficaria sem download)"
+            exit 1
+          fi
+          grep -q 'release_too_big' .github/workflows/iso.yml
           # O verificador TEM de escolher pela distro: a preseed tem o seu
           # proprio marcador (apt-setup/local0) e nao pode ser cobrada pelo
           # autoinstall (foi o falso positivo do run #10).
