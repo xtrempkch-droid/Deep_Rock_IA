@@ -1818,7 +1818,7 @@ o que dava a impressão de que o negativo funcionava.
     índice que cite uma versão já removida). A causa raiz é a **melhor
     explicação compatível com a medição** (4 s, erro idêntico), não uma
     observação direta.
-- **Commits:** *(preenchido após o push)*
+- **Commits:** `8e49043` — `fix(iso): a 2a tentativa do repo apt refresca o INDICE e loga o erro do apt`.
 
 ---
 
