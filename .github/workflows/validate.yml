@@ -115,6 +115,14 @@ jobs:
           set -euo pipefail
           make iso-verify-test
 
+      # O gravador de pendrive é o passo mais PERIGOSO do projeto (`dd` num
+      # dispositivo). As travas que impedem apontar para o disco errado são
+      # testadas aqui, sem root, sem device e sem escrever nada.
+      - name: Pendrive (travas de segurança do gravador)
+        run: |
+          set -euo pipefail
+          make pendrive-test
+
       # Prova que os guardas do próprio job REALMENTE derrubam o job, plantando
       # cada violacao numa COPIA temporaria. Existe porque SEIS guardas estavam
       # na forma `! grep`, que o `set -e` ignora quando o comando e invertido
@@ -161,7 +169,7 @@ jobs:
           chmod +x build.sh detect-hardware.sh llama-build.sh \
                    mods/apply.sh mods/*/*.sh families/resolve.sh \
                    roles/*/*.sh roles/inference/shell-ia.py tests/*.sh \
-                   iso/verify-iso.sh iso/test-vm.sh
+                   iso/verify-iso.sh iso/test-vm.sh iso/write-pendrive.sh
 
       - name: detect-hardware.sh
         run: ./detect-hardware.sh
@@ -203,6 +211,7 @@ jobs:
             iso/preseed/ai-cpu-os-firstboot.service
             iso/autoinstall/autoinstall.yaml
             iso/verify-iso.sh iso/test-vm.sh
+            iso/write-pendrive.sh
             families/resolve.sh families/_base/family.conf
             families/intel-haswell/family.conf families/intel-broadwell/family.conf
             families/intel-skylake-avx512/family.conf families/generic/family.conf
@@ -223,6 +232,7 @@ jobs:
             tests/test-iso-repo-filter.sh
             tests/test-ci-guards.sh
             tests/test-verify-iso-repo-distro.sh
+            tests/test-write-pendrive.sh
             tests/fixtures/SHA256SUMS.ubuntu-24.04
             tests/fixtures/SHA256SUMS.debian-13
             tests/fixtures/apt-cache-policy.txt
@@ -405,6 +415,26 @@ jobs:
           # proprio marcador (apt-setup/local0) e nao pode ser cobrada pelo
           # autoinstall (foi o falso positivo do run #10).
           grep -q 'apt-setup/local0/repository' iso/verify-iso.sh
+          # GRAVADOR DE PENDRIVE: as travas que impedem gravar no disco errado
+          # nao podem sumir, e a gravacao nao pode perder a verificacao. Cada
+          # uma destas linhas e uma protecao real contra apagar a maquina.
+          grep -q 'pendrive-test' Makefile
+          grep -q 'validate:.*pendrive-test' Makefile
+          grep -q 'make pendrive-test' .github/workflows/validate.yml
+          grep -q 'root_disk_name' iso/write-pendrive.sh
+          grep -q 'sistema em execução' iso/write-pendrive.sh
+          grep -q 'allow-internal' iso/write-pendrive.sh
+          grep -q 'confirm_target' iso/write-pendrive.sh
+          grep -q 'cmp -n' iso/write-pendrive.sh
+          grep -q 'conv=fsync' iso/write-pendrive.sh
+          # As travas mais faceis de perder sem ninguem notar: o TYPE=disk
+          # (um sr0/DVD tem RM=1 e passaria como removivel), a assinatura
+          # CD001, o nome do device como confirmacao e o teste que NUNCA
+          # encosta num dispositivo de verdade (grava num ARQUIVO).
+          grep -q 'TYPE' iso/write-pendrive.sh
+          grep -q 'CD001' iso/write-pendrive.sh
+          grep -q 'dev_is_removable' iso/write-pendrive.sh
+          grep -q 'ARQUIVO' tests/test-write-pendrive.sh
           if grep -q 'xargs -r -n 25' iso/build-iso.sh; then
             echo "::error file=iso/build-iso.sh::lote sem fallback: um nome ruim perde 25 pacotes"
             exit 1

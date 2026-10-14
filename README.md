@@ -447,9 +447,38 @@ Como funciona, em três linhas:
 > 💡 **A ISO APAGA o disco** indicado em `--disk`. Teste em máquina virtual
 > **primeiro**, sempre.
 >
-> ⚠️ **Estado atual:** a ISO está escrita e verificada por ferramentas do
-> projeto, mas **ninguém ainda a bootou e instalou de verdade** — é o maior
-> item em aberto. Detalhes em [`docs/ISO.md`](docs/ISO.md).
+> ⚠️ **Estado atual:** a ISO **já foi gerada e bootada numa VM** (Ubuntu Server
+> 24.04, sessão #21) com o 1º boot aplicando o ai-cpu-os **sem rede**. O que
+> ainda **não** foi validado: o caminho **Debian**, o boot **UEFI** e qualquer
+> **hardware físico**. Detalhes em [`docs/ISO.md`](docs/ISO.md) § 6.
+
+### Passo final: gravar num pendrive (bootável)
+
+> 🎯 **É para isto que a ISO existe.** E é o passo mais **perigoso** de todos:
+> um `dd` no dispositivo errado apaga o disco errado, sem desfazer.
+
+```bash
+make pendrives                          # 1. o que está plugado? (só removíveis)
+sudo make pendrive DEVICE=/dev/sdb      # 2. grava (pede confirmação)
+```
+
+O que a ferramenta faz por você, além de gravar:
+
+| Trava | Por quê |
+|---|---|
+| Recusa o disco que contém `/` | Nada sobrescreve o sistema em uso |
+| Recusa disco **interno** (SATA/NVMe) | Só passa com `--allow-internal`, digitando o caminho completo |
+| Recusa partição, DVD, loop | Um DVD (`sr0`) aparece como “removível” — o `TYPE` é conferido |
+| Recusa se houver partição **montada** | Gravar com o pendrive montado corrompe |
+| Confere se o arquivo é mesmo uma ISO | Assinatura `CD001` (ISO 9660) |
+| Confere se a ISO **cabe** | E **avisa** se o dispositivo for muito maior (sinal de dispositivo errado) |
+| Exige digitar o **nome** do dispositivo | `--yes` pula a pergunta, **nunca** as travas |
+| **Lê de volta e compara byte a byte** | Gravar sem conferir é fé, não engenharia |
+
+> 💡 Prefere gravar com outra ferramenta? Sem problema — a ISO é uma ISO 9660
+> comum e **híbrida** (boota por BIOS e por UEFI). Use a que você já conhece
+> (Rufus, balenaEtcher, Ventoy, `dd`). O importante é apontar para o
+> **dispositivo** (ex.: `/dev/sdb`), não para uma partição dele.
 
 ---
 

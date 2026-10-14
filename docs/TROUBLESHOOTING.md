@@ -328,6 +328,43 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 
 ---
 
+## Gravar o pendrive
+
+### `make pendrives` não lista o meu pendrive
+
+- **Causa:** a listagem mostra só o que é **removível** (`RM=1` ou barramento
+  de cartão/pendrive) **e** do tipo `disk`. Um pendrive aparece como `disk`
+  (com `sdb1` = partição); `sr0` (DVD) tem `RM=1` mas é `rom`.
+- **Solução:** confira o que o kernel vê:
+  `lsblk -o NAME,TYPE,RM,TRAN,SIZE,MODEL`. Se o seu dispositivo for um **HD
+  externo por USB**, ele é removível e aparece — cuidado: é justamente o caso
+  que a trava do tamanho avisa (dispositivo muito maior que a ISO).
+
+### Recusa dizendo "disco que contém o sistema em execução"
+
+- **Causa:** trava funcionando. O alvo contém a raiz (`/`) montada.
+- **Solução:** é para ser impossível mesmo. Se você realmente precisa gravar
+  nesse disco, o sistema tem de estar rodando de **outro** dispositivo (ou de
+  uma live ISO).
+
+### Recusa dizendo "NÃO é removível" (mas é um pendrive)
+
+- **Causa:** o kernel não marca `RM=1` para aquele dispositivo (comum em alguns
+  adaptadores USB-SATA/NVMe e em VMs, que expõem disco como não removível).
+- **Solução:** se **tem certeza**, `--allow-internal` libera — e ele exige
+  digitar o **caminho completo** do dispositivo, o que é proposital.
+
+### `cmp` acusa diferença depois de gravar
+
+- **Causa:** normalmente o **dispositivo é menor que a ISO** com o tamanho
+  anunciado (pendrives falsos que se declaram de 64 GB); ou a ISO estava
+  truncada.
+- **Solução:** confira o `sha256sum` da ISO (`iso/out/*.iso.sha256`) e o
+  tamanho real do dispositivo (`lsblk -b`). **Não boote** — o resultado seria
+  uma instalação truncada.
+
+---
+
 ## CI / Guardas
 
 ### Plantei a violação e o guarda do CI não reprovou

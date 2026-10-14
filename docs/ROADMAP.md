@@ -154,10 +154,6 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
       **nenhum backend foi compilado ou testado** por este projeto.
 - [ ] **Promover a GPU a um papel (`roles/gpu-*`)** — só depois de existir
       medição real; hoje seria um papel sustentado por zero número.
-- [ ] **Mesclar o PR #2 do Dependabot** (`debian:12-slim` → `13-slim` no
-      `docker/`) — **✅ 6/6 checks verdes**, incluindo os dois smokes de imagem,
-      e `mergeable: clean`. Só falta a decisão do dono. *(O PR #1 foi mesclado
-      em 2026-10-09; o PR #3 foi resolvido direto no `main` — ver `JOURNAL.md`.)*
 - [ ] **Suporte a `nvme` tuning** — `mq-deadline` vs `none` scheduler para
       SSD NVMe, e `nr_requests`.
 - [ ] **Benchmark automatizado** — script que roda `llama-bench`, salva CSV e

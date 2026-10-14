@@ -147,8 +147,17 @@ jobs:
           # acima disso, e o upload falharia DEPOIS de 10+ minutos de build.
           if [ "$bytes" -ge 2147483648 ]; then
             echo "too_big=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::ISO com ${mb} MB: acima do limite de 2 GiB por "
-              "arquivo de Release. Upload pulado -- gere esta ISO na sua maquina."
+            # ATENÇÃO: nada de string solta. A versão anterior quebrava a
+            # mensagem no meio, e a segunda linha virava um COMANDO
+            # inexistente -> `command not found` -> exit 127 -> o passo (e o
+            # job) falhavam COM A ISO JÁ GERADA (run #15). O bug só aparecia
+            # quando a ISO passava de 2 GiB, isto é, no caso air-gapped.
+            # Montar em variável mantém cada linha curta (limite de 120 do
+            # yamllint) SEM quebra de linha por `\`, que exigiria indentação e
+            # quebraria o bloco YAML do `run: |`.
+            msg="ISO com ${mb} MB: acima do limite de 2 GiB por arquivo de Release."
+            msg+=" Upload pulado -- gere esta ISO na sua maquina."
+            echo "::warning::${msg}"
           else
             echo "too_big=false" >> "$GITHUB_OUTPUT"
             echo "::notice::ISO com ${mb} MB: dentro do limite de 2 GiB."

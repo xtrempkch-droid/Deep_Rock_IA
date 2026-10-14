@@ -1,10 +1,12 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-13 (🎉 **a ISO FOI GERADA E BOOTADA** numa VM
-> com KVM: instalou sozinha, reiniciou e o 1º boot aplicou o ai-cpu-os — o
-> critério de conclusão do projeto foi cumprido. No caminho, 8 bugs reais só
-> visíveis ao EXECUTAR foram corrigidos. Ver § 3.3 e `docs/JOURNAL.md` sessão #21)
+> **Última atualização:** 2026-10-14 (🔌 **o passo final existe:**
+> `iso/write-pendrive.sh` + `make pendrives`/`make pendrive`, com **9 travas** e
+> 16 asserções — provado gravando num **arquivo**. ⚠️ **Nenhum pendrive real foi
+> gravado ainda.** A ISO segue provada na VM (sessão #21); o que continua sem
+> validação: pendrive físico, caminho Debian, UEFI e hardware físico.
+> Ver § 3.3, § 3.4 e `docs/JOURNAL.md` sessão #22)
 
 ---
 
@@ -87,9 +89,8 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 > **PRs do Dependabot** (verificado pela API em 2026-10-12):
 > - **PR #1** (`bump the actions group`, 5 updates): **✅ mesclado** em
 >   2026-10-09.
-> - **PR #2** (`debian:12-slim` → `13-slim` no `docker/`): **✅ 6/6 checks
->   verdes**, incluindo os dois smokes de imagem, e `mergeable: clean`. Só
->   falta a decisão do dono.
+> - **PR #2** (`debian:12-slim` → `13-slim` no `docker/`): **✅ mesclado**
+>   (`63eebff`), com os dois smokes de imagem verdes.
 > - **PR #3** (`bump the actions group`, 2 updates): **resolvido direto no
 >   `main`** — a parte do `upload-artifact` (`@v6`→`@v7`) foi aplicada aqui e
 >   ganhou guarda no CI; a do `checkout` já estava feita. **Pode ser fechado.**

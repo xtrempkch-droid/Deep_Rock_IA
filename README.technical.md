@@ -125,6 +125,7 @@ ai-cpu-os/
 │   ├── build-iso.sh        # remasteriza (--distro ubuntu|debian)
 │   ├── verify-iso.sh       # prova o CONTEÚDO (--iso ou --dir)
 │   ├── test-vm.sh          # prova o COMPORTAMENTO (qemu + console serial)
+│   ├── write-pendrive.sh   # grava num pendrive (9 travas; o passo mais perigoso)
 │   ├── autoinstall/autoinstall.yaml   # config do Ubuntu (padrão)
 │   └── preseed/            # templates compartilhados + legado Debian
 │       ├── ai-cpu-os.cfg       # (só Debian)
@@ -139,6 +140,7 @@ ai-cpu-os/
 │   ├── test-iso-repo-filter.sh # repo apt: filtro + fallback (stubs)
 │   ├── test-verify-iso-repo-distro.sh # verificador distro-aware (autoinstall × preseed)
 │   ├── test-ci-guards.sh   # os guardas do CI reprovam mesmo?
+│   ├── test-write-pendrive.sh # as travas do pendrive (alvo = ARQUIVO)
 │   ├── fixtures/           # SHA256SUMS reais + saída real do apt-cache
 │   └── families-matrix.txt # ~60 CPUs reais → família esperada
 │
@@ -473,6 +475,7 @@ Esta seção é um **playbook**. Todos os itens abaixo aconteceram de verdade.
 | Um guarda do CI "não reprova" quando você planta a violação | Guarda na forma `! cmd`: o `set -e` **ignora** o status de comandos invertidos com `!` | `make ci-guards-test` planta as violações e exige que o job falhe |
 | A ISO **Debian** é reprovada pelo verificador, mas está correta | O `verify-iso.sh` procurava o repo em uso **só no autoinstall** — que não existe no Debian (que usa preseed). Falso positivo | `make iso-verify-test` roda o verificador nas duas distros, e falha se voltar o viés |
 | `openssl não encontrado` no build da ISO | Dependência **implícita do runner**: o build usa `openssl passwd -6` e o workflow não o instalava. Descobri num container `ubuntu:24.04` limpo | O workflow agora instala `openssl`, `gzip` e `ca-certificates` |
+| O run da ISO falha **depois** de gerar a ISO, com `exit 127` | Uma mensagem de aviso tinha a linha partida: a 2ª linha virava **comando solto** (`command not found`). Só aparecia com ISO > 2 GiB (o caso air-gapped) | Monte a mensagem numa **variável**; nunca deixe string solta no `run: \|` |
 | `test-vm.sh` "não vê nada" do 1º boot | Faltou `--serial-console` no build (o `console=ttyS0` não entrou no sistema instalado) | O próprio script avisa; gere a ISO com a flag |
 | `yamllint` reprova o template do autoinstall | O `@` de `@@TOKEN@@` é reservado no YAML — **esperado** | Use `make iso-yaml` (valida o arquivo **substituído**) |
 | `xorriso -map` reclama de um caminho | Arquivo opcional inexistente na ISO base | Confira a extração em `prepare_ubuntu` (ex.: `/EFI/boot/grub.cfg`) |
@@ -487,7 +490,24 @@ Esta seção é um **playbook**. Todos os itens abaixo aconteceram de verdade.
 | Não **contar** ocorrências varrendo `*.yml` | O próprio `validate.yml` cita os padrões dentro dos comandos; a contagem infla e a perda de um arquivo passa batido. Prefira uma asserção por arquivo. |
 | Todo comando do CI é um **alvo do Makefile**, e o CI **chama o alvo** | Comando duplicado diverge: foi assim que o `validate` ficou vermelho no `main` por duas sessões com o `make validate` local verde. |
 
-### 4.6 Fluxo de trabalho (evita retrabalho)
+### 4.6 Pendrive (`iso/write-pendrive.sh`)
+
+Este é o passo mais perigoso do projeto: `dd` no dispositivo errado apaga o
+disco errado, sem desfazer. As travas são o produto — o `dd` é consequência.
+
+| Invariante | Por quê |
+|---|---|
+| Nunca escrever no disco que contém `/` | Nada sobrescreve o sistema em uso |
+| Recusar disco **não removível** sem `--allow-internal` | SATA/NVMe interno tem de ser difícil de acertar por engano |
+| Recusar quem não for **disco inteiro** (`TYPE=disk`) | Um `sr0` (DVD) tem `RM=1` e passaria como "removível"; partição e loop também não servem |
+| Recusar se houver partição **montada** | Gravar com o pendrive montado corrompe |
+| Conferir a assinatura `CD001` (ISO 9660) | O alvo não pode ser um arquivo qualquer |
+| Conferir que a ISO **cabe** no dispositivo | E **avisar** se o dispositivo for muito maior (sinal de alvo errado) |
+| `--yes` **nunca** pula as travas acima | Só pula a digitação do nome do dispositivo |
+| **Ler de volta** e comparar (`cmp -n`) | Gravar sem conferir é fé, não engenharia. `conv=fsync` antes de conferir |
+| O teste **nunca** toca um dispositivo | `make pendrive-test` grava num **arquivo** e exercita as funções de trava com um `lsblk` simulado |
+
+### 4.7 Fluxo de trabalho (evita retrabalho)
 
 - **`grep` sem arquivo no terminal bloqueia a sessão** (lê `stdin`). Sempre dê
   um arquivo ou um `path`.

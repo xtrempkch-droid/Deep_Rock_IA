@@ -244,7 +244,7 @@ máquina da mesma release da ISO (ou numa VM dela), ou passe
 
 ## 4. Como gerar a ISO
 
-> **Dependências:** veja a lista completa em § 4.7 (o que é obrigatório, o que só
+> **Dependências:** veja a lista completa em § 4.8 (o que é obrigatório, o que só
 o Debian precisa e o que é só para o teste de VM).
 
 ### 4.2 Primeiro: simular (sempre)
@@ -454,7 +454,41 @@ Se o primeiro marcador não aparecer, o problema é a **config** (rode
 `verify-iso.sh`); se o segundo não aparecer, o problema é o **primeiro boot**
 (veja se o `console=ttyS0` entrou na cmdline do sistema instalado).
 
-### 4.7 Dependências
+### 4.7 O passo final: gravar num pendrive
+
+É para isto que a ISO existe — e é o passo **mais perigoso** do projeto: `dd` no
+dispositivo errado apaga o disco errado, sem desfazer.
+
+```bash
+make pendrives                          # o que está plugado? (só removíveis)
+sudo make pendrive DEVICE=/dev/sdb      # grava (pede para digitar o nome)
+```
+
+**As travas, em ordem de importância** (a lista completa está em
+`iso/write-pendrive.sh`, no cabeçalho):
+
+| Trava | Por quê |
+|---|---|
+| Recusa o disco que contém `/` | Nada sobrescreve o sistema em uso |
+| Recusa disco **não removível** (SATA/NVMe) | Só passa com `--allow-internal`, que exige o caminho **completo** do dispositivo |
+| Exige **disco inteiro** (`TYPE=disk`) | Um `sr0` (DVD) tem `RM=1` e passaria como “removível”; partição e loop também não servem |
+| Recusa se houver partição **montada** | Gravar com o pendrive montado corrompe |
+| Confere a assinatura **`CD001`** | Prova que o arquivo é uma ISO 9660 |
+| Confere que a ISO **cabe** | E **avisa** se o dispositivo for muito maior — sinal clássico de alvo errado |
+| Exige digitar o **nome** do dispositivo | `--yes` pula a pergunta, **nunca** as travas 1–6 |
+| **Lê de volta e compara byte a byte** (`cmp -n`) | Gravar sem conferir é fé, não engenharia. `conv=fsync` antes de conferir |
+
+> 💡 **É uma ISO 9660 híbrida** (boota por BIOS **e** UEFI). Se preferir gravar
+> com outra ferramenta (Rufus, balenaEtcher, Ventoy, `dd` puro), funciona — a
+> ferramenta é conveniência + segurança, não um formato proprietário. O que
+> importa é apontar para o **dispositivo** (ex.: `/dev/sdb`), nunca para uma
+> partição dele (`/dev/sdb1`).
+
+> 🧪 **Como isso é testado sem pendrive:** `make pendrive-test`. O teste grava
+> num **ARQUIVO** (nunca num dispositivo) e exercita as funções de trava com um
+> `lsblk` simulado — incluindo os casos que **devem** ser recusados.
+
+### 4.8 Dependências
 
 ```bash
 # Obrigatórias
@@ -466,6 +500,9 @@ sudo apt install -y isolinux mtools
 # Só para o teste de VM
 sudo apt install -y qemu-system-x86 qemu-utils
 sudo apt install -y ovmf     # apenas para --boot-mode uefi
+
+# Só para gravar no pendrive (util-linux traz lsblk/findmnt; dd e cmp são base)
+sudo apt install -y util-linux
 ```
 
 > **Rede:** `curl` é usado para baixar a ISO base, o modelo (`--iso-model auto`)

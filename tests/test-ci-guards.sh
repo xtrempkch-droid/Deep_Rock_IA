@@ -160,6 +160,12 @@ planta "tirar o marcador '*' da fixture do SHA256SUMS" tests/fixtures/SHA256SUMS
   sed_ 's|\*ubuntu-24.04.5|ubuntu-24.04.5|' tests/fixtures/SHA256SUMS.ubuntu-24.04
 planta "o verificador esquecer a preseed (volta o falso positivo)" iso/verify-iso.sh \
   sed_ 's|apt-setup/local0/repository|apt-setup/REMOVIDO|' iso/verify-iso.sh
+planta "o pendrive deixar de exigir disco inteiro (TYPE)" iso/write-pendrive.sh \
+  sed_ 's|TYPE|TIPO|g' iso/write-pendrive.sh
+planta "o pendrive deixar de conferir a assinatura CD001" iso/write-pendrive.sh \
+  sed_ 's|CD001|XXXXX|g' iso/write-pendrive.sh
+planta "o teste do pendrive esquecer que o alvo e um ARQUIVO" tests/test-write-pendrive.sh \
+  sed_ 's|ARQUIVO|ALVO|g' tests/test-write-pendrive.sh
 
 echo
 if [[ $FAIL -eq 0 ]]; then

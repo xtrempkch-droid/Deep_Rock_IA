@@ -1529,6 +1529,80 @@ o que dava a impressão de que o negativo funcionava.
   primeira vez` + docs.
 
 ---
+### Sessão #22 — 2026-10-14 · 🔌 O passo final: gravar num PENDRIVE
+
+- **Objetivo:** o dono quis uma ferramenta para transformar a ISO (agora provada
+  na sessão #21) num **pendrive bootável** — e é o passo mais perigoso do
+  projeto. Ele também cogitou uma **WebUI** para isso; a análise está no fim
+  desta entrada.
+- **Feito:** `iso/write-pendrive.sh` + `tests/test-write-pendrive.sh` (16
+  asserções) + `make pendrives` / `make pendrive DEVICE=/dev/sdX` /
+  `make pendrive-test`.
+  As **9 travas** (o produto é a trava; o `dd` é consequência):
+  1. recusa o disco que contém `/`; 2. recusa disco **não removível** sem
+  `--allow-internal` (que exige o caminho completo); 3. exige **disco inteiro**
+  (`TYPE=disk` — um `sr0`/DVD tem `RM=1` e passaria como “removível”);
+  4. recusa se houver partição **montada**; 5. exige assinatura **`CD001`**;
+  6. confere que a ISO **cabe**; 7. **avisa** se o dispositivo for muito maior
+  (alvo errado); 8. exige digitar o **nome** do dispositivo (`--yes` pula só a
+  pergunta, **nunca** as travas 1–6); 9. **lê de volta** e compara byte a byte
+  (`cmp -n`, com `dd conv=fsync` antes).
+- **Decisões:**
+  - **O teste nunca toca um dispositivo.** `make pendrive-test` grava num
+    **arquivo** e exercita as funções de trava com um `lsblk` **simulado** —
+    inclusive os casos que **devem** ser recusados. É assim que um passo
+    destrutivo vira testável no CI.
+  - **`--yes` não é “sem travas”.** `--yes` só evita digitar o nome do alvo;
+    nenhuma trava de segurança é pulada. Confundir os dois é como um passo
+    destrutivo vaza para automação.
+  - **Falha rápido na entrada:** a checagem da ISO (existe? é ISO 9660?) roda
+    antes de tudo — melhor descobrir na hora do que depois de abrir o
+    dispositivo.
+  - **`cmp -n BYTES`** em vez de `cmp` puro: compara exatamente o tamanho da ISO
+    e para na primeira diferença, sem depender de EOF dos dois lados.
+- **Problemas:**
+  - A rodada anterior foi interrompida e deixou o repositório **vermelho**: a
+    mensagem de aviso do passo “Tamanho da ISO” tinha a linha partida e a 2ª
+    linha virou **comando solto** → `command not found` → **exit 127** (foi o
+    que fez o run #15 falhar **com a ISO já gerada**, 3891 MB). Corrigido
+    montando a mensagem numa **variável** (mantém as linhas curtas para o
+    `yamllint` **sem** quebra com `\`, que exigiria indentação e quebraria o
+    bloco YAML do `run: |`).
+  - O `README.md` tinha uma nota **desatualizada** (“ninguém ainda bootou a
+    ISO”) contradizendo o resto do próprio arquivo, já que a sessão #21 provou
+    o boot. Corrigida.
+- **Sobre a WebUI (que o dono perguntou):** ideia válida, **escopo da proposta
+  era ~3× maior do que serve**. O que acerta: wizard, preview do `--dry-run`,
+  teste em VM e validação de “modelo × RAM do alvo”. O que não se aplica:
+  Celery + Redis + Svelte + JWT + quotas para **duas máquinas** — e a própria
+  regra do projeto (“1% importa”) rejeita infra que não paga por si. Upload de
+  4.5 GB por HTTP é pior que `cp` (o filesystem **é** o cache). E o ponto que a
+  proposta não trata: **onde isso roda?** Não pode entrar na ISO (Regra 13-b),
+  não roda no notebook do dono (sem `xorriso`) — roda num container na máquina
+  de build, ou (melhor) vira **front-end do GitHub Actions**, que já gera a ISO.
+  Regra inegociável se for adiante: a UI **chama `make`/os scripts, nunca
+  reimplementa** — comando duplicado divergiu e quebrou o CI **duas vezes em
+  duas sessões**.
+  **Ordem sugerida:** (0) o pendrive — **feito aqui**, e é o que entrega o
+  objetivo declarado; (1) UI fina (FastAPI + SSE, sem banco/fila) só sobre alvos
+  do `make`; (2) front-end do Actions.
+- **Verificado:** `make validate` verde com **34 scripts** — `families 60/60`,
+  `iso-selection 13/13`, `iso-repo-filter 16/16`, `verify-repo-distro 6/6`,
+  `ci-guards 16/16` e **`write-pendrive 16/16`**. Guardas novos no CI para as
+  travas (`TYPE=disk`, `CD001`, `dev_is_removable`, `conv=fsync`, `cmp -n`,
+  `confirm_target`, `allow-internal`, `root_disk_name`, `sistema em execução`) e
+  para o teste gravar num **ARQUIVO**.
+- **NÃO feito / não testado:**
+  - 🔴 **Nenhum pendrive real foi gravado.** As travas e o `dd`→`cmp` foram
+    provados **contra um arquivo**; a gravação num dispositivo físico segue
+    **não validada**.
+  - `iso/write-pendrive.sh` (`--list`) foi exercitado nesta máquina (reconheceu
+    e **recusou** o disco interno corretamente), mas o hardware do dono não tem
+    pendrive plugado.
+- **Commits:** `(a preencher após o push)`.
+
+---
+
 
 
 
@@ -1565,6 +1639,7 @@ o que dava a impressão de que o negativo funcionava.
 | ⚠️ **Dependências implícitas do runner** | **Resolvido (sessão #20):** `openssl` (hash da senha), `gzip` (índice do repo) e `ca-certificates` (curl HTTPS) passaram a ser instalados explicitamente. Descobertos num container `ubuntu:24.04` limpo — dependência que existe no runner "por acaso" some quando o runner muda. |
 | **Rodar o workflow `iso` de novo (ubuntu e debian, `air_gapped=true`)** | É o **próximo passo real**: as três causas conhecidas estão fechadas. Se falhar de novo, as **anotações** dirão o motivo (agora capturam `[FAIL]` do verificador também). |
 | **PRs abertos para decidir** | **PR #2** (debian `13-slim` no `docker/`): ✅ **mesclado** em `63eebff` (o `main` remoto já está à frente). **PR #3** (bump de actions): ✅ **resolvido no `main`** (caminho B) — o `@v7` do `upload-artifact` foi aplicado direto, com guarda no CI; **pode fechar o PR**. |
+| ✅ **Pendrive bootável (o passo final)** | **Existe (sessão #22):** `iso/write-pendrive.sh` com 9 travas + `make pendrive-test` (16 asserções). ⚠️ **Nenhum pendrive FÍSICO foi gravado ainda** — as travas e o `dd`→`cmp` foram provados contra um **arquivo**. |
 | **Gerar a ISO (passo 3 do checklist)** | ✅ **FEITO na sessão #21** — build **exit 0**, `verify-iso.sh` **PASS=41/FAIL=0**. Ver `STATE.md` § 3.3. |
 | **Bootar em VM (passo 4 — o critério de conclusão)** | ✅ **FEITO na sessão #21** — `test-vm.sh` **exit 0** (instalou + 1º boot aplicou). Ainda falta **hardware físico** e o caminho **Debian**. |
 | ⚠️ **Limite de 2 GiB por arquivo de Release** | A ISO air-gapped (~5,2 GB) **não pode** ser anexada a uma Release. O CI pula o upload e avisa. Distribuição: pendrive/`scp`, runner self-hosted, ou outro host + SHA256 na Release. |

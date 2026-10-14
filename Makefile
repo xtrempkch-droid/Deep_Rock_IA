@@ -22,6 +22,11 @@ ISO      ?=
 ISO_ARGS ?=
 # Args extras para o teste de VM (ex.: VM_ARGS="--boot-mode uefi")
 VM_ARGS  ?=
+# Dispositivo alvo do pendrive (make pendrive DEVICE=/dev/sdb). NÃO tem padrão
+# de propósito: sem DEVICE explícito, `make pendrive` só explica o uso.
+DEVICE   ?=
+# Args extras do gravador (ex.: PENDRIVE_ARGS=--dry-run / --no-verify)
+PENDRIVE_ARGS ?=
 # Backend de GPU (opcional, EXPLÍCITO): make build GPU=vulkan  → ver docs/GPU.md
 GPU      ?=
 JOBS     ?= 4
@@ -33,6 +38,7 @@ SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
 .PHONY: help lint bashn shellcheck python yaml docs validate dry-run apply \
         build mods mods-check mods-test families families-test gpu-check \
         iso iso-dry-run iso-dry-run-both iso-lint iso-yaml iso-verify iso-vm \
+        pendrives pendrive pendrive-test \
         iso-select-test iso-repo-test iso-verify-test ci-guards-test docker docker-check ci clean
 
 help: ## Lista os alvos disponíveis
@@ -72,7 +78,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-dry-run-both ## Lint + docs + famílias + testes de ISO + guardas + dry-run
+validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-dry-run-both ## Lint + docs + famílias + testes de ISO + guardas + dry-run
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -138,11 +144,31 @@ iso-vm: ## Boota a ISO numa VM e espera instalação + 1º boot (requer qemu)
 	fi
 	@bash iso/test-vm.sh --iso "$(ISO)" --yes $(VM_ARGS)
 
+pendrives: ## Lista os dispositivos que podem receber a ISO (só leitura)
+	@bash iso/write-pendrive.sh --list
+
+pendrive: ## Grava a ISO num pendrive (DEVICE=/dev/sdX) — APAGA o dispositivo!
+	@if [ -z "$(DEVICE)" ]; then \
+	  echo "Informe o dispositivo: make pendrive DEVICE=/dev/sdb"; \
+	  echo "Para ver o que está plugado: make pendrives"; \
+	  exit 1; \
+	fi
+	@cmd='bash iso/write-pendrive.sh --device $(DEVICE)'; \
+	 if [ -n "$(ISO)" ]; then cmd="$$cmd --iso $(ISO)"; fi; \
+	 if [ -n "$(PENDRIVE_ARGS)" ]; then cmd="$$cmd $(PENDRIVE_ARGS)"; fi; \
+	 if [ "$$(id -u)" -ne 0 ]; then cmd="sudo $$cmd"; fi; \
+	 echo "+ $$cmd"; \
+	 exec $$cmd
+
+pendrive-test: ## Prova as travas do gravador de pendrive (sem root nem device)
+	@bash tests/test-write-pendrive.sh
+
 iso-lint: ## Verifica os scripts da ISO e valida templates + ferramentas
-	@bash -n iso/build-iso.sh iso/verify-iso.sh iso/test-vm.sh iso/preseed/firstboot.sh
+	@bash -n iso/build-iso.sh iso/verify-iso.sh iso/test-vm.sh iso/write-pendrive.sh \
+	  iso/preseed/firstboot.sh
 	@sh -n iso/preseed/late-command.sh
 	@shellcheck -x -S warning iso/build-iso.sh iso/verify-iso.sh iso/test-vm.sh \
-	  iso/preseed/late-command.sh
+	  iso/write-pendrive.sh iso/preseed/late-command.sh
 	@bash iso/build-iso.sh --check-templates --yes >/dev/null \
 	  && echo "iso-lint: templates e ferramentas OK"
 	@echo "iso-lint: OK"

@@ -141,6 +141,7 @@ ai-cpu-os/
 │   ├── build-iso.sh        # Remasteriza a ISO base (--distro ubuntu|debian)
 │   ├── verify-iso.sh       # Verifica o CONTEÚDO da ISO (ou de uma árvore: --dir)
 │   ├── test-vm.sh          # Boota a ISO em qemu e espera instalação + 1º boot
+│   ├── write-pendrive.sh   # 🎯 Grava a ISO num PENDRIVE (o passo mais perigoso)
 │   ├── autoinstall/        # Templates do Ubuntu (Subiquity/autoinstall)
 │   │   └── autoinstall.yaml # Config de instalação automática (padrão)
 │   └── preseed/            # Templates compartilhados + os do Debian (legado)
@@ -200,6 +201,7 @@ ai-cpu-os/
     ├── test-iso-repo-filter.sh # Repo apt: filtro + fallback (stubs; sem rede)
     ├── test-verify-iso-repo-distro.sh # Verificador distro-aware (autoinstall × preseed)
     ├── test-ci-guards.sh   # Prova que os guardas do CI REPROVAM (cópia temp.)
+    ├── test-write-pendrive.sh # Travas do pendrive (gravando num ARQUIVO)
     └── fixtures/           # SHA256SUMS REAIS + saída REAL do apt-cache policy
 ```
 
@@ -230,6 +232,7 @@ ai-cpu-os/
 | **Gerar a ISO de instalação (entregável final)** | **`iso/build-iso.sh`**, **`docs/ISO.md`** |
 | **Validar a ISO (conteúdo, sem bootar)** | **`iso/verify-iso.sh`**, `docs/ISO.md` § 4.6 |
 | **Testar a ISO de verdade (boot em VM)** | **`iso/test-vm.sh`**, `docs/VALIDATION.md` Bloco M |
+| **Gravar a ISO num PENDRIVE (bootável)** | **`iso/write-pendrive.sh`**, `make pendrives` / `make pendrive` |
 | **Entender a variante Ubuntu (autoinstall)** | **`iso/autoinstall/autoinstall.yaml`**, **`docs/ISO.md`** § 4.5 |
 | **Retomar/continuar depois de um tempo parado** | **`docs/JOURNAL.md`** (§ 1 retomada, § 5 threads abertas) |
 | Scripts principais                     | `build.sh`, `detect-hardware.sh`, `llama-build.sh` |
@@ -368,7 +371,23 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-13
+- **Data:** 2026-10-14
+- **O que mudou:** **O passo final existe: `iso/write-pendrive.sh` (sessão #22).**
+  `make pendrives` lista os candidatos (só removíveis) e
+  `sudo make pendrive DEVICE=/dev/sdX` grava com **9 travas** — recusa o disco
+  que contém `/`, recusa não-removível sem `--allow-internal`, exige **disco
+  inteiro** (`TYPE=disk`: um `sr0`/DVD tem `RM=1` e passaria), recusa partição
+  montada, exige assinatura `CD001`, confere se **cabe**, avisa se o
+  dispositivo for muito maior que a ISO, exige digitar o **nome** do alvo e
+  **lê de volta** comparando byte a byte (`cmp -n` com `conv=fsync`). `--yes`
+  pula só a pergunta, **nunca** as travas. O teste (`make pendrive-test`, 16
+  asserções) grava num **ARQUIVO** e simula o `lsblk` — nenhum dispositivo real
+  é tocado. **Nenhum pendrive físico foi gravado ainda.** Também corrigido o bug
+  que derrubava o run #15 **com a ISO já gerada** (`exit 127`: uma mensagem de
+  aviso com a linha partida virava comando solto) e uma nota desatualizada do
+  `README.md` que dizia que a ISO nunca havia sido bootada (a sessão #21 provou
+  que foi).
+- **Data anterior:** 2026-10-13
 - **O que mudou:** 🎉 **A ISO foi GERADA e BOOTADA pela primeira vez — o
   critério de conclusão do projeto (§ 1) foi cumprido.** Numa máquina com 24
   vCPU + `/dev/kvm` + Docker (que destravou o que era "bloqueado por ambiente"),
