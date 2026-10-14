@@ -1659,7 +1659,7 @@ o que dava a impressão de que o negativo funcionava.
     prova é a documentação oficial + o guarda.
   - Continua: nenhum **pendrive físico** gravado; caminho **Debian**, **UEFI** e
     **hardware físico** sem validação.
-- **Commits:** `(a preencher após o push)`.
+- **Commits:** `263aeff` — `fix(iso)!: a ISO volta a ser BAIXAVEL + make iso-check (conferencia sem xorriso)`.
 
 ---
 
