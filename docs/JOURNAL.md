@@ -1745,7 +1745,7 @@ o que dava a impressão de que o negativo funcionava.
     explicativa, o que o teste prova.
   - Continua: nenhum **pendrive físico** gravado; caminho **Debian**, **UEFI** e
     **hardware físico** sem validação.
-- **Commits:** *(preenchido após o push)*
+- **Commits:** `6adc3fd` — `feat(webui): interface web local para gerar/conferir a ISO`.
 
 ---
 
