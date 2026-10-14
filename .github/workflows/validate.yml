@@ -518,6 +518,17 @@ jobs:
           # E a midia NAO leva a UI: ela e ferramenta da maquina que GERA a
           # ISO, nao do sistema instalado (Regra 13-b).
           grep -q 'exclude=./webui' iso/build-iso.sh
+          # REPOSITORIO APT: a 2a tentativa tem de (a) refrescar o INDICE (um
+          # 404 de espelho nao melhora com Acquire::Retries — a lista invalida
+          # e reusada, e foi o que o run #16 mostrou em 4 s) e (b) LOGAR a
+          # saida do apt, em vez de descarta-la: foi o descarte que deixou o
+          # run #16 ilegivel ("pacote ausente" de um pacote que existe).
+          grep -q 'índice fresco para a 2ª tentativa' iso/build-iso.sh
+          grep -q 'Ainda faltando depois da 2ª tentativa' iso/build-iso.sh
+          if grep -qE 'apt-get download -o Acquire::Retries=5 \$\{faltando\}' iso/build-iso.sh; then
+            echo "::error file=iso/build-iso.sh::o retry volta a DESCARTAR a saida do apt (log ilegivel)"
+            exit 1
+          fi
           if grep -q 'xargs -r -n 25' iso/build-iso.sh; then
             echo "::error file=iso/build-iso.sh::lote sem fallback: um nome ruim perde 25 pacotes"
             exit 1

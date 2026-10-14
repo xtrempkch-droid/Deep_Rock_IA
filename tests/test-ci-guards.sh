@@ -193,6 +193,12 @@ planta "a UI deixar de recusar bind fora do localhost" webui/server.py \
 planta "a ISO passar a levar o webui/ (Regra 13-b)" iso/build-iso.sh \
   sed_ 's|--exclude=./webui||' iso/build-iso.sh
 
+# --- Repositório apt: a 2ª tentativa tem de ser diagnosticável --------------
+planta "o retry deixar de refrescar o índice (404 de espelho volta)" iso/build-iso.sh \
+  sed_ 's|índice fresco para a 2ª tentativa|segunda tentativa|' iso/build-iso.sh
+planta "o retry voltar a descartar a saída do apt (log ilegível)" iso/build-iso.sh \
+  sed_ 's|apt-get download -o Acquire::Retries=5 "\$p"|apt-get download -o Acquire::Retries=5 ${faltando}|' iso/build-iso.sh
+
 echo
 if [[ $FAIL -eq 0 ]]; then
   echo "ci-guards: PASS=${PASS} FAIL=0"

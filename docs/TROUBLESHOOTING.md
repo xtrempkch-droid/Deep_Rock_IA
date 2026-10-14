@@ -294,6 +294,40 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 - **Teste que guarda isso:** `make iso-repo-test` — reproduz o caso inteiro
   offline, com `apt-get`/`apt-cache` substituídos por stubs.
 
+### `Pacote pedido não entrou no repositório local: git` — mesmo com o retry
+
+- **Sintoma:** o fix acima está no código, e o build **ainda** morre com um
+  único pacote banal faltando (`git`), desta vez dizendo *"não entrou no
+  repositório local"*. Antes de 2026-10-15 a mensagem dizia *"está AUSENTE no
+  repositório"* — frase **falsa**: o pacote existe no Ubuntu, o que não entrou
+  foi o `.deb` na pasta que estamos montando. A redação foi corrigida
+  justamente porque a antiga mandou uma sessão caçar um bug inexistente.
+- **Como identificar:** no resumo do run, o intervalo entre as duas mensagens
+  `Repositório incompleto` é de **segundos**, não de minutos. Um download
+  real de fecho leva **minutos**; poucos segundos significa que o `apt-get
+  download` **falhou na hora** — logo não é "a rede caiu no meio".
+- **Causa medida (run #16, 2026-10-14):** a segunda tentativa repetia o
+  `apt-get download` **com a mesma lista de pacotes** e com `Acquire::Retries`,
+  que **não conserta uma lista inválida**. Quando o espelho responde **404**
+  (a versão que a lista cita já saiu do `archive` — típico em virada de *point
+  release*), repetir com a lista velha reproduz o erro **idêntico**, quantas
+  vezes for. Pior: a saída do `apt` era descartada (`>/dev/null 2>&1`), então
+  **a causa nunca aparecia em lugar nenhum** — nem no log, nem na anotação.
+- **Solução (2026-10-15):** `iso/build-iso.sh` agora, na 2ª tentativa,
+  (a) roda **`apt-get update`** antes de repetir — **índice fresco** é o que
+  resolve o caso do 404 — e (b) baixa **um a um logando a resposta do `apt`**
+  (`log_warn "  <pacote>: <erro do apt>"`). Se falhar de novo, a **causa** vai
+  para o log **e** para a anotação pública.
+- **Como ver a causa sem token:** o `iso.yml` publica anotações com o padrão
+  `PAT`. Foram acrescentados `Refazendo o download`, `Ainda faltando` e
+  `falhou:` a esse padrão — sem isso, a informação ficaria presa no log do job,
+  que **exige token** (403 para quem não está logado).
+- **Como consultar rápido:**
+  `curl -s .../check-runs/<job_id>/annotations` (as anotações são **públicas**).
+- **Teste que guarda isso:** `make ci-guards-test` — plantas que (a) removem o
+  `apt-get update` da 2ª tentativa e (b) fazem o retry voltar a descartar a
+  saída do `apt`. As duas têm de reprovar o job.
+
 ### A ISO Debian é REPROVADA pelo verificador, mas está correta
 
 - **Sintoma:** no caminho Debian com `--iso-repo`, o build **gera** a ISO e o

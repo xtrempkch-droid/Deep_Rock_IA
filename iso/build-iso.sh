@@ -1114,7 +1114,11 @@ check_repo_completeness() {
   if [[ -n "$missing" ]]; then
     local p
     for p in $missing; do
-      log_error "Pacote pedido está AUSENTE no repositório: ${p}"
+      # Cuidado com a palavra: "AUSENTE" afirmava que o pacote não existe, o
+      # que é FALSO quando a causa foi um 404/queda de rede — e mandou uma
+      # sessão inteira caçar um bug inexistente em `git`. Diga o que se sabe:
+      # ele não entrou no repositório que estamos montando.
+      log_error "Pacote pedido não entrou no repositório local: ${p} (veja os avisos do apt acima)"
     done
     log_error "Repositório incompleto — o alvo precisaria de rede."
     return 1
@@ -1242,12 +1246,38 @@ acquire_repo() {
       # no CI isso derrubou o build com "Pacote pedido está AUSENTE: git" — um
       # pacote que simplesmente existe. Refazer apenas os ausentes custa
       # segundos e converte a falha intermitente em sucesso.
-      local faltando
+      local faltando p saida
+      local -a ainda=()
       faltando="$(repo_missing_packages "$dest" "$pkgs")"
       log_warn "Refazendo o download de: ${faltando} (segunda tentativa)"
+
+      # (i) ÍNDICE FRESCO antes de repetir. Se a falha foi um `404` do espelho
+      #     (a lista aponta para uma versão que já saiu do archive, o que
+      #     acontece em virada de point release), repetir o download com a
+      #     MESMA lista falha igual — `Acquire::Retries` não conserta uma lista
+      #     inválida. Foi o que o run #16 mostrou: o retry gastou ~4 s e
+      #     reproduziu o erro idêntico. Degrada com aviso (Regra 13-a) se não
+      #     houver rede.
+      if ! run "apt-get update (índice fresco para a 2ª tentativa)" \
+               apt-get update -qq; then
+        log_warn "apt-get update falhou (sem rede?); seguindo com o índice atual."
+      fi
+
+      # (ii) Um a UM **e com a saída do apt logada**. Descartar o erro
+      #      (`>/dev/null 2>&1`) foi o que deixou o run #16 ilegível: o log
+      #      dizia "pacote ausente" de um pacote que existe, e a CAUSA real
+      #      (o que o apt respondeu) não tinha ido para lugar nenhum.
       # shellcheck disable=SC2086
-      ( cd "${dest}/pool" && apt-get download -o Acquire::Retries=5 ${faltando} ) \
-        >/dev/null 2>&1 || true
+      for p in ${faltando}; do
+        if ! saida="$( cd "${dest}/pool" && apt-get download -o Acquire::Retries=5 "$p" 2>&1 )"; then
+          ainda+=( "$p" )
+          log_warn "  ${p}: $(printf '%s' "$saida" | tail -n 1)"
+        fi
+      done
+      if (( ${#ainda[@]} > 0 )); then
+        log_warn "Ainda faltando depois da 2ª tentativa: ${ainda[*]}"
+      fi
+
       build_repo_index "$dest" || exit 1
       check_repo_completeness "$dest" "$pkgs" || exit 1
     fi

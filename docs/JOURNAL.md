@@ -1749,6 +1749,79 @@ o que dava a impressão de que o negativo funcionava.
 
 ---
 
+### Sessão #25 — 2026-10-15 · 🔬 O run #16 da ISO voltou a falhar com `git` (e a causa era invisível)
+
+- **Objetivo:** conferir o CI depois de publicar a sessão #24. `validate` e
+  `container` estavam em andamento, mas apareceu um run que eu **não tinha
+  visto**: `iso` (nº **#16**), disparado **manualmente** no `be2662f`,
+  `completed failure`.
+- **Feito:**
+  - **Diagnóstico sem token.** Os **logs** de job exigem token (403), mas as
+    **anotações são públicas**: `curl -s …/check-runs/<job_id>/annotations`.
+    Foi de lá que veio a causa:
+    `[ERROR] Pacote pedido está AUSENTE no repositório: git` +
+    `[ERROR] Repositório incompleto — o alvo precisaria de rede.`
+  - **A pista estava no RELÓGIO.** As duas mensagens `Repositório incompleto`
+    aparecem com **4 segundos** de diferença. Um download de fecho leva
+    **minutos**; 4 s significa que o `apt-get download` **falhou na hora**.
+    Logo não era "a rede caiu no meio" — era falha **imediata e repetível**.
+  - **Medi em vez de supor:** `apt-get download git` + `find -name 'git_*.deb'`
+    na minha máquina → funciona, e o arquivo é `git_1%3a2.51.0-…_amd64.deb`
+    (o `%3a` é o epoch). Ou seja: o `find` do `repo_missing_packages` **casa**
+    e o mecanismo está certo — o que falhou foi o download, não a checagem.
+  - **Causa raiz:** a 2ª tentativa repetia `apt-get download` **com a mesma
+    lista** e com `Acquire::Retries`. `Retries` **não conserta uma lista
+    inválida**: se o espelho dá **404** (a versão citada já saiu do `archive`,
+    típico em virada de *point release*), repetir reproduz o erro **idêntico**,
+    rápido. E — o pior — a saída do `apt` era **descartada**
+    (`>/dev/null 2>&1`): **a causa não ia para lugar nenhum**.
+  - **Corrigido** (`iso/build-iso.sh`, 2ª tentativa): (a) `apt-get update`
+    **antes** de repetir — índice fresco é o que resolve o 404; (b) download
+    **um a um logando a resposta do `apt`**
+    (`log_warn "  <pacote>: <erro do apt>"`); (c) aviso final `Ainda faltando…`.
+  - **Mensagem honesta:** `Pacote pedido está AUSENTE no repositório: X` virou
+    `Pacote pedido não entrou no repositório local: X (veja os avisos do apt
+    acima)`. A palavra "AUSENTE" **afirmava que o pacote não existe** — falso,
+    e foi o que me fez caçar um bug inexistente em `git` na sessão #18.
+  - **Anotações públicas ganharam a causa:** o `PAT` do `iso.yml` (o filtro que
+    converte log em anotação) passou a incluir `Refazendo o download`,
+    `Ainda faltando` e `falhou:`. Sem isso a informação ficaria presa no log,
+    **que exige token**.
+  - **Guardas novos** (3) e **violações plantadas** (2): remover o
+    `apt-get update` da 2ª tentativa e fazer o retry voltar a descartar a saída
+    do `apt`. `make ci-guards-test`: 31 → **33** casos.
+- **Decisões:**
+  - **Registrar a causa é parte da correção.** Uma falha que não diz *por quê*
+    custa uma sessão inteira: foi o que aconteceu nos runs #9, #10, #16 e #18.
+    O par "logar o erro da ferramenta" + "levar isso para a anotação pública" é
+    o que transforma uma falha opaca em algo diagnosticável de fora do repo.
+  - **Não tratar um default/ambiente como erro fatal** (Regra 13-a): se o
+    `apt-get update` da 2ª tentativa falhar (sem rede), **avisa e segue** com o
+    índice atual — o build ainda pode dar certo.
+- **Problemas:**
+  - Perdi um tempo considerável suspeitando do filtro `packages_with_candidate`
+    e do `find` do `repo_missing_packages`. **Os dois estavam certos** — e a
+    prova custou 1 comando (`apt-get download git` + `find`). **Lição: quando
+    uma hipótese é testável em um comando, teste antes de teorizar mais.**
+  - O ISO roda **manualmente** (`workflow_dispatch`): eu não fui avisado da
+    falha porque não recebo notificação de run manual. Descobri de passagem,
+    olhando a lista de runs por outro motivo. **Thread aberta.**
+- **Verificado:** `make validate` verde (37 scripts; families 60/60;
+  iso-repo-filter 16/16; **ci-guards 33/33**; **webui 34/34**; dry-run dos dois
+  caminhos OK). `make iso-lint` e `make iso-repo-test` verdes.
+- **NÃO feito / não testado:**
+  - 🔴 **A correção não foi exercitada por um run novo.** O `iso` precisa ser
+    disparado outra vez para provar que (i) a 2ª tentativa com índice fresco
+    resolve o 404 e (ii) a causa aparece na anotação. Até lá, o que está
+    provado é o **diagnóstico**, não a **cura**.
+  - Não consigo reproduzir o **404 do espelho** localmente (preciso de um
+    índice que cite uma versão já removida). A causa raiz é a **melhor
+    explicação compatível com a medição** (4 s, erro idêntico), não uma
+    observação direta.
+- **Commits:** *(preenchido após o push)*
+
+---
+
 
 
 
@@ -1799,6 +1872,8 @@ o que dava a impressão de que o negativo funcionava.
 | **Boot UEFI da ISO** | ⚠️ **não testado.** O `-boot_image replay` (sessão #21) restaurou a imagem EFI oculta do Ubuntu; falta o Debian (`mtools`) e o boot UEFI de fato. |
 | 🖥️ **A interface web num NAVEGADOR de verdade** | ⚠️ **nunca foi aberta** — nem por quem escreveu (sessão #24). Os **34** casos de `make ui-test` exercitam a **API**: lista branca, validadores, SSE, recusa sem `xorriso`, ausência de rota de escrita, bind em `127.0.0.1`. **Tudo que for visual** (layout, um botão que não responde, contraste) é afirmação não verificada. Abrir `make ui` numa máquina com browser e clicar em **Simular** resolveria. |
 | 🖥️ **A UI numa máquina COM `xorriso`** | ⚠️ O caminho "gerar a ISO" pelo navegador só foi provado **recusando** (esta máquina não tem `xorriso`). O caminho feliz (job roda, SSE mostra o progresso real até o fim, a ISO nova aparece na lista) **não** foi exercitado ponta a ponta. |
+| 🔬 **Quem avisa quando o `iso` falha?** | ⚠️ O workflow `iso` roda **manualmente** (`workflow_dispatch`) ou por tag. O run **#16** (2026-10-14) falhou e eu **só descobri de passagem**, numa sessão seguinte, olhando a lista de runs por outro motivo — ninguém foi notificado. Enquanto for assim, uma ISO que não gera pode ficar dias sem ninguém notar. Idéias: um lembrete em `docs/STATE.md`, ou disparar o `iso` no `main` com `air_gapped=false` (a ISO leve, ~1 GB) para usar o CI como sinal. |
+| 🔬 **O run #16 depois do fix (confirmar)** | ⚠️ A 2ª tentativa agora roda `apt-get update` e loga a resposta do `apt`, mas **nenhum run novo rodou ainda**: a correção é hipótese informada pela medição (4 s + erro idêntico ⇒ lista inválida/404), não fato observado. **Disparar o `iso` com `air_gapped=true` e conferir as anotações.** |
 
 ### 5.3 Dúvidas em aberto / dívida técnica (requerem decisão sua)
 
@@ -1898,6 +1973,10 @@ o que dava a impressão de que o negativo funcionava.
 | Julgar um teste pela **saída do serial** quando o processo loga no **journal** | O `test-vm.sh` julga por marcadores no console serial, mas o `log()` do late-command vai para o log do subiquity e o firstboot logava só no journal → **nenhum marcador** aparecia e o teste parecia não ver nada (embora a instalação estivesse certa) | Faça o marcador sair **no `/dev/console`** (`printf … > /dev/console`) e use `StandardOutput=journal+console` no unit. Confirme com `--serial-console` |
 | Depurar boot de VM **sem tela** | "a VM não boota" sem pista nenhuma: serial vazio. A causa (GRUB subindo a entrada errada) só apareceu com a **tela** | Capture o framebuffer por **QMP** (`screendump`) e leia com OCR (`tesseract` em container); e use **serial bidirecional** (`-serial unix:`) para logar na VM e ver `journalctl` — o serial do subiquity **não** traz a saída do curtin |
 | `-boot d` **+** `-no-reboot` num teste de instalação | O instalador **reinicia** ao terminar e o `-no-reboot` encerra o qemu → o 1º boot (o teste que importa) nunca acontece | `-boot order=c,once=d` (1º boot do CD, depois do disco), **sem** `-no-reboot` |
+| Retry que **repete o download com a MESMA lista inválida** | `Acquire::Retries` tenta de novo a mesma URL. Se o índice cita uma versão que já saiu do espelho (**404** — comum em virada de *point release*), repetir reproduz o erro **idêntico**, rápido (run #16: 4 s). `Retries` não conserta lista inválida | `apt-get update` **antes** de repetir — índice fresco. E interprete o **intervalo entre as tentativas** como sinal: falha em segundos é falha determinística, não rede |
+| Descartar a saída da ferramenta que falhou (`>/dev/null 2>&1`) | O build dizia `Pacote pedido está AUSENTE: git` — **falso**, o pacote existe. A resposta real do `apt` não foi para lugar nenhum, e a sessão inteira caçou um bug inexistente | Capture (`saida="$(cmd 2>&1)"`) e **logue a última linha**. Se a mensagem não distingue "não existe" de "o download falhou", ela é zero-útil |
+| Ferramenta de diagnóstico que só lê o **log do job** | O log exige **token** (403). Sem token o diagnóstico é ilegível — no run #16 só as **anotações** (públicas) contaram a história | Leve a causa para a **anotação** (o filtro `PAT` do `iso.yml`) e use `…/check-runs/<job_id>/annotations` para ler |
+| Rodar workflow **manual** (`workflow_dispatch`) e ninguém avisar da falha | O run #16 falhou em 2026-10-14 e eu só descobri no dia seguinte, de passagem, olhando a lista de runs por outro motivo | Registre o run pendente em `docs/STATE.md`/§ 5; considere disparar a ISO leve no `main` para o CI virar sinal |
 
 ---
 

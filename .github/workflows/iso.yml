@@ -220,7 +220,12 @@ jobs:
           # aqui porque o verify-iso.sh reprova com eles (run #10): na primeira
           # versão o grep só via `[ERROR]`, e a anotação que chegou foi só
           # "A ISO não passou na verificação" — o SINTOMA, sem dizer O QUÊ.
-          PAT='\[ERROR\]|\[FAIL\]|\[erro\]|FALHOU|Traceback|No such file'
+          # `Refazendo o download`/`Ainda faltando`/`falhou:` vêm da 2ª
+          # tentativa do repositório apt: sem elas, a CAUSA (o que o apt
+          # respondeu ao baixar) ficava só no log do job — que exige token e
+          # por isso e ilegivel de fora. Foi assim no run #16: a anotacao dizia
+          # "pacote ausente" de um pacote que existe.
+          PAT='\[ERROR\]|\[FAIL\]|\[erro\]|FALHOU|Traceback|No such file|Refazendo o download|Ainda faltando|falhou:'
           {
             echo "## Diagnóstico do build da ISO"
             echo
