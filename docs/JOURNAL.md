@@ -35,10 +35,15 @@ git log --oneline -12     # os últimos passos dados
 #    - build-llama      ✅ verde (compila e roda de verdade)
 #    - container        ✅ verde (imagem no GHCR)
 #    - ISO (sessão #21) ✅ GERADA e BOOTADA em VM (KVM) — instalou + 1º boot OK
+#    - webui (sessão #24) ⚠️ 34 asserções de API; 🔴 NUNCA aberta num navegador
 #    - ISO: Debian/preseed 🔴 NUNCA executado · hardware físico 🔴 NUNCA
 ```
 
 **Depois disso**, vá para a "Próxima ação imediata" em `docs/STATE.md` § 6.
+
+> 🖥️ **Para gerar a ISO sem decorar flags:** `make ui` → http://127.0.0.1:8787
+> (sessão #24; só biblioteca padrão; sem `xorriso` ela **recusa** e explica).
+
 
 > 🎉 **A ISO existe e roda (2026-10-13).** O critério de conclusão do projeto
 > (uma ISO que instala sozinha e aplica o ai-cpu-os no 1º boot) **foi cumprido
@@ -1663,6 +1668,87 @@ o que dava a impressão de que o negativo funcionava.
 
 ---
 
+### Sessão #24 — 2026-10-15 · 🖥️ Interface web local (gerar a ISO sem decorar flags)
+
+- **Objetivo:** o pedido foi direto — *"uma ferramenta de web UI para facilitar a
+  vida do usuário que usa o repositório, assim ele pode criar uma imagem ISO sem
+  dificuldade"*. O foco é o **usuário que não conhece o projeto**: ele não sabe
+  que existe `--iso-source`, nem o que é `--iso-repo auto`, e não deveria
+  precisar saber.
+- **Feito:**
+  - **`webui/server.py`** — servidor **só de biblioteca padrão** (`http.server`,
+    `json`, `subprocess`), que serve a página e expõe uma **API pequena**:
+    `/api/status` (hardware detectado, espaço livre, quais ferramentas existem),
+    `/api/options` (famílias lidas de `families/`, mods de `mods/` — **lidas do
+    repositório**, não duplicadas numa lista paralela que diverge), `/api/preview`,
+    `/api/build`, `/api/iso-check`, `/api/iso-verify`, `/api/pendrives` e
+    `/api/jobs/<id>` + `/api/jobs/<id>/events` (**SSE** para o log ao vivo).
+  - **`webui/index.html`** — página única, HTML+CSS+JS **inline, sem CDN**: o
+    alvo é justamente a máquina offline/limitada, uma tag `<script src="https://…">`
+    quebraria a página ali.
+  - **`tests/test-webui.sh`** — sobe o servidor de verdade numa porta livre e
+    exercita a API: **34 asserções**.
+  - **Nova Regra 16** no `AGENTS.md` com os invariantes da UI, e **9 guardas
+    novos** no CI (cada um com violação plantada).
+- **Decisões:**
+  - **A UI não é um segundo caminho.** Ela monta a linha de comando a partir de
+    valores **validados** e chama **alvos do `Makefile`** que já existem e já
+    são testados (`iso/build-iso.sh`, `iso/check-iso.sh`, …). Se um dia ela
+    "implementar" algo, isso é decisão de arquitetura — não atalho.
+  - **Lista branca fechada** (`ACTIONS`): a UI nunca aceita comando, caminho de
+    script ou nome de alvo vindo do navegador. Cada entrada tem o seu validador
+    (`v_disk` → `^/dev/[a-zA-Z0-9]+$`, `v_family` → existe `family.conf`?,
+    `v_iso_path` → dentro de `iso/out` ou um `.iso` que existe).
+  - **Nunca lida com senha.** Gravar pendrive exige root; a UI só **lista** os
+    dispositivos e mostra o comando `sudo make pendrive DEVICE=/dev/sdX` pronto
+    para o usuário colar no terminal. Senha não entra no navegador, no servidor
+    nem em log (há guarda negativo proibindo `password`/`sudo -S`/`askpass`).
+  - **Só stdlib.** Esta máquina é limitada e `pip install` **não pode** ser
+    pré-requisito para gerar a ISO. Guardas negativos proíbem
+    `fastapi`/`flask`/`django`/`requests` e qualquer `pip install`.
+  - **Sem `xorriso`, ela RECUSA — com o motivo.** O servidor responde
+    `"xorriso não está instalado nesta máquina — gerar a ISO aqui é
+    impossível…"` e a página aponta o caminho do **GitHub Actions**. É a Regra
+    13-a aplicada ao usuário final: degradar com aviso explícito, nunca falhar
+    em silêncio (nem mostrar um botão que não faz nada).
+  - **`webui/` fica FORA da ISO** (`--exclude=./webui`): é ferramenta da máquina
+    que **gera** a mídia; um `webui/` dentro de `/opt/ai-cpu-os` no alvo não faz
+    nada e só confunde.
+- **Problemas:**
+  - **O teste "não achava" o `<title>` da página** — e a página estava certa.
+    Eu passava o corpo de ~17 KB por `printf | grep -q` e a asserção falhava; a
+    mesma expressão casava quando rodada à mão. Troquei por comparação direta
+    (`[[ "$r" == *"<title>ai-cpu-os"* ]]`): sem pipe, sem `cut`, sem 3
+    processos para checar uma substring. **Lição: para checar substring, não
+    passe 17 KB por um pipeline — compare na variável.**
+  - **`stdout` em bloco escondeu o `PORT=`.** O teste lia a porta que o servidor
+    imprime ao subir; com a saída redirecionada para arquivo, o Python **não
+    faz flush** e o teste concluía que o servidor nunca subiu. Corrigido com
+    `flush=True` no `print` da porta.
+  - **`set -u` + `$3` não passado** no helper `expect_400` → `unbound variable`;
+    resolvido com `${3:-{}}`.
+  - **`status_of` devolvia várias linhas** quando o corpo HTTP era multi-linha
+    (`cut -f1` sobre um texto enorme) → `head -1 | cut -f1`.
+  - O meu próprio script de repro em `/tmp` falhou porque **eu** esqueci de
+    definir `BASE` — perdi tempo perseguindo um bug que era meu, não do código.
+- **Verificado:** `make validate` verde; `make ui-test` **34/34**;
+  `make ci-guards-test` **31/31** (eram 22 — os 9 novos são todos da UI);
+  `make python` compila `webui/` junto com `roles/`.
+- **NÃO feito / não testado:**
+  - 🔴 **A interface NUNCA foi aberta num navegador de verdade.** Nem por mim.
+    Os testes exercitam a **API** (lista branca, validadores, SSE, recusa sem
+    `xorriso`, ausência de rota de escrita, bind em `127.0.0.1`). Tudo que for
+    **visual** (layout, contraste, um botão que não responde ao clique) é
+    **afirmação não verificada**.
+  - Não cliquei em "gerar ISO" no navegador **porque esta máquina não tem
+    `xorriso`** — e é exatamente isso que a UI responde com uma recusa
+    explicativa, o que o teste prova.
+  - Continua: nenhum **pendrive físico** gravado; caminho **Debian**, **UEFI** e
+    **hardware físico** sem validação.
+- **Commits:** *(preenchido após o push)*
+
+---
+
 
 
 
@@ -1711,6 +1797,8 @@ o que dava a impressão de que o negativo funcionava.
 | **Blocos A–L** (`VALIDATION.md`) | Idem — nenhum resultado preenchido (hardware físico). |
 | **`md5sum.txt` da ISO** | Gerado pelo script, mas **nunca validado** por um instalador real. |
 | **Boot UEFI da ISO** | ⚠️ **não testado.** O `-boot_image replay` (sessão #21) restaurou a imagem EFI oculta do Ubuntu; falta o Debian (`mtools`) e o boot UEFI de fato. |
+| 🖥️ **A interface web num NAVEGADOR de verdade** | ⚠️ **nunca foi aberta** — nem por quem escreveu (sessão #24). Os **34** casos de `make ui-test` exercitam a **API**: lista branca, validadores, SSE, recusa sem `xorriso`, ausência de rota de escrita, bind em `127.0.0.1`. **Tudo que for visual** (layout, um botão que não responde, contraste) é afirmação não verificada. Abrir `make ui` numa máquina com browser e clicar em **Simular** resolveria. |
+| 🖥️ **A UI numa máquina COM `xorriso`** | ⚠️ O caminho "gerar a ISO" pelo navegador só foi provado **recusando** (esta máquina não tem `xorriso`). O caminho feliz (job roda, SSE mostra o progresso real até o fim, a ISO nova aparece na lista) **não** foi exercitado ponta a ponta. |
 
 ### 5.3 Dúvidas em aberto / dívida técnica (requerem decisão sua)
 
@@ -1781,7 +1869,7 @@ o que dava a impressão de que o negativo funcionava.
 | Escrever merge de PR sem o usuário presente | Decisão que não é minha: dependência bump pode quebrar o build de um jeito que os checks não pegam | Analise e **reporte** (PR #2 verde e `clean`; PR #3 em conflito e com valor parcial); quem mescla é o dono |
 | Chamar um PR de dependabot de "redundante" sem conferir **linha por linha** | Um PR pode ter vários hunks e só *alguns* já aplicados: o do `checkout` já estava feito, o do `upload-artifact` não | Compare `changed_files` + o **diff real** com o conteúdo do `main`; conferir as versões publicadas na API antes de opinar |
 | Guarda de CI que **conta** um padrão varrendo `*.yml` quando a *string do próprio guarda* está dentro de um `*.yml` | Auto-referência: o `validate.yml` cita `uses: actions/upload-artifact@v7` dentro do comando, então a contagem ficava inflada (3 em vez de 2) e remover o v7 de **um** dos dois workflows não reprovava | Prefira asserção **por arquivo** (`grep -q <padrão> <arquivo>` para cada um) em vez de contar ocorrências num glob que inclui o próprio arquivo do guarda |
-| Guarda negativo com `grep` de texto que aparece em **comentário** | O guarda reprova o repositório correto (ex.: o Dockerfile **cita** `COPY build/bin` para explicar por que NÃO usá-lo) | Ancore na forma do comando (`^COPY[[:space:]]+.*build/bin`) e teste o guarda com um caso positivo |
+| Guarda negativo com `grep` de texto que aparece em **comentário** | O guarda reprova o repositório correto (ex.: o Dockerfile **cita** `COPY build/bin` para explicar por que NÃO usá-lo). **Segunda vez (sessão #24):** o guarda proibia `pip install` e varria o `README.md` — que **explica** "um `pip install` não pode ser pré-requisito para gerar a ISO". A árvore limpa passou a reprovar | Ancore na forma do comando (`^COPY[[:space:]]+.*build/bin`) e teste o guarda com um caso positivo. Aqui: **escopo no código** (`webui/`) + um guarda **positivo** de que a doc promete stdlib |
 | `sed -i` na 1ª linha de um script com `#!` | Pode trocar o **shebang** (`#!/usr/bin/env bash` vs `#!/bin/sh`) e mudar o interpretador | Nunca use `sed -i '1s/…'`; confirme o shebang depois (o CI verifica o modo estrito por shebang) |
 | Renomear/remover uma **chave de matriz** do CI e esquecer quem a consome | Ficou `${{ matrix.profile }}` no `build-llama.yml` depois de a matriz virar `family` → o **nome do artefato ia vazio** e o `upload-artifact` falharia (só num run de tag, longe do PR) | Ao renomear uma chave de matriz, `grep -n 'matrix\.'` no workflow inteiro; prefira `matrix.family` a nomes genéricos |
 | Documentar citando **nomes/comandos de cabeça** | A doc descreve algo que não existe, e ninguém descobre até alguém tentar (ex.: `@@PROFILE@@`, removido na refatoração) | Sempre **copie a saída real** (rode o script) e confira nomes com `grep` no código antes de escrever |
@@ -1802,7 +1890,9 @@ o que dava a impressão de que o negativo funcionava.
 | `xorriso -boot_image any keep` num ISO com **imagem El Torito oculta** (Ubuntu) | O `keep` mantém a *referência*, mas a imagem EFI **oculta** (fora da árvore ISO9660) não é copiada: a ISO sai ~6 MB menor, o `efi.img` vira 1 bloco e o MBR protetor aponta além do fim → **exit 32** + UEFI quebrado | Use `-boot_image any replay` (reexecuta o `-report_system_area cmd`: re-anexa a partição EFI via `--interval:imported_iso`) |
 | Remontar ISO por `-map` **seletivo** e esquecer arquivos | O caminho Ubuntu mapeia só o que muda; o que fica no `stage` (modelo, fonte, repo) **não** entra na ISO — e o `verify-iso.sh` acusou "air-gapped sem conteúdo" | Ao adicionar algo à mídia, **acrescente o `-map`** correspondente; rode `verify-iso.sh` (ele pega) |
 | `xorriso -find` **cita os caminhos entre aspas simples** | `'/apt-repo/x.deb'` não casa com `x.deb` numa comparação de igualdade → **408 falsos** "repositório incompleto" (só no modo `--iso`; o `--dir` usa `find` e não tem aspas) | Remova as aspas do resultado (`sed -e "s/^'//" -e "s/'$//"`); teste os dois modos |
-| `printf … \| grep -q` com `set -o pipefail` (entrada > buffer do pipe) | O `grep -q` sai no 1º match, o `printf` leva **SIGPIPE (141)** e o pipeline "falha" → o `if` cai no else. Falsos "a fonte não tem CMakeLists". Já tinha acontecido com `find \| head` | Use **here-string**: `grep -qE … <<<"$VAR"`. (Ou `grep` sem `-q`, que lê tudo.) Vale para qualquer lista > ~64 KB |
+| `printf … \| grep -q` com `set -o pipefail` (entrada > buffer do pipe) | O `grep -q` sai no 1º match, o `printf` leva **SIGPIPE (141)** e o pipeline "falha" → o `if` cai no else. Falsos "a fonte não tem CMakeLists". Já tinha acontecido com `find \| head`. **Terceira vez (sessão #24):** o teste da UI passava 17 KB de HTML por `printf \| grep -q` e a asserção do `<title>` falhava — com a página **correta** | Use **here-string**: `grep -qE … <<<"$VAR"`. (Ou `grep` sem `-q`, que lê tudo.) Vale para qualquer lista > ~64 KB. **Melhor ainda, se é substring de uma variável que você já tem: compare direto** — `[[ "$r" == *"<title>"* ]]` (zero processo extra) |
+| Testar API HTTP com `status_of`/`body_of` sobre um corpo **multi-linha** | `printf '%s' "$body" \| cut -f1` devolve **uma linha por linha do corpo** (o `<title>` e mais 400). A comparação `== "200"` falha por "sobra lixo" | `head -1 \| cut -f1`. E, para checar conteúdo, **não** passe o corpo por pipe: compare na variável |
+| `print()` do Python **sem `flush`** quando a saída é redirecionada para arquivo | `stdout` vira **block-buffered** (não line-buffered): o `PORT=8787` que o servidor imprime ao subir **não sai no arquivo na hora**, e o teste conclui que o servidor nunca subiu | `print(..., flush=True)` (ou `sys.stdout.reconfigure(line_buffering=True)`). Vale para **qualquer** script que um teste precise ler com a saída redirecionada |
 | `set default="<id>"` no GRUB sem `menuentry … --id <id>` | O `set default` casa por **id** OU **título**; sem o `--id` não acha, cai na entrada **0** (a interativa) e a instalação automática **nunca acontece** — sem erro, só o instalador interativo | Sempre par `set default="X"` + `menuentry "…" --id X`. E o verificador tem de checar o `--id`, não só a string (senão casa com o próprio `set default`) |
 | Declarar `file:///cdrom/...` como fonte **no apt do instalador** | O curtin roda `apt-get update` **dentro de um chroot no alvo**, onde **`/cdrom` não está montado** → `file:///cdrom/apt-repo` é inalcançável → `apt-config` **exit 100** ("does not have a Release file"), mesmo com o repo e o `Release` na mídia | Carregue o repo para o **alvo** (o late-command copia `/cdrom/apt-repo` → `/opt/apt-repo`) e aponte a fonte lá; o apt do instalador **não** o usa |
 | Julgar um teste pela **saída do serial** quando o processo loga no **journal** | O `test-vm.sh` julga por marcadores no console serial, mas o `log()` do late-command vai para o log do subiquity e o firstboot logava só no journal → **nenhum marcador** aparecia e o teste parecia não ver nada (embora a instalação estivesse certa) | Faça o marcador sair **no `/dev/console`** (`printf … > /dev/console`) e use `StandardOutput=journal+console` no unit. Confirme com `--serial-console` |

@@ -173,6 +173,26 @@ planta "tirar iso-check-test do validate" Makefile \
 planta "o artifact da ISO voltar a ser gateado pela Release" .github/workflows/iso.yml \
   sed_ 's|steps.size.outputs.release_too_big|steps.size.outputs.too_big|' .github/workflows/iso.yml
 
+# --- Interface web (fácil de degradar sem ninguém notar) --------------------
+planta "tirar ui-test do validate" Makefile \
+  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-check-test iso-dry-run-both|' Makefile
+planta "a UI passar a usar dependência externa" webui/server.py \
+  app 'import fastapi' webui/server.py
+planta "a UI passar a exigir pip install" webui/server.py \
+  app 'print("rode: pip install flask")' webui/server.py
+planta "a página passar a carregar um recurso externo (CDN)" webui/index.html \
+  app '<script src="https://cdn.jsdelivr.net/npm/x.js"></script>' webui/index.html
+planta "a UI passar a lidar com senha" webui/server.py \
+  app 'sudo -S true' webui/server.py
+planta "a UI perder a lista branca de ações" webui/server.py \
+  sed_ 's|^ACTIONS = {|OPACO = {|' webui/server.py
+planta "a UI perder o validador de disco" webui/server.py \
+  sed_ 's|^RE_DISK = |# RE_DISK = |' webui/server.py
+planta "a UI deixar de recusar bind fora do localhost" webui/server.py \
+  sed_ 's|args.host not in|args.host in|' webui/server.py
+planta "a ISO passar a levar o webui/ (Regra 13-b)" iso/build-iso.sh \
+  sed_ 's|--exclude=./webui||' iso/build-iso.sh
+
 echo
 if [[ $FAIL -eq 0 ]]; then
   echo "ci-guards: PASS=${PASS} FAIL=0"

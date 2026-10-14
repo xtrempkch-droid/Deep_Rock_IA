@@ -27,7 +27,7 @@ possível — usando só o processador, sem placa de vídeo.**
 7. [Medindo o resultado (e entendendo o número)](#7-medindo-o-resultado-e-entendendo-o-número)
 8. [Só quero uma melhoria, não o sistema todo](#8-só-quero-uma-melhoria-não-o-sistema-todo)
 9. [Como desfazer](#9-como-desfazer)
-10. [A ISO: instalar já pronto](#10-a-iso-instalar-já-pronto)
+10. [A ISO: instalar já pronto](#10-a-iso-instalar-já-pronto) — inclui [a interface web](#a-interface-web--o-jeito-sem-decorar-flag-nenhuma)
 11. [Usar uma GPU (opcional)](#11-usar-uma-gpu-opcional)
 12. [Problemas comuns](#12-problemas-comuns)
 13. [Perguntas frequentes](#13-perguntas-frequentes)
@@ -514,6 +514,51 @@ O `make iso-check` é a checagem que faz sentido numa máquina sem `xorriso`:
 > ✅ Ele **não substitui** o `verify-iso.sh` (que abre a ISO e confere o
 > conteúdo — precisa de `xorriso`). São complementares: um prova que **o
 > arquivo chegou inteiro**; o outro, que **o conteúdo está certo**.
+
+### A interface web — o jeito sem decorar flag nenhuma
+
+Se você só quer clicar e ver acontecer, o projeto traz uma **página local**:
+
+```bash
+make ui          # abre http://127.0.0.1:8787 no seu navegador
+```
+
+Ela mostra, de cara, o que a sua máquina tem: **CPU/família detectada**, espaço
+livre em disco e **quais ferramentas existem** (`xorriso`, `qemu`, `dd`…). A
+partir daí:
+
+| Na página você pode… | O que ela faz por baixo |
+|---|---|
+| **Criar a ISO** (distro, disco, papel, família, payload) | Monta o `iso/build-iso.sh` com os valores que você escolheu e roda, imprimindo o log **ao vivo** |
+| **Simular** (dry-run) | Não baixa nem escreve nada — só mostra o plano |
+| **Conferir uma ISO gerada** | Abre `iso/out/*.iso` e chama o `verify-iso.sh` (precisa de `xorriso`) |
+| **Conferir uma ISO baixada** | Chama o `check-iso.sh` — o caminho que funciona **sem** `xorriso` |
+| **Ver os pendrives** | Lista os dispositivos e mostra o comando `sudo make pendrive …` **pronto para copiar** |
+
+Três coisas que a interface **deliberadamente não faz** — e por que isso é uma
+qualidade, não uma limitação:
+
+- **Não lida com senha.** Gravar pendrive exige root, e senha não deve passar
+  por uma página. Ela só **lista** os dispositivos e mostra o comando; quem
+  escreve no disco é você, no terminal, com as 9 travas do `write-pendrive.sh`.
+- **Não instala nada.** Ela é só **biblioteca padrão** do Python 3 — se a sua
+  máquina é limitada, um `pip install` não pode ser pré-requisito para gerar a
+  ISO.
+- **Não inventa caminho novo.** Toda ação dela é um alvo do `Makefile` que já
+  existe e já é testado. A UI é atalho, não uma segunda implementação.
+
+Se faltar `xorriso`, ela **não fica tentando**: diz o motivo e aponta o caminho
+do GitHub Actions (§ acima). É a mesma regra do resto do projeto — *degradar com
+aviso explícito, nunca falhar em silêncio*.
+
+> 🔒 Ela escuta **apenas em `127.0.0.1`** (só a sua máquina enxerga) e recusa
+> explicitamente amarrar em outra interface — expor isso na rede seria expor uma
+> página que gera ISO e escolhe disco.
+
+> ⚠️ **Honestidade:** a interface é exercitada por **testes de API**
+> (`make ui-test`, 34 asserções: lista branca, validadores, SSE, recusa sem
+> `xorriso`), mas **nunca foi aberta num navegador de verdade** — nem por quem
+> escreveu. Se algum detalhe visual te incomodar, é aí que ninguém olhou ainda.
 
 ---
 

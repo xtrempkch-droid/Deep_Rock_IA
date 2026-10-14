@@ -130,6 +130,17 @@ jobs:
           set -euo pipefail
           make pendrive-test
 
+      # A interface web é o caminho amigável para quem não quer decorar flags.
+      # O teste sobe o servidor de verdade numa porta livre e prova o essencial:
+      # a lista fechada de ações (nada de comando arbitrário), os validadores
+      # de entrada, a recusa EXPLICATIVA quando falta `xorriso`, a ausência de
+      # qualquer rota de escrita e o bind em 127.0.0.1. Sem navegador, sem rede
+      # e sem dependência de terceiros (o server é só biblioteca padrão).
+      - name: Interface web (API + salvaguardas)
+        run: |
+          set -euo pipefail
+          make ui-test
+
       # Prova que os guardas do próprio job REALMENTE derrubam o job, plantando
       # cada violacao numa COPIA temporaria. Existe porque SEIS guardas estavam
       # na forma `! grep`, que o `set -e` ignora quando o comando e invertido
@@ -243,6 +254,8 @@ jobs:
             tests/test-verify-iso-repo-distro.sh
             tests/test-write-pendrive.sh
             tests/test-check-iso.sh
+            tests/test-webui.sh
+            webui/server.py webui/index.html
             tests/fixtures/SHA256SUMS.ubuntu-24.04
             tests/fixtures/SHA256SUMS.debian-13
             tests/fixtures/apt-cache-policy.txt
@@ -461,6 +474,50 @@ jobs:
           grep -q 'CD001' iso/write-pendrive.sh
           grep -q 'dev_is_removable' iso/write-pendrive.sh
           grep -q 'ARQUIVO' tests/test-write-pendrive.sh
+          # INTERFACE WEB: o valor dela esta em ser segura por construcao, e
+          # cada uma destas linhas e o que garante isso.
+          grep -q 'ui-test' Makefile
+          grep -q 'validate:.*ui-test' Makefile
+          grep -q 'make ui-test' .github/workflows/validate.yml
+          # A lista branca de acoes e o que impede "rode este comando pra mim":
+          # a UI so consegue disparar alvos que existem neste dicionario.
+          grep -q '^ACTIONS = {' webui/server.py
+          # Os validadores de entrada ancoram os valores que vao para o shell.
+          grep -q '^RE_DISK = ' webui/server.py
+          grep -q '^RE_ISO_NAME = ' webui/server.py
+          # Default local + recusa explicita de amarrar em outra interface.
+          grep -q '"127.0.0.1"' webui/server.py
+          grep -q 'args.host not in' webui/server.py
+          # A UI NUNCA deve passar senha: gravar pendrive exige root, entao o
+          # navegador so LISTA os dispositivos e mostra o comando pronto.
+          if grep -qE '(password|sudo -S|askpass)' webui/server.py webui/index.html; then
+            echo "::error::a interface web nao pode lidar com senha (use o terminal)"
+            exit 1
+          fi
+          # Sem dependencia de terceiros: esta maquina e limitada e o usuario
+          # nao pode ser obrigado a um `pip install` antes de gerar a ISO.
+          if grep -qE '^(import|from) (fastapi|flask|django|aiohttp|requests)' webui/server.py; then
+            echo "::error file=webui/server.py::a UI usa dependencia externa (deve ser so stdlib)"
+            exit 1
+          fi
+          # ESCopo: so o codigo da UI. Citar `pip install` no README e
+          # justamente a doc explicando que NAO se instala nada — foi a
+          # armadilha 'guarda casa com a prosa que o explica'.
+          if grep -qE 'pip[3]? install' webui/server.py webui/index.html; then
+            echo "::error::a UI nao pode exigir pip install (stdlib only)"
+            exit 1
+          fi
+          # ...e a doc tem de PROMETER isso ao usuario.
+          grep -qi 'biblioteca padrão' README.md
+          # Nada de CDN: um `<script src="https://...">` deixaria a pagina
+          # quebrada justamente na maquina offline/limitada.
+          if grep -qE '(src|href)="https?://' webui/index.html; then
+            echo "::error file=webui/index.html::a pagina carrega recurso externo (quebraria offline)"
+            exit 1
+          fi
+          # E a midia NAO leva a UI: ela e ferramenta da maquina que GERA a
+          # ISO, nao do sistema instalado (Regra 13-b).
+          grep -q 'exclude=./webui' iso/build-iso.sh
           if grep -q 'xargs -r -n 25' iso/build-iso.sh; then
             echo "::error file=iso/build-iso.sh::lote sem fallback: um nome ruim perde 25 pacotes"
             exit 1

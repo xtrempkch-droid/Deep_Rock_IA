@@ -694,15 +694,19 @@ inject_project() {
   local dest="${base}/ai-cpu-os"
 
   if [[ $DRY_RUN -eq 1 ]]; then
-    log_info "[dry-run] copiaria ${REPO_ROOT} → ${dest} (sem .git, sem iso/work, sem iso/out, sem *.iso)"
+    log_info "[dry-run] copiaria ${REPO_ROOT} → ${dest} (sem .git, sem iso/work, sem iso/out, sem webui, sem *.iso)"
     return 0
   fi
 
   mkdir -p "$dest"
+  # `webui/` fica de FORA: é ferramenta da máquina que GERA a ISO (quer
+  # navegador e não faz nada num sistema já instalado). Levá-la para a mídia só
+  # confundiria quem olhasse /opt/ai-cpu-os no alvo.
   tar -C "$REPO_ROOT" -cf - \
       --exclude=./.git \
       --exclude=./iso/work \
       --exclude=./iso/out \
+      --exclude=./webui \
       --exclude='./*.iso' \
       . | tar -C "$dest" -xf -
 
@@ -2212,7 +2216,8 @@ selftest_iso_tools() {
   # 2) O projeto real (o mesmo tar que o build injeia).
   mkdir -p "${stage}/ai-cpu-os"
   tar -C "$REPO_ROOT" -cf - \
-      --exclude=./.git --exclude=./iso/work --exclude=./iso/out --exclude='./*.iso' \
+      --exclude=./.git --exclude=./iso/work --exclude=./iso/out \
+      --exclude=./webui --exclude='./*.iso' \
       . | tar -C "${stage}/ai-cpu-os" -xf -
   chmod +x "${stage}/ai-cpu-os/build.sh" "${stage}/ai-cpu-os/detect-hardware.sh" \
            "${stage}/ai-cpu-os/llama-build.sh" "${stage}/ai-cpu-os/families/resolve.sh" \

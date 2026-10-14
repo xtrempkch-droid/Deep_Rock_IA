@@ -105,7 +105,13 @@ Dispara em **todo push para `main` e em todo Pull Request**.
 11. `make ci-guards-test` — planta as violações numa cópia temporária e exige
     que o job **falhe**. Existe porque seis guardas estavam na forma `! cmd`,
     que o `set -e` ignora — nunca derrubaram nada.
-12. `make iso-dry-run-both` — dry-run dos DOIS caminhos (ubuntu e debian) **sem
+12. `make ui-test` — sobe o servidor da Interface Web numa porta livre e
+    exercita a **API** (sem navegador e sem rede): a página é servida e **não
+    carrega nada de CDN**, a lista branca recusa valores maliciosos, o SSE
+    entrega o log e o `done`, e — o ponto central — **sem `xorriso` a geração é
+    RECUSADA com o motivo explícito** em vez de falhar em silêncio (Regra 13-a).
+    Também prova que **não existe rota de escrita** e que o bind é `127.0.0.1`.
+13. `make iso-dry-run-both` — dry-run dos DOIS caminhos (ubuntu e debian) **sem
    flags extras**, exatamente como o `make validate` local.
 
 ### Job `dry-run` (matriz: `xeon` e `ryzen`)
@@ -134,6 +140,11 @@ reais:
 | O `artifact` da ISO **não** é gateado pelo limite da Release | O mesmo booleano gateava os dois, e a ISO air-gapped (~4 GB) era gerada e **descartada** — quem não tem `xorriso` ficava sem nenhum caminho. O limite de 2 GiB é de asset de Release |
 | `make iso-check-test` existe, está no `validate` e o CI o chama | O conferidor de ISO baixada existe porque a máquina de desenvolvimento **não tem `xorriso`**; sem teste, o modo de falha mais comum (o navegador entregar o `.zip` em vez do `.iso`) voltaria a passar despercebido |
 | `make ci-guards-test` existe, está no `validate` e o CI o chama | Fecha o buraco acima: planta **cada** violação numa cópia temporária e exige que o job falhe. Guarda que nunca reprovou não é guarda |
+| A Interface Web **só** usa biblioteca padrão (sem `fastapi`/`flask`/`pip install`) | A máquina alvo pode ser limitada: instalar pacote Python não pode ser pré-requisito para gerar a ISO. Guarda negativo + positivo |
+| A página **não** carrega recurso externo (CDN) | Um `<script src="https://…">` deixaria a UI quebrada justamente na máquina offline/limitada |
+| A UI **não** lida com senha e **não** tem rota de escrita | Gravar pendrive exige root: senha não deve passar pelo navegador. A UI lista os dispositivos e mostra o comando para o usuário rodar no terminal |
+| A UI **recusa** bind fora de `127.0.0.1` | Expor na rede uma página que gera ISO e escolhe disco para particionar |
+| A ISO **não** leva o `webui/` (`--exclude=./webui`) | É ferramenta da máquina que **gera** a mídia, não do sistema instalado (Regra 13-b) |
 | `make iso-repo-test` existe, está no `validate` e o CI o chama | O bug do repo apt era **dependente do ambiente** (só aparece com uma "isca" no fecho, que varia com a release do host) — por isso precisa de teste com stub, não de um dry-run |
 | `make iso-verify-test` existe, está no `validate` e o CI o chama | O `verify-iso.sh` tinha **viés de distro**: procurava o repo em uso só no autoinstall e reprovava uma ISO Debian correta (run #10). O guarda exige o marcador da preseed (`apt-setup/local0/repository`) no verificador |
 Este é o job que protege as regras do `AGENTS.md` de erosão:

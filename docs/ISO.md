@@ -399,6 +399,44 @@ gravar, usando só `dd`/`od`/`sha256sum`:
 > GitHub (é o seu repositório). O `artifact-url` que o próprio workflow expõe
 > (`${{ steps.upload.outputs.artifact-url }}`) também exige sessão.
 
+### 4.3.2 Autor de flag nenhuma: a interface web local
+
+Tudo o que está nesta seção (§ 4.2 a § 4.3.1) tem uma página local equivalente,
+para quem não quer decorar flag:
+
+```bash
+make ui          # → http://127.0.0.1:8787   (só biblioteca padrão)
+make ui-test     # prova a API e as salvaguardas (34 asserções)
+```
+
+A página mostra o **hardware detectado**, o **espaço livre** e **quais
+ferramentas existem** na máquina; a partir daí monta o `make iso` com distro,
+disco, papel, família e payload que você escolher, roda e imprime o log **ao
+vivo** (SSE). Ela também:
+
+- **lista as ISOs** de `iso/out` com botões para conferir o **conteúdo**
+  (`verify-iso.sh`, exige `xorriso`) e um caminho para conferir uma ISO
+  **baixada** (`check-iso.sh`, **sem** `xorriso` — § 4.3.1);
+- **lista os pendrives** e mostra o comando `sudo make pendrive DEVICE=/dev/sdX`
+  pronto para copiar. A UI **nunca** pede senha: gravar disco exige root, e
+  senha não passa por uma página (§ 4.7).
+
+Três invariantes que valem repetir aqui:
+
+| Invariante | Por quê |
+|---|---|
+| **Só biblioteca padrão** do Python 3 | A máquina que gera a ISO pode ser limitada: `pip install` não pode ser pré-requisito |
+| **Só `127.0.0.1`** | Expor na rede uma página que gera ISO e escolhe disco de particionamento |
+| **Recusa com o motivo** quando falta `xorriso` | Regra 13-a: degradar com aviso explícito e apontar o GitHub Actions — nunca falhar em silêncio |
+
+> 📄 Os invariantes completos (lista branca de ações, sem rota de escrita, sem
+> CDN, `webui/` **fora da ISO**) estão na **Regra 16** do `AGENTS.md` e na § 4.7
+> do `README.technical.md`. Cada um tem guarda no CI, provado por violação
+> plantada (`make ci-guards-test`).
+
+> ⚠️ **Não validado:** a interface é exercitada **pela API** — **nunca foi
+> aberta num navegador de verdade**. Ver § 6.
+
 ### 4.4 Testar numa VM **antes** de qualquer máquina real
 
 ```bash
@@ -588,13 +626,15 @@ root desabilitado); no Debian o root fica bloqueado por padrão.
 
 | Item | Situação |
 |------|----------|
-| **Nenhuma ISO foi construída nem bootada** | ⚠️ **Os dois caminhos estão escritos e passam no autoteste de templates; o Debian foi exercitado em `--dry-run`. Nenhuma ISO real foi gerada, instalada ou bootada.** Requer `xorriso` (ausente no ambiente de desenvolvimento). |
-| **Caminho Ubuntu (`--distro ubuntu`)** | ⚠️ Escrito na sessão #10 e validado no autoteste (`autoinstall.yaml` final passa no `yamllint` + verificador) — mas **nunca executado** contra uma ISO real do Ubuntu. |
-| **`iso/verify-iso.sh`** | ✅ Exercitado de verdade: roda no `make iso-lint` sobre uma árvore montada com os templates e o projeto **reais**, incluindo um **teste negativo** (reprova quando falta a config). O caminho `--iso` (com xorriso) ainda **não** foi executado. |
-| **`iso/test-vm.sh`** | ⚠️ **Nunca executado**: não há `qemu` no ambiente de desenvolvimento. O comando do qemu só foi conferido em `--dry-run`. |
-| **`--serial-console`** | ⚠️ Nunca validado num boot real. Se o `console=ttyS0` não entrar na cmdline do sistema instalado, o `test-vm.sh` não verá o primeiro boot (o script avisa exatamente isso). |
+| **A ISO Ubuntu foi construída, bootada e instalada** | ✅ **FEITO (sessão #21)**: gerada dentro de um container `ubuntu:24.04`, instalada numa VM com KVM, e o **1º boot aplicou o ai-cpu-os** (família `intel-haswell`) compilando o llama.cpp do tarball da mídia, **sem rede**. Ver `STATE.md` § 3.3. ⚠️ Falta **hardware físico** e o caminho **Debian**. |
+| 🖥️ **A interface web (`make ui`)** | ⚠️ **Nunca aberta num navegador** — nem por quem escreveu. O `make ui-test` (34 asserções) exercita a **API**: lista branca, validadores, SSE, recusa sem `xorriso`, ausência de rota de escrita, bind em `127.0.0.1`. **Tudo que for visual é afirmação não verificada.** Ver § 4.3.2. |
+| 🖥️ **A UI numa máquina COM `xorriso`** | ⚠️ Só o caminho de **recusa** foi provado (esta máquina não tem `xorriso`). O caminho feliz — job roda, o SSE mostra o progresso real até o fim e a ISO nova aparece na lista — **não** foi exercitado ponta a ponta. |
+| **Caminho Ubuntu (`--distro ubuntu`)** | ✅ **EXECUTADO (sessão #21)**: ISO gerada, instalada numa VM (KVM) e o 1º boot aplicou o ai-cpu-os sem rede. Ver `STATE.md` § 3.3. |
+| **`iso/verify-iso.sh`** | ✅ Exercitado de verdade: roda no `make iso-lint` sobre uma árvore montada com os templates e o projeto **reais**, incluindo um **teste negativo** (reprova quando falta a config). E o caminho `--iso` (com `xorriso`) foi executado na sessão #21: **PASS=41/FAIL=0**. |
+| **`iso/test-vm.sh`** | ✅ **Executado (sessão #21)**: `exit 0` — bootou, instalou sozinho e o 1º boot aplicou. ⚠️ Nesta máquina de desenvolvimento **não há `qemu`**: só roda onde houver qemu + `/dev/kvm`. |
+| **`--serial-console`** | ✅ **Validado (sessão #21)**: foi o que tornou a instalação e o 1º boot observáveis sem tela. Sem ele, o `test-vm.sh` não vê os marcadores (o script avisa exatamente isso). |
 | Layout da ISO base | Ubuntu exige `casper/` (recusado com mensagem clara se não existir); Debian exige `isolinux/`. Outras ISOs falham de propósito em vez de gerar algo quebrado. |
-| Boot BIOS | Ubuntu: El Torito preservado do original. Debian: `isolinux` + `isohdpfx.bin`. **Não validado.** |
+| Boot BIOS | Ubuntu: El Torito preservado do original e **bootou numa VM**. Debian: `isolinux` + `isohdpfx.bin` — **não validado**. |
 | Boot UEFI | Ubuntu: imagem EFI preservada + patch do `grub.cfg` do UEFI. Debian: **best-effort** (tenta `EFI/*/grub.cfg`; se estiver dentro de `efi.img`, exige `mtools`). **Não validado.** |
 | **Rede no 1º boot** | ✅ **Não é necessária E foi provado (sessão #21)**: numa VM, o 1º boot compilou o llama.cpp do tarball da mídia e usou o modelo e o repositório local, sem rede. A rede **é usada** se estiver disponível (para atualizar pacotes) e é **obrigatória na máquina que GERA a ISO**. |
 | **Modelo na mídia** | ✅ Implementado (`--iso-model`) e **validado num boot real** (o `late-command` copiou para `/opt/models` e o `firstboot` usou via `AI_MODEL_FILE`, sem rede). |

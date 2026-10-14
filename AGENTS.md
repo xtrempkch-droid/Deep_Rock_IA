@@ -204,7 +204,11 @@ ai-cpu-os/
     ├── test-ci-guards.sh   # Prova que os guardas do CI REPROVAM (cópia temp.)
     ├── test-write-pendrive.sh # Travas do pendrive (gravando num ARQUIVO)
     ├── test-check-iso.sh   # Conferência de ISO baixada (fixtures byte a byte)
-    └── fixtures/           # SHA256SUMS REAIS + saída REAL do apt-cache policy
+│   ├── test-webui.sh       # Interface web: API + salvaguardas (sem navegador)
+│   └── fixtures/           # SHA256SUMS REAIS + saída REAL do apt-cache policy
+└── webui/                  # 🖥️ Interface web local (criar/conferir a ISO)
+    ├── server.py           # Servidor só-stdlib: lista branca de ações + SSE
+    └── index.html          # Página única, sem CDN (funciona offline)
 ```
 
 ---
@@ -236,6 +240,7 @@ ai-cpu-os/
 | **Testar a ISO de verdade (boot em VM)** | **`iso/test-vm.sh`**, `docs/VALIDATION.md` Bloco M |
 | **Gravar a ISO num PENDRIVE (bootável)** | **`iso/write-pendrive.sh`**, `make pendrives` / `make pendrive` |
 | **Conferir uma ISO baixada sem ter xorriso** | **`iso/check-iso.sh`**, `make iso-check ISO=…` |
+| **Criar/conferir a ISO por uma interface web (sem decorar flags)** | **`webui/server.py`**, `make ui` (→ http://127.0.0.1:8787) |
 | **Entender a variante Ubuntu (autoinstall)** | **`iso/autoinstall/autoinstall.yaml`**, **`docs/ISO.md`** § 4.5 |
 | **Retomar/continuar depois de um tempo parado** | **`docs/JOURNAL.md`** (§ 1 retomada, § 5 threads abertas) |
 | Scripts principais                     | `build.sh`, `detect-hardware.sh`, `llama-build.sh` |
@@ -363,6 +368,31 @@ Estas regras são **obrigatórias**:
     "Próxima ação imediata" do `STATE.md`, é o que garante que o trabalho possa
     ser retomado **sem perder nada**. Ver o template em `docs/JOURNAL.md` § 8.
 
+16. **A interface web (`webui/`) é uma CONVENIÊNCIA, nunca um novo caminho.**
+    Ela existe para quem não quer decorar flags — e é isso que a torna perigosa
+    se crescer sem disciplina. Invariantes obrigatórios (todos com guarda no CI,
+    cada um provado por violação plantada em `tests/test-ci-guards.sh`):
+    - **Só executa o que está na lista branca** (`ACTIONS` em `server.py`). A UI
+      **nunca** aceita comando, caminho de script ou nome de alvo vindo do
+      navegador: ela monta a linha de comando a partir de valores **validados**
+      (`v_disk`, `v_family`, `v_distro`, …) e chama os alvos do `Makefile`.
+    - **Escuta só em `127.0.0.1`** e **recusa** explicitamente outra interface
+      (amarrar em `0.0.0.0` exporia uma página que gera ISO e particiona disco).
+    - **Somente biblioteca padrão.** Nada de `fastapi`/`flask`/`pip install`:
+      a máquina do usuário pode ser limitada, e ele não pode ser obrigado a
+      instalar nada para gerar a ISO.
+    - **Nunca lida com senha.** Gravar pendrive exige root; a UI só **lista** os
+      dispositivos e mostra o comando pronto para o usuário rodar no terminal.
+      Nenhuma senha entra no navegador, no servidor ou em log.
+    - **Não tem rota de escrita arbitrária.** Se um dia precisar, isso é uma
+      decisão de arquitetura — não um atalho.
+    - **A ISO não leva o `webui/`** (`--exclude=./webui` no `build-iso.sh`): é
+      ferramenta da máquina que GERA a mídia, não do sistema instalado
+      (Regra 13-b).
+    - A UI **não implementa nada**: quando falta `xorriso`, ela diz *por que* não
+      dá para gerar ali e aponta o caminho do GitHub Actions — degradar com
+      aviso explícito (Regra 13-a), nunca falhar em silêncio.
+
 ---
 
 ## 7. Próxima ação imediata
@@ -374,8 +404,27 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-14
-- **O que mudou:** **A ISO volta a ser BAIXÁVEL + conferência sem `xorriso` (sessão #23).**
+- **Data:** 2026-10-15
+- **O que mudou:** **Interface web local para gerar/conferir a ISO (sessão #24).**
+  Entrou `webui/` (`server.py` + `index.html`) para quem não quer decorar flags:
+  a página mostra o hardware detectado, o espaço livre e quais ferramentas
+  existem, monta o `make iso` com o que você escolher, roda e vai imprimindo o
+  log **ao vivo** (SSE), lista as ISOs em `iso/out` com botões de conferir, e
+  **lista os pendrives** mostrando o comando `sudo make pendrive …` pronto para
+  copiar (a UI nunca pede senha). **Provado com `make ui-test`** (34 asserções):
+  a página é servida, **não usa CDN**, a lista branca recusa `../`, disco/serviço
+  inválido e JSON quebrado, o `/api/jobs/<id>` valida o formato do id, o SSE
+  entrega log + `done`, e — o ponto central — **sem `xorriso` ela RECUSA gerar
+  com o motivo explícito** e aponta o GitHub Actions (Regra 13-a), em vez de
+  falhar em silêncio. Ela só usa **biblioteca padrão** (esta máquina é limitada:
+  `pip install` não pode ser pré-requisito para gerar a ISO) e escuta **só em
+  `127.0.0.1`**. Nova **Regra 16** com os invariantes, cada um com guarda no CI
+  provado por violação plantada (`make ci-guards-test`: 22 → **31** casos).
+  `webui/` **fica de fora da ISO** (`--exclude=./webui`) — é ferramenta da
+  máquina que gera a mídia, não do sistema instalado. Alvos novos: `make ui` e
+  `make ui-test` (este no `validate`, no CI e no dry-run local).
+  **Nada disso foi aberto num navegador de verdade** — o teste exercita a API.
+- **Data anterior:** 2026-10-14 — **A ISO volta a ser BAIXÁVEL + conferência sem `xorriso` (sessão #23).**
   O workflow gateava o **artifact** pelo limite de **2 GiB**, que é de **asset de
   Release** (os limites documentados do `upload-artifact` são número por job e
   perda de permissões). Resultado cruel: a ISO air-gapped (~4 GB) era gerada e

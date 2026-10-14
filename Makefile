@@ -38,9 +38,9 @@ SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
 .PHONY: help lint bashn shellcheck python yaml docs validate dry-run apply \
         build mods mods-check mods-test families families-test gpu-check \
         iso iso-dry-run iso-dry-run-both iso-lint iso-yaml iso-verify iso-vm \
-        pendrives pendrive pendrive-test \
         iso-select-test iso-repo-test iso-verify-test ci-guards-test \
-        pendrive pendrives pendrive-test iso-check iso-check-test \
+        pendrives pendrive pendrive-test iso-check iso-check-test \
+        ui ui-test \
         docker docker-check ci clean
 
 help: ## Lista os alvos disponíveis
@@ -62,7 +62,7 @@ shellcheck: ## Roda shellcheck (severidade warning+)
 	@echo "shellcheck: OK"
 
 python: ## Compila os arquivos Python (checagem de sintaxe)
-	@python3 -m compileall -q roles/ && echo "python: OK"
+	@python3 -m compileall -q roles/ webui/ && echo "python: OK"
 
 yaml: ## Lint dos arquivos YAML
 	@command -v yamllint >/dev/null || { echo "yamllint ausente"; exit 1; }
@@ -80,7 +80,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-check-test iso-dry-run-both ## Lint + docs + famílias + testes de ISO + guardas + dry-run
+validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-check-test ui-test iso-dry-run-both ## Lint + docs + famílias + testes de ISO + UI + guardas + dry-run
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -174,6 +174,12 @@ iso-check: ## Confere uma ISO BAIXADA (sem xorriso, sem root): make iso-check IS
 
 iso-check-test: ## Prova a conferência de ISO baixada (fixtures; sem xorriso)
 	@bash tests/test-check-iso.sh
+
+ui: ## Abre a interface web local (criar/conferir a ISO pelo navegador)
+	@python3 webui/server.py $(UI_ARGS)
+
+ui-test: ## Prova a interface web (API + salvaguardas; sem navegador, sem rede)
+	@bash tests/test-webui.sh
 
 iso-lint: ## Verifica os scripts da ISO e valida templates + ferramentas
 	@bash -n iso/build-iso.sh iso/verify-iso.sh iso/test-vm.sh iso/write-pendrive.sh \

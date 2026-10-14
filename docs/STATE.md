@@ -68,6 +68,9 @@
 | `.github/workflows/*.yml`             | ✅      | ⚠️ (yamllint)      | ❌ (1º run pendente)|
 | `Makefile`                            | ✅      | ⚠️ (make -n/test)  | ❌                  |
 | `iso/build-iso.sh` (gerador da ISO)   | ✅      | ✅ shellcheck      | ✅ **executado (2026-10-13)** — ver § 3.3 |
+| `iso/check-iso.sh` (ISO baixada, sem xorriso) | ✅ | ✅ shellcheck | ✅ **20 asserções, fixtures byte a byte**; ❌ nunca rodou contra um artifact real do GitHub |
+| `iso/write-pendrive.sh` (grava o pendrive) | ✅ | ✅ shellcheck | ⚠️ 16 asserções gravando num **ARQUIVO**; ❌ **nenhum pendrive físico gravado** |
+| `webui/server.py` + `webui/index.html` (interface web) | ✅ | ⚠️ py_compile | ⚠️ **34 asserções pela API**; ❌ **nunca aberta num navegador** |
 | `iso/preseed/*` (preseed, 1º boot)    | ✅      | ⚠️ (templating)    | ✅ **bootado em VM (Ubuntu)**; Debian/preseed ❌ |
 | `docs/ISO.md`                         | ✅      | ⚠️ (revisão manual)| ❌                  |
 | `docs/JOURNAL.md` (continuidade)      | ✅      | ⚠️ (revisão manual)| ☐ **em uso contínuo** |
@@ -268,6 +271,26 @@ bash iso/test-vm.sh --iso iso/out/ai-cpu-os-ubuntu-<data>.iso \
 > 📓 **Para retomar do zero (ou de outra sessão):** [`docs/JOURNAL.md`](JOURNAL.md)
 > — § 1 (retomada em 5 min), § 5 (threads abertas) e § 6 (armadilhas já
 > pisadas). Ao terminar qualquer sessão, **registre-a lá** (Regra 14 do `AGENTS.md`).
+
+**Passo 1-b — ✅ CONCLUÍDO (2026-10-15). Interface web local (`webui/`).**
+Existe agora um jeito de gerar/conferir a ISO **sem decorar flags**:
+
+```bash
+make ui          # → http://127.0.0.1:8787
+make ui-test     # prova a API e as salvaguardas (34 asserções; sem navegador)
+```
+
+A página mostra o hardware detectado + espaço livre + ferramentas presentes,
+monta o `make iso` com o que o usuário escolher, imprime o log **ao vivo** (SSE),
+lista as ISOs de `iso/out` e **lista os pendrives** mostrando o comando
+`sudo make pendrive …` pronto para copiar (a UI **nunca** pede senha).
+É **só biblioteca padrão** (a máquina do usuário pode ser limitada) e escuta
+**apenas `127.0.0.1`**. Sem `xorriso`, ela **recusa** gerar com o motivo
+explícito e aponta o GitHub Actions (Regra 13-a). Nova **Regra 16** no
+`AGENTS.md`; `make ci-guards-test` passou de 22 para **31** casos provados.
+`webui/` **fica fora da ISO** (`--exclude=./webui`).
+⚠️ **Não provado:** a UI **nunca foi aberta num navegador de verdade** — os
+testes exercitam a API. Nada aqui é afirmação sobre o visual.
 
 **Passo 2 (AGORA) — validar em HARDWARE FÍSICO (Xeon E5-2680 v4 e Ryzen 5 3500X).**
 

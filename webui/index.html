@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ai-cpu-os · gerador de ISO</title>
+<!--
+  Página única, SEM recursos externos de propósito: nada de CDN, nada de fonte
+  remota, nada de framework. A máquina que gera a ISO pode estar sem internet, e
+  uma UI que quebra offline não serve para este projeto.
+-->
+<style>
+  :root{
+    --bg:#0f1115; --card:#171a21; --card2:#1e222b; --line:#2a2f3a;
+    --fg:#e6e8ee; --dim:#9aa3b2; --accent:#5cc8ff; --ok:#4ade80; --warn:#fbbf24; --err:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{padding:18px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;
+    background:linear-gradient(180deg,#0f1115ee,#0f1115cc);backdrop-filter:blur(6px);z-index:9}
+  h1{margin:0;font-size:19px;letter-spacing:.2px}
+  h1 small{color:var(--dim);font-weight:400;font-size:13px;margin-left:8px}
+  main{max-width:1100px;margin:0 auto;padding:22px}
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card h2{margin:0 0 12px;font-size:15px;color:var(--accent);display:flex;gap:8px;align-items:center}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  label{display:block;color:var(--dim);font-size:12.5px;margin:10px 0 4px;text-transform:uppercase;letter-spacing:.4px}
+  select,input{width:100%;background:var(--card2);color:var(--fg);border:1px solid var(--line);
+    border-radius:8px;padding:9px 10px;font:inherit}
+  select:focus,input:focus{outline:2px solid var(--accent);outline-offset:1px}
+  button{background:var(--accent);color:#04121a;border:0;border-radius:8px;padding:10px 16px;
+    font:600 14px/1 inherit;cursor:pointer}
+  button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px}
+  .kv b{color:var(--dim);font-weight:500}
+  .pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;border:1px solid var(--line)}
+  .pill.ok{color:var(--ok);border-color:#26492f}
+  .pill.no{color:var(--err);border-color:#4a2626}
+  .pill.warn{color:var(--warn);border-color:#4a3d1a}
+  pre{background:#0b0d11;border:1px solid var(--line);border-radius:8px;padding:12px;
+    overflow:auto;max-height:340px;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+    white-space:pre-wrap;word-break:break-word}
+  .log{max-height:420px}
+  .muted{color:var(--dim);font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:500;font-size:12.5px;text-transform:uppercase}
+  .warnbox{background:#2a2113;border:1px solid #4a3d1a;color:#ffe6b3;border-radius:10px;padding:12px;font-size:13.5px}
+  .errbox{background:#2b1717;border:1px solid #4a2626;color:#ffd7d7;border-radius:10px;padding:12px;font-size:13.5px}
+  .okbox{background:#132519;border:1px solid #26492f;color:#ccf5da;border-radius:10px;padding:12px;font-size:13.5px}
+  code{background:#0b0d11;padding:2px 6px;border-radius:5px;font-size:13px}
+  .steps li{margin:6px 0}
+  .spin{display:inline-block;width:11px;height:11px;border:2px solid var(--accent);
+    border-right-color:transparent;border-radius:50%;animation:s .8s linear infinite;vertical-align:-1px}
+  @keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header>
+  <h1>ai-cpu-os · gerador de ISO <small id="repo"></small></h1>
+</header>
+
+<main>
+  <div id="alert"></div>
+
+  <div class="grid">
+    <!-- ================= ESTADO ================= -->
+    <section class="card">
+      <h2>💻 Esta máquina</h2>
+      <div class="kv" id="status-kv"><span class="muted">carregando…</span></div>
+      <h2 style="margin-top:16px">🧰 Ferramentas</h2>
+      <div class="row" id="tools"></div>
+    </section>
+
+    <!-- ================= CRIAR ISO ================= -->
+    <section class="card">
+      <h2>📀 Criar a ISO</h2>
+      <label for="distro">Base do sistema</label>
+      <select id="distro">
+        <option value="ubuntu">Ubuntu Server (autoinstall) — padrão</option>
+        <option value="debian">Debian (preseed) — legado</option>
+      </select>
+
+      <label for="disk">Disco da instalação (gravado na ISO)</label>
+      <input id="disk" value="/dev/vda" spellcheck="false">
+      <div class="muted" style="margin-top:4px">
+        ⚠️ É o disco que será <b>apagado</b> na máquina de destino, não neste computador.
+      </div>
+
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
+        <div>
+          <label for="role">Papel</label>
+          <select id="role"></select>
+        </div>
+        <div>
+          <label for="family">Família de CPU</label>
+          <select id="family"></select>
+        </div>
+      </div>
+
+      <label for="payload">Conteúdo embutido</label>
+      <select id="payload">
+        <option value="none">Nenhum — ISO leve (~2,7 GB), precisa de internet na máquina que gera</option>
+        <option value="auto">Tudo na mídia (air-gapped) — fonte + modelo + pacotes (~4 GB)</option>
+      </select>
+
+      <div class="row" style="margin-top:16px">
+        <button class="ghost" id="btn-preview">👁 Simular</button>
+        <button id="btn-build">⚙ Gerar ISO</button>
+      </div>
+      <div class="muted" style="margin-top:8px" id="build-hint"></div>
+    </section>
+
+    <!-- ================= GITHUB ================= -->
+    <section class="card" id="card-remote">
+      <h2>☁️ Gerar no GitHub Actions</h2>
+      <p class="muted" style="margin-top:0">
+        O caminho para <b>qualquer máquina sem <code>xorriso</code></b> (esta, por
+        exemplo). O build roda nos servidores do GitHub e você baixa o arquivo.
+      </p>
+      <ol class="steps muted">
+        <li>Abra <a id="actions-link" href="#" target="_blank" rel="noopener">Actions → workflow <code>iso</code></a>.</li>
+        <li>Clique em <b>Run workflow</b> e escolha os mesmos valores do formulário acima.</li>
+        <li>Marque <b>air_gapped</b> se quiser a ISO que se basta.</li>
+        <li>Ao terminar, baixe o <b>artifact</b> e <b>extraia o .zip</b> (dentro está o <code>.iso</code>).</li>
+        <li>Volte aqui e clique em <b>Conferir</b> na seção de ISOs, apontando o caminho.</li>
+      </ol>
+      <div class="warnbox" style="margin-top:10px">
+        <b>Dica:</b> o arquivo baixado do Actions é um <code>.zip</code>. Renomear
+        para <code>.iso</code> <b>não funciona</b> — é preciso extrair.
+      </div>
+    </section>
+  </div>
+
+  <!-- ================= LOG ================= -->
+  <section class="card" id="card-log" style="margin-top:16px;display:none">
+    <h2><span id="log-spin"></span> <span id="log-title">Executando…</span>
+      <span class="pill" id="log-state"></span></h2>
+    <pre class="log" id="log"></pre>
+    <div class="row">
+      <button class="ghost" id="btn-clear">Limpar</button>
+      <span class="muted" id="log-note"></span>
+    </div>
+  </section>
+
+  <!-- ================= ISOS ================= -->
+  <section class="card" style="margin-top:16px">
+    <h2>📦 ISOs existentes</h2>
+    <div id="isos"></div>
+
+    <label for="iso-path">Ou confira uma ISO baixada (caminho completo)</label>
+    <div class="row">
+      <input id="iso-path" placeholder="/home/você/Downloads/ai-cpu-os-ubuntu.iso" spellcheck="false" style="flex:1;min-width:260px">
+      <button class="ghost" id="btn-check">🔍 Conferir</button>
+      <button class="ghost" id="btn-verify" title="Confere o CONTEÚDO (exige xorriso)">🧾 Verificar conteúdo</button>
+    </div>
+    <div class="muted" style="margin-top:6px">
+      <b>Conferir</b> usa <code>dd</code>/<code>od</code>/<code>sha256sum</code> — funciona aqui.
+      <b>Verificar conteúdo</b> abre a imagem e exige <code>xorriso</code>.
+    </div>
+  </section>
+
+  <!-- ================= PENDRIVE ================= -->
+  <section class="card" style="margin-top:16px">
+    <h2>🔌 Gravar num pendrive</h2>
+    <div class="row">
+      <button class="ghost" id="btn-pendrives">Listar dispositivos</button>
+    </div>
+    <pre id="pendrives" style="display:none"></pre>
+    <div class="warnbox" style="margin-top:10px">
+      A gravação precisa de <b>root</b>, então ela <b>não</b> é disparada daqui
+      (pedir senha pelo navegador seria inseguro). O comando exato está abaixo —
+      é o mesmo caminho com as <b>9 travas</b> do projeto.
+      <div class="row" style="margin-top:8px">
+        <code id="pendrive-cmd" style="flex:1">sudo make pendrive DEVICE=/dev/sdX</code>
+        <button class="ghost" id="btn-copy">Copiar</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+};
+
+let OPTIONS = null;
+
+function alertBox(kind, html) {
+  const cls = kind === "err" ? "errbox" : kind === "ok" ? "okbox" : "warnbox";
+  const box = document.getElementById("alert");
+  box.replaceChildren();
+  const d = el("div", cls);
+  d.innerHTML = html;
+  box.append(d);
+}
+function clearAlert(){ $("alert").replaceChildren(); }
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({ error: "resposta inválida" }));
+  if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+
+/* ---------------- estado ---------------- */
+async function loadStatus() {
+  const s = await api("/api/status");
+  const kv = $("status-kv");
+  kv.replaceChildren();
+  const add = (k, v) => { kv.append(el("b", null, k), el("span", null, v)); };
+  $("repo").textContent = s.repo;
+  add("Família de CPU", s.hardware.family || "—");
+  add("Papel sugerido", s.hardware.role || "—");
+  add("GPU", s.hardware.gpu || "nenhuma");
+  const free = s.disk.free_gb;
+  add("Espaço livre", free + " GB" + (free < 8 ? "  ⚠️ pouco para gerar a ISO" : ""));
+  add("ISOs geradas", String(s.isos.length));
+
+  const tools = $("tools");
+  tools.replaceChildren();
+  const names = {xorriso:"xorriso", "qemu-system-x86_64":"qemu", dd:"dd", lsblk:"lsblk"};
+  for (const [k, label] of Object.entries(names)) {
+    const ok = s.tools[k];
+    const p = el("span", "pill " + (ok ? "ok" : "no"), (ok ? "✓ " : "✗ ") + label);
+    tools.append(p);
+  }
+
+  // Botão de gerar: desabilitado COM MOTIVO, nunca escondido.
+  const canBuild = s.can_build;
+  $("btn-build").disabled = !canBuild;
+  $("btn-verify").disabled = !s.can_verify;
+  $("build-hint").textContent = canBuild
+    ? "xorriso presente: a ISO será gerada nesta máquina."
+    : "xorriso ausente: gerar aqui é impossível. Use a seção do GitHub Actions ao lado.";
+  $("card-remote").style.display = canBuild ? "none" : "";
+
+  renderIsos(s.isos);
+  return s;
+}
+
+function renderIsos(isos) {
+  const box = $("isos");
+  box.replaceChildren();
+  if (!isos.length) {
+    box.append(el("p", "muted", "Nenhuma ISO em iso/out ainda."));
+    return;
+  }
+  const t = el("table");
+  const thead = el("thead");
+  const hr = el("tr");
+  ["Nome", "Tamanho", "SHA256", "Ações"].forEach(h => hr.append(el("th", null, h)));
+  thead.append(hr); t.append(thead);
+  const tb = el("tbody");
+  for (const iso of isos) {
+    const tr = el("tr");
+    tr.append(el("td", null, iso.name));
+    tr.append(el("td", null, iso.size_mb + " MB"));
+    tr.append(el("td", null, iso.sha256_file ? "✓" : "—"));
+    const td = el("td");
+    const b1 = el("button", "ghost", "Conferir");
+    b1.onclick = () => startJob("/api/iso-check", {iso: iso.name});
+    td.append(b1, document.createTextNode(" "));
+    const b2 = el("button", "ghost", "Conteúdo");
+    b2.onclick = () => startJob("/api/iso-verify", {iso: iso.name, distro: $("distro").value});
+    td.append(b2);
+    tr.append(td);
+    tb.append(tr);
+  }
+  t.append(tb); box.append(t);
+}
+
+/* ---------------- opções ---------------- */
+async function loadOptions() {
+  OPTIONS = await api("/api/options");
+  const fill = (id, values, labels) => {
+    const sel = $(id); sel.replaceChildren();
+    for (const v of values) {
+      const o = el("option", null, labels ? labels[v] || v : v);
+      o.value = v; sel.append(o);
+    }
+  };
+  fill("role", OPTIONS.roles, {
+    auto: "auto — detecta o hardware no 1º boot",
+    inference: "inference — servidor de IA",
+    builder: "builder — build/registry/Gitea",
+  });
+  fill("family", OPTIONS.families);
+  $("distro").value = OPTIONS.defaults.distro;
+  $("disk").value = OPTIONS.defaults.disk;
+  const repo = $("repo").textContent;
+  const m = repo.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
+  const slug = m ? m[1] : "SEU-USUARIO/SEU-REPO";
+  $("actions-link").href = "https://github.com/" + slug + "/actions/workflows/iso.yml";
+}
+
+/* ---------------- jobs + SSE ---------------- */
+let ES = null;
+
+function showLog(title) {
+  $("card-log").style.display = "";
+  $("log-title").textContent = title;
+  $("log-state").textContent = "rodando";
+  $("log-state").className = "pill warn";
+  $("log-spin").innerHTML = '<span class="spin"></span>';
+  $("log").textContent = "";
+  $("log-note").textContent = "";
+  $("card-log").scrollIntoView({behavior: "smooth", block: "nearest"});
+}
+
+function appendLog(line) {
+  const pre = $("log");
+  pre.textContent += line + "\n";
+  pre.scrollTop = pre.scrollHeight;
+}
+
+function watchJob(jobId, title) {
+  showLog(title);
+  if (ES) ES.close();
+  ES = new EventSource(`/api/jobs/${jobId}/events`);
+  ES.onmessage = (ev) => appendLog(JSON.parse(ev.data));
+  ES.addEventListener("done", (ev) => {
+    const rc = JSON.parse(ev.data).rc;
+    ES.close(); ES = null;
+    $("log-spin").innerHTML = "";
+    const ok = rc === 0;
+    $("log-state").textContent = ok ? "concluído (rc=0)" : "falhou (rc=" + rc + ")";
+    $("log-state").className = "pill " + (ok ? "ok" : "no");
+    $("log-note").textContent = ok
+      ? "Tudo certo. Se era um build, a ISO está em iso/out/."
+      : "Veja as linhas de erro acima. Elas dizem o motivo.";
+    if (ok) { clearAlert(); loadStatus().catch(() => {}); }
+    else alertBox("err", "O comando terminou com <b>rc=" + rc +
+      "</b>. O motivo está no log (procure por <code>[ERROR]</code> ou <code>[FAIL]</code>).");
+  });
+  ES.onerror = () => { /* reconexão automática */ };
+}
+
+async function startJob(path, body) {
+  try {
+    clearAlert();
+    const r = await api(path, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    watchJob(r.job, (body.distro ? body.distro + " · " : "") +
+      ({"/api/preview":"Simulação","/api/build":"Gerando a ISO",
+        "/api/iso-check":"Conferência","/api/iso-verify":"Verificação de conteúdo"}[path] || "Executando"));
+  } catch (e) {
+    alertBox("err", "<b>" + e.message + "</b>");
+  }
+}
+
+/* ---------------- eventos ---------------- */
+$("btn-preview").onclick = () =>
+  startJob("/api/preview", formValues());
+$("btn-build").onclick = () => {
+  const v = formValues();
+  const ok = confirm(
+    "Gerar a ISO agora?\n\n" +
+    "Base: " + v.distro + "\n" +
+    "Papel: " + v.role + " · Família: " + v.family + "\n" +
+    "Conteúdo: " + (v.payload === "auto" ? "tudo na mídia (air-gapped)" : "nenhum") + "\n\n" +
+    "O disco " + v.disk + " será o alvo da INSTALAÇÃO (na máquina de destino).\n" +
+    "O build pode demorar e baixar alguns GB."
+  );
+  if (ok) startJob("/api/build", v);
+};
+$("btn-check").onclick = () => {
+  const p = $("iso-path").value.trim();
+  if (!p) { alertBox("warn", "Informe o caminho da ISO baixada."); return; }
+  startJob("/api/iso-check", {iso: p});
+};
+$("btn-verify").onclick = () => {
+  const p = $("iso-path").value.trim();
+  if (!p) { alertBox("warn", "Informe o caminho da ISO."); return; }
+  startJob("/api/iso-verify", {iso: p, distro: $("distro").value});
+};
+$("btn-clear").onclick = () => { $("log").textContent = ""; };
+$("btn-copy").onclick = async () => {
+  try { await navigator.clipboard.writeText($("pendrive-cmd").textContent); $("btn-copy").textContent = "copiado ✓"; }
+  catch { $("btn-copy").textContent = "selecione e copie"; }
+  setTimeout(() => { $("btn-copy").textContent = "Copiar"; }, 1600);
+};
+$("btn-pendrives").onclick = async () => {
+  const pre = $("pendrives");
+  pre.style.display = "";
+  pre.textContent = "listando…";
+  try {
+    const r = await api("/api/pendrives");
+    pre.textContent = r.output || "(sem saída)";
+  } catch (e) { pre.textContent = "erro: " + e.message; }
+};
+
+function formValues() {
+  return {
+    distro: $("distro").value,
+    disk: $("disk").value.trim(),
+    role: $("role").value,
+    family: $("family").value,
+    payload: $("payload").value,
+  };
+}
+
+/* ---------------- start ---------------- */
+(async () => {
+  try {
+    await loadOptions();
+    await loadStatus();
+  } catch (e) {
+    alertBox("err", "Não consegui falar com o servidor: " + e.message);
+  }
+})();
+</script>
+</body>
+</html>

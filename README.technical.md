@@ -143,8 +143,13 @@ ai-cpu-os/
 │   ├── test-ci-guards.sh   # os guardas do CI reprovam mesmo?
 │   ├── test-write-pendrive.sh # as travas do pendrive (alvo = ARQUIVO)
 │   ├── test-check-iso.sh   # conferência de ISO baixada (fixtures byte a byte)
+│   ├── test-webui.sh       # interface web: API + salvaguardas (sem navegador)
 │   ├── fixtures/           # SHA256SUMS reais + saída real do apt-cache
 │   └── families-matrix.txt # ~60 CPUs reais → família esperada
+│
+├── webui/                  # interface web local (conveniência, não um 2º caminho)
+│   ├── server.py           # só stdlib: lista branca + validadores + SSE
+│   └── index.html          # página única, sem CDN (funciona offline)
 │
 ├── docker/                 # Dockerfile + exemplo de compose
 ├── docs/                   # ver a tabela do § 0
@@ -270,6 +275,7 @@ bash tests/test-iso-repo-filter.sh        # o repo apt não perde lote em silên
 bash tests/test-verify-iso-repo-distro.sh # o verificador entende as duas distros?
 bash tests/test-ci-guards.sh              # os guardas do CI reprovam mesmo?
 bash tests/test-check-iso.sh              # a conferência de ISO baixada acerta?
+bash tests/test-webui.sh                  # a interface web continua contida?
 ```
 
 `family.conf` mínimo:
@@ -422,6 +428,7 @@ bash tests/test-iso-repo-filter.sh   # repo apt: filtro e fallback (sem rede)
 bash tests/test-verify-iso-repo-distro.sh # verificador distro-aware (sem xorriso)
 bash tests/test-ci-guards.sh         # os guardas do CI reprovam? (cópia temporária)
 bash tests/test-check-iso.sh         # conferência de ISO baixada (sem xorriso)
+bash tests/test-webui.sh             # interface web: API + salvaguardas
 ```
 
 > **Sem `gh`/token, a API do GitHub é limitada a 60 req/h.** Não faça polling
@@ -513,7 +520,32 @@ disco errado, sem desfazer. As travas são o produto — o `dd` é consequência
 | **Ler de volta** e comparar (`cmp -n`) | Gravar sem conferir é fé, não engenharia. `conv=fsync` antes de conferir |
 | O teste **nunca** toca um dispositivo | `make pendrive-test` grava num **arquivo** e exercita as funções de trava com um `lsblk` simulado |
 
-### 4.7 Fluxo de trabalho (evita retrabalho)
+### 4.7 A interface web (`webui/`) — conveniência, nunca um 2º caminho
+
+A UI existe para quem não quer decorar flags. Todo o risco dela é **crescer sem
+disciplina** e virar um segundo cérebro do projeto (com regras próprias, que
+divergem). Estes invariantes são o que a impede:
+
+| Invariante | Por quê |
+|---|---|
+| **Só executa o que está na lista branca** (`ACTIONS`) | A UI **nunca** aceita comando, caminho de script ou nome de alvo vindo do navegador. Ela monta a linha de comando a partir de valores **validados** (`v_disk`, `v_family`, `v_distro`, …) e chama **alvos do `Makefile`** que já existem e já são testados. |
+| **Escuta só em `127.0.0.1`** e recusa outra interface | Amarrar em `0.0.0.0` exporia, na rede, uma página que gera ISO e escolhe disco para particionar. |
+| **Somente biblioteca padrão** | `pip install` não pode ser pré-requisito para gerar a ISO numa máquina limitada. Nada de `fastapi`/`flask`/`requests`. |
+| **Nunca lida com senha** | Gravar pendrive exige root; a UI só **lista** os dispositivos e mostra o comando `sudo make pendrive …` pronto. Senha nunca entra no navegador, no servidor ou em log. |
+| **Não tem rota de escrita arbitrária** | Se um dia precisar, é decisão de arquitetura — não um atalho. |
+| **Não fica tentando o impossível** | Sem `xorriso`, ela **recusa** com o motivo explícito e aponta o GitHub Actions (Regra 13-a: degradar com aviso, nunca falhar em silêncio). |
+| **A ISO não leva o `webui/`** | `--exclude=./webui` no `build-iso.sh`: é ferramenta da máquina que **gera** a mídia, não do sistema instalado (Regra 13-b). |
+| **Não depende de CDN** | Um `<script src="https://…">` quebraria a página justamente na máquina offline. A página é HTML+CSS+JS inline. |
+
+Cada linha acima tem guarda no CI e um **caso negativo** provado em
+`tests/test-ci-guards.sh` (planta a violação e exige que o job falhe).
+
+⚠️ **O que não foi provado:** a UI é exercitada **pela API** (`make ui-test`,
+34 asserções — lista branca, validadores, SSE, recusa sem `xorriso`). **Nunca
+foi aberta num navegador de verdade.** Se algo é puramente visual, ninguém
+olhou.
+
+### 4.8 Fluxo de trabalho (evita retrabalho)
 
 - **`grep` sem arquivo no terminal bloqueia a sessão** (lê `stdin`). Sempre dê
   um arquivo ou um `path`.
