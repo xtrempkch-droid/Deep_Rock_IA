@@ -2201,7 +2201,7 @@ o que dava a impressão de que o negativo funcionava.
   - ⚠️ Nenhum outro teste da árvore usa `flock` (auditado por `grep`), mas a
     mesma classe de erro — *depender de detalhe do shell* — não foi varrida no
     resto do repositório.
-- **Commits:** `fix(ci)!: a trava do teste dependia do \`exec\` do bash — \`validate\` #57 vermelho` (hash abaixo).
+- **Commits:** `e43cceb` — fix(ci): a trava do teste dependia do `exec` do bash — `validate` #57 vermelho.
 
 ---
 
