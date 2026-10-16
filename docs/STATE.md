@@ -306,6 +306,19 @@ explícito e aponta o GitHub Actions (Regra 13-a). Nova **Regra 16** no
 ⚠️ **Não provado:** a UI **nunca foi aberta num navegador de verdade** — os
 testes exercitam a API. Nada aqui é afirmação sobre o visual.
 
+**Passo 1-c — ⚠️ SINALIZADO (sessão #30, 2026-10-16) — não resolvido:**
+"a ISO pode não instalar automaticamente". Auditei o gatilho do autoinstall
+inteiro (evidência lida da ISO 24.04.5 oficial por HTTP Range) e **não achei
+defeito novo**: `/boot/grub/grub.cfg` existe, é o único menu e é ele que ambos
+(BIOS/UEFI) usam; `/EFI/boot/grub.cfg` **não existe** (por isso o código confia
+na delegação — confirmado), e o `--id ai-cpu-os-auto` (bug #6, já corrigido e
+conferido pelo `verify-iso.sh`) continua no lugar. Ficam **3 modos sinalizados**
+de a automação falhar, detalhados em `docs/TROUBLESHOOTING.md` § "SINALIZADO":
+**(1)** `--disk` fixado que não existe no alvo (o **default do CI é `/dev/vda`**
+— em hardware real pode não existir → Subiquity cai em erro e o `verify-iso` não
+pega); **(2)** **UEFI nunca bootado** (`--boot-mode uefi` exige `ovmf`);
+**(3)** **Debian/preseed nunca executado**.
+
 **Passo 2 (AGORA) — validar em HARDWARE FÍSICO (Xeon E5-2680 v4 e Ryzen 5 3500X).**
 
 O que falta não é código: é rodar os blocos preenchíveis de

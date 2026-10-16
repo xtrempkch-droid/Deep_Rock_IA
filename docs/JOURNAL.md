@@ -2031,6 +2031,40 @@ o que dava a impressão de que o negativo funcionava.
 
 ---
 
+### Sessão #30 — 2026-10-16 · 🔎 Auditoria do gatilho do autoinstall (sinalizado, não resolvido)
+
+- **Objetivo:** o dono relatou *"havia outro bug que fazia a ISO não instalar
+  automaticamente"* e pediu **só olhar e deixar sinalizado**.
+- **Método novo (barato, vale repetir):** em vez de baixar a ISO de ~3 GB, **li
+  a estrutura dela por HTTP Range** (~poucos KB): PVD no setor 16 (*root
+  directory record* no **offset 156** — errei na 1ª tentativa, usei 190), *path
+  table* L (offset 132 = tamanho, 140 = LBA) para listar **todos** os
+  diretórios, e os *directory records* para baixar arquivos específicos. Foi
+  assim que li o `/boot/grub/grub.cfg` **de fábrica** sem baixar a ISO.
+- **Fatos medidos (ISO 24.04.5 live-server):**
+  - `/boot/grub/grub.cfg` **existe** (573 B) e é o **único** menu. A entrada **0**
+    é `"Try or Install Ubuntu Server"` (interativa) — é ela que o GRUB sobe
+    quando o `set default` não casa (o bug #6 da sessão #21).
+  - `/EFI/boot/grub.cfg` **NÃO existe** (só `bootx64.efi`/`grubx64.efi`/
+    `mmx64.efi`): a branch *"o UEFI delegará para /boot/grub/grub.cfg"* do
+    `prepare_ubuntu` é o caminho **normal** — e o UEFI usa o MESMO menu patchado.
+  - ⚠️ O `.list` publicado em `releases.ubuntu.com` é **INCOMPLETO** (omite
+    `/boot`, `/install`, `/.disk` e quase todo `/dists`): **não** sirva dele
+    para concluir sobre a estrutura da ISO (cheguei a achar que faltava
+    `/boot/grub` — era o `.list`).
+- **Auditado e DESCARTADO:** o `prompt 1` do `patch_isolinux` (Debian) — a doc
+  do syslinux diz que `PROMPT` **não** cancela o `TIMEOUT`, então o `default`
+  sobe sozinho após o timeout.
+- **Conclusão:** **nenhum defeito novo confirmado** no gatilho do autoinstall.
+  Ficam **sinalizados 3 modos** de a ISO não instalar sozinha (ver
+  `docs/TROUBLESHOOTING.md` § "SINALIZADO" e `STATE.md` § 6): **(1)** `--disk`
+  fixado que não existe no alvo (o **default do CI é `/dev/vda`**); **(2)**
+  **UEFI nunca bootado**; **(3)** **Debian/preseed nunca executado**.
+- **NÃO feito:** nenhuma linha de código mudou; nenhuma ISO gerada/bootada.
+- **Commits:** *(ver `git log`)*.
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,
@@ -2077,6 +2111,7 @@ o que dava a impressão de que o negativo funcionava.
 | **Boot UEFI da ISO** | ⚠️ **não testado.** O `-boot_image replay` (sessão #21) restaurou a imagem EFI oculta do Ubuntu; falta o Debian (`mtools`) e o boot UEFI de fato. |
 | 🖥️ **A interface web num NAVEGADOR de verdade** | ⚠️ **nunca foi aberta** — nem por quem escreveu (sessão #24). Os **34** casos de `make ui-test` exercitam a **API**: lista branca, validadores, SSE, recusa sem `xorriso`, ausência de rota de escrita, bind em `127.0.0.1`. **Tudo que for visual** (layout, um botão que não responde, contraste) é afirmação não verificada. Abrir `make ui` numa máquina com browser e clicar em **Simular** resolveria. |
 | 🖥️ **A UI numa máquina COM `xorriso`** | ⚠️ O caminho "gerar a ISO" pelo navegador só foi provado **recusando** (esta máquina não tem `xorriso`). O caminho feliz (job roda, SSE mostra o progresso real até o fim, a ISO nova aparece na lista) **não** foi exercitado ponta a ponta. |
+| ⚠️ **Gatilho do autoinstall (sinalizado, sessão #30)** | **Auditado, nenhum defeito novo confirmado**, mas a automação pode falhar em 3 modos: **(1)** `--disk` fixado que não existe no alvo (default do CI = `/dev/vda`); **(2)** **UEFI nunca bootado**; **(3)** **Debian/preseed nunca executado**. Detalhes e evidência em `docs/TROUBLESHOOTING.md` § "SINALIZADO". |
 | 🔬 **Quem avisa quando o `iso` falha?** | ⚠️ O workflow `iso` roda **manualmente** (`workflow_dispatch`) ou por tag. O run **#16** (2026-10-14) falhou e eu **só descobri de passagem**, numa sessão seguinte, olhando a lista de runs por outro motivo — ninguém foi notificado. Enquanto for assim, uma ISO que não gera pode ficar dias sem ninguém notar. Ideias: um lembrete em `docs/STATE.md`, ou disparar o `iso` no `main` com `air_gapped=false` (a ISO leve, ~1 GB) para usar o CI como sinal. |
 | 🔬 **O run #16 depois do fix (confirmar)** | ⚠️ A 2ª tentativa agora roda `apt-get update` e loga a resposta do `apt`, mas **nenhum run novo rodou ainda**: a correção é hipótese informada pela medição (4 s + erro idêntico ⇒ lista inválida/404), não fato observado. **Disparar o `iso` com `air_gapped=true` e conferir as anotações.** |
 
@@ -2184,6 +2219,7 @@ o que dava a impressão de que o negativo funcionava.
 | Descartar a saída da ferramenta que falhou (`>/dev/null 2>&1`) | O build dizia `Pacote pedido está AUSENTE: git` — **falso**, o pacote existe. A resposta real do `apt` não foi para lugar nenhum, e a sessão inteira caçou um bug inexistente | Capture (`saida="$(cmd 2>&1)"`) e **logue a última linha**. Se a mensagem não distingue "não existe" de "o download falhou", ela é zero-útil |
 | Ferramenta de diagnóstico que só lê o **log do job** | O log exige **token** (403). Sem token o diagnóstico é ilegível — no run #16 só as **anotações** (públicas) contaram a história | Leve a causa para a **anotação** (o filtro `PAT` do `iso.yml`) e use `…/check-runs/<job_id>/annotations` para ler |
 | Rodar workflow **manual** (`workflow_dispatch`) e ninguém avisar da falha | O run #16 falhou em 2026-10-14 e eu só descobri no dia seguinte, de passagem, olhando a lista de runs por outro motivo | Registre o run pendente em `docs/STATE.md`/§ 5; considere disparar a ISO leve no `main` para o CI virar sinal |
+| Confiar no **`.list`** que a Ubuntu publica ao lado da ISO | Ele é **incompleto** (omite `/boot`, `/install`, `/.disk` e quase todo `/dists`). Concluí que faltava `/boot/grub` e quase reportei um bug falso | Para saber a estrutura real da ISO, leia a **própria ISO**: *path table* + *directory records* por HTTP Range (~KB), sem baixar 3 GB |
 
 ---
 

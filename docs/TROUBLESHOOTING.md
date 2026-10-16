@@ -231,6 +231,47 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 
 ## ISO / Remasterização
 
+### ⚠️ SINALIZADO (não resolvido): a instalação automática pode não acontecer
+
+> **Estado:** *sinalizado em 2026-10-16 (sessão #30) — ainda **NÃO resolvido**.*
+> O gatilho do autoinstall foi auditado inteiro e **nenhum defeito novo foi
+> confirmado**. Abaixo, os **três** modos realistas de a ISO instalar sem
+> automatismo, com o que **está** e o que **não está** provado.
+
+**Evidência (lida da ISO oficial 24.04.5 por **HTTP Range**, sem baixar 3 GB):**
+
+| Fato verificado na ISO | Consequência |
+|---|---|
+| `/boot/grub/grub.cfg` **existe** (573 B) e é o **único** menu | o `set default="ai-cpu-os-auto"` + `menuentry … --id ai-cpu-os-auto` (bug #6 da sessão #21, já corrigido) valem para **BIOS e UEFI** |
+| `/EFI/boot/grub.cfg` **NÃO existe** (só `bootx64.efi`, `grubx64.efi`, `mmx64.efi`) | a branch *"o UEFI delegará para /boot/grub/grub.cfg"* é o caminho **normal**, não uma exceção |
+| **entry 0** do menu de fábrica = `"Try or Install Ubuntu Server"` (interativo) | é exatamente o que o GRUB sobe quando o `set default` não casa → daí a criticidade do `--id` |
+
+**Modo 1 — disco fixado que não existe no alvo (o mais provável no mundo real).**
+O CI grava `--disk /dev/vda` (é o `default` do `iso.yml`). Bootando essa ISO em
+hardware real (NVMe `/dev/nvme0n1`, SATA `/dev/sda`), o `storage` do autoinstall
+vira `layout: {name: direct, match: {path: /dev/vda}}` → **nenhum disco casa** →
+o Subiquity **não instala sozinho** (aborta/cai em erro). O `verify-iso.sh`
+**não** pega isso: ele confere o *conteúdo* da mídia, não se o caminho do disco
+existe na máquina do alvo.
+*Mitigação hoje:* gere com `--disk auto` (o layout passa a `layout: {name: direct}`
+e o Subiquity escolhe o maior disco) ou com o `--disk` do **seu** disco.
+*Sinalizado (a fazer):* (a) teste que reprove `--disk` inexistente e (b) aviso ao
+final do build quando o `--disk` não casar com nenhum disco da máquina.
+
+**Modo 2 — UEFI nunca foi bootado.** O `test-vm.sh --boot-mode uefi` exige
+`ovmf` e nunca rodou. A prova de que o UEFI herda o menu patchado é **indireta**
+(o UEFI usa o mesmo `/boot/grub/grub.cfg`, já que `/EFI/boot/grub.cfg` não
+existe) — ver a tabela acima. **Não confirmado por boot.** Se um `grubx64.efi`
+trouxer menu próprio embutido, o UEFI sobe a entrada 0 (interativa) e a
+instalação automática **não acontece, sem erro nenhum**.
+*Como confirmar:* `bash iso/test-vm.sh --iso … --boot-mode uefi --yes` (precisa de `ovmf`).
+
+**Modo 3 — Debian/preseed nunca foi executado.** O caminho `--distro debian`
+(`isolinux` + `preseed/file=`) **nunca foi bootado** — só o Ubuntu foi.
+*Auditado e **descartado** como bug:* o `prompt 1` que o `patch_isolinux`
+escreve **não** desliga o `timeout` (a doc do syslinux diz que `PROMPT` **não**
+cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout).
+
 ### O build da ISO morre com `exit code 22` (e nenhuma mensagem)
 
 - **Sintoma:** `bash iso/build-iso.sh ...` termina com **`exit code 22`** logo
