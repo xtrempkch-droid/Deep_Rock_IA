@@ -9,7 +9,9 @@
 > [`docs/STATE.md`](STATE.md).
 > **Quando escrever:** **ao fim de TODA sessão de trabalho** (ver § 8).
 >
-> **Última entrada:** sessão **#21** (2026-10-13) — 🎉 a **ISO foi GERADA e BOOTADA** numa VM (KVM): instalou sozinha e o 1º boot aplicou o ai-cpu-os (`status=ok`, família `intel-haswell`). **8 bugs reais** só visíveis ao executar. Ver § 4.
+> **Última entrada:** sessão **#26** (2026-10-16) — 🧬 **14 famílias** (Xeon
+> Scalable v5–v9, Xeon 6 P-cores, Zen 5) e **AVX-512 por padrão** nas famílias
+> que o têm (política `auto`, decisão do dono). Ver § 4.
 
 ---
 
@@ -1822,7 +1824,56 @@ o que dava a impressão de que o negativo funcionava.
 
 ---
 
+### Sessão #26 — 2026-10-16 · 🧬 14 famílias de CPU + AVX-512 por padrão
 
+- **Objetivo:** pedido do dono, em paralelo aos testes dele (webui e a ISO
+  gerada pela ferramenta — funcionando bem): expandir o suporte às famílias de
+  **SERVIDOR**, tornar o **AVX-512 o padrão** nas CPUs que o têm (mais
+  desempenho) e incluir as famílias AMD que faltavam (o Zen 5 já está no
+  mercado).
+- **Feito:**
+  - **6 famílias novas** (herança em cadeia): `intel-cascadelake-sp` (v6,
+    `-march=cascadelake`), `intel-icelake-sp` (v7, `icelake-server`),
+    `intel-sapphirerapids-sp` (v8, `sapphirerapids` + AMX),
+    `intel-emeraldrapids-sp` (v9, `emeraldrapids` + AMX),
+    `intel-graniterapids-sp` (Xeon 6 P-cores, `graniterapids`, GCC≥14 com
+    fallback `sapphirerapids`) e **`amd-zen5`** (Ryzen 9000, Ryzen AI 300,
+    EPYC Turin; `znver5`, GCC≥14 com fallback `znver4`).
+  - **Decisão do dono aplicada:** `FAMILY_AVX512_POLICY="auto"` nas famílias
+    cujas CPUs têm AVX-512 — Skylake-SP (agora **v5 somente**), Cascade Lake+,
+    Zen 4 (que TEM `avx512f`) e Zen 5. O AVX-512 liga quando a CPU reporta a
+    flag; verificação em runtime mantida (Regra 8), hardcode proibido (Regra 12).
+  - **`--no-avx512`** (resolve.sh + llama-build.sh): desliga e **troca o
+    `-march` pelo fallback sem AVX-512** (novo `FAMILY_MARCH_HAS_AVX512`) — sem
+    isso o GCC continuaria emitindo AVX-512 via `-march`. É o caminho para
+    medir AVX2 × AVX-512 no Skylake-SP (downclock) e afins.
+  - `amd-zen4` ganhou EPYC 4124P/9754/9684X no casamento e o AVX-512 auto;
+    `skylake-avx512` teve o regex restringido (Bronze 32xx/Cascade Lake saíram
+    daqui e foram para as famílias novas — o teste de corpus pegou os casos).
+  - **Corpus:** 60 → **85 CPUs reais**, incluindo negativos (Xeon `6766E`
+    Sierra Forest → `generic`) e cada geração Xeon/EPYC na família certa.
+  - CI: matrix do `build-llama.yml` (7 → **14 famílias**) e `required` do
+    `validate.yml`.
+- **Problemas:**
+  - Regex EPYC com `[0-9]{3}` não casava os modelos de **4 dígitos** (9554,
+    9755…): o corpus pegou na hora (7 divergências → 0). É o tipo de erro que o
+    teste existe para pegar — e pegou.
+- **Verificado:** `make validate` verde (**families 85/85**, ci-guards 33/33,
+  webui 33/33, write-pendrive 16/16, check-iso 20/20); cross-build dry-run de
+  `graniterapids` com `-DGGML_AVX512=ON -DGGML_AVX512_VNNI=ON -DGGML_AMX=ON`;
+  `--no-avx512` em skylake → march `broadwell` + aviso; `build.sh
+  --list-families` mostra as 14.
+- **NÃO feito / não testado:**
+  - 🔴 **Nenhuma das famílias novas foi compilada nem medida** — o `build-llama`
+    do CI é o que exercita; hardware físico (Bloco N) continua pendente.
+  - O `-march` de cada família nova depende do GCC do runner (13 no
+    `ubuntu-24.04`): `graniterapids`/`znver5` vão cair no fallback lá até o
+    runner ter GCC ≥ 14 — comportamento correto, mas é o fallback que será
+    exercitado.
+- **Commits:** `793d540` — `feat(families)!: 14 famílias (Xeon Scalable
+  v5–v9, Xeon 6 P, Zen 5) + AVX-512 por padrão` · `84c2f79` — docs.
+
+---
 
 
 
@@ -2040,6 +2091,7 @@ Ao **fim de cada sessão**, faça nesta ordem:
 
 | Data | Mudança |
 |------|---------|
+| 2026-10-16 | Sessão #26 — 🧬 **14 famílias** (Xeon Scalable v5–v9, Xeon 6 P-cores, `amd-zen5`) e **AVX-512 por padrão** (`auto`) nas famílias que o têm — decisão do dono. `--no-avx512` + `FAMILY_MARCH_HAS_AVX512` (troca o `-march` pelo fallback sem AVX-512). Corpus 85 CPUs; matrix do CI 7→14. |
 | 2026-10-13 | Sessão #21 — 🎉 **a ISO é GERADA e BOOTADA.** Numa máquina com 24 vCPU + KVM + Docker, a ISO air-gapped foi construída (container `ubuntu:24.04`), verificada (`PASS=41`) e **bootada numa VM** (instalou sozinha; o 1º boot aplicou o ai-cpu-os, família `intel-haswell`). **8 bugs reais** só visíveis ao executar. § 5.1 deixa de ser "bloqueado"; § 5.2 marca o repo local como **bug resolvido** (o apt do curtin roda em chroot sem `/cdrom`); § 5.3 ganha o resíduo do UI do llama.cpp; § 6 ganha 11 armadilhas novas. |
 | 2026-10-07 | Criação — diário de continuidade (sessões #1–#8), inventário do ambiente, threads abertas e armadilhas. |
 | 2026-10-12 | Sessões #9–#13 (famílias → ISO Ubuntu → ferramentas de validação → Zen 3/4 + GPU → documentação por público). Corrigido o marcador "Última entrada" do topo (estava parado em #7) e a lista de marcadores do § 7 (era `@@PROFILE@@`, removido na refatoração). |
