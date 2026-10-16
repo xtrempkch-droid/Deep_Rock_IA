@@ -48,10 +48,16 @@ readonly PRISTINE="${WORK}/pristine"
 
 # Copia a árvore de trabalho (sem .git) — duas vezes: uma para mexer, outra
 # para restaurar arquivo a arquivo sem depender de git.
+# Exclui os ARTEFATOS de build (iso/work pode ter GB de cache/downloads):
+# sem isto, o teste estoura a cota do /tmp (tmpfs) em máquinas que já geraram
+# uma ISO — o guarda em si não tem nada a ver com eles.
 copy_tree() {
   local dst="$1"
   mkdir -p "$dst"
-  tar -C "$SRC_ROOT" --exclude=.git --exclude=iso/out -cf - . | tar -C "$dst" -xf -
+  tar -C "$SRC_ROOT" \
+      --exclude=.git --exclude=iso/out --exclude=iso/work \
+      --exclude='./*.iso' --exclude='./*.gguf' \
+      -cf - . | tar -C "$dst" -xf -
 }
 copy_tree "$REPO"
 copy_tree "$PRISTINE"
@@ -182,8 +188,12 @@ planta "a UI passar a exigir pip install" webui/server.py \
   app 'print("rode: pip install flask")' webui/server.py
 planta "a página passar a carregar um recurso externo (CDN)" webui/index.html \
   app '<script src="https://cdn.jsdelivr.net/npm/x.js"></script>' webui/index.html
-planta "a UI passar a lidar com senha" webui/server.py \
+planta "a UI voltar a pedir senha de sudo (pendrive)" webui/server.py \
   app 'sudo -S true' webui/server.py
+planta "senha em TEXTO PURO na linha de comando da UI" webui/server.py \
+  app 'args += ["--password", pw]' webui/server.py
+planta "a UI perder o hash crypt (senha chegaria em claro)" webui/server.py \
+  sed_ 's|crypt\.crypt|X|g; s|crypt\.mksalt|X|g' webui/server.py
 planta "a UI perder a lista branca de ações" webui/server.py \
   sed_ 's|^ACTIONS = {|OPACO = {|' webui/server.py
 planta "a UI perder o validador de disco" webui/server.py \

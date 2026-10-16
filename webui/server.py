@@ -369,6 +369,60 @@ def action_options() -> dict[str, Any]:
     }
 
 
+def _crypt_hash(pw: str) -> str:
+    """Hash crypt SHA-512 da senha.
+
+    A senha do usuário/root da ISO chega do formulário, mas **nunca vai em
+    texto puro para a linha de comando nem para o log**: vira hash crypt AQUI,
+    em memória, e só o hash entra no `argv` do build-iso.sh.
+
+    Caminho 1: módulo `crypt` da stdlib (Python <= 3.12; o PEP 594 o removeu
+    no 3.13). Caminho 2: `openssl passwd -6 -stdin` — a MESMA ferramenta que o
+    build-iso.sh exige para gerar a senha dele, com o texto vindo pelo STDIN
+    (nunca nos argumentos, onde apareceria em `ps`). Sem nenhum dos dois,
+    degrada com motivo explícito (Regra 13-a).
+    """
+    try:
+        import crypt  # stdlib até o Python 3.12
+
+        return crypt.crypt(pw, crypt.mksalt(crypt.METHOD_SHA512))
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        proc = subprocess.run(
+            ["openssl", "passwd", "-6", "-stdin"],
+            input=pw, capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise Invalid(
+            "não consegui gerar o hash crypt da senha (sem o módulo 'crypt' "
+            "e sem openssl funcionando) — use o terminal: "
+            "`mkpasswd -m sha-512` e passe --password-hash."
+        ) from exc
+    out = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not out.startswith("$6$"):
+        raise Invalid(
+            "não consegui gerar o hash crypt da senha (openssl recusou) — "
+            "use o terminal: `mkpasswd -m sha-512` e passe --password-hash."
+        )
+    return out
+
+
+def _password_or_none(raw: Any, label: str) -> str | None:
+    """Valida a senha do formulário. Vazio/vazio-ausente = não fornecida."""
+    if raw is None:
+        return None
+    s = str(raw)
+    if s == "":
+        return None
+    if len(s) > 128:
+        raise Invalid(f"{label}: máximo de 128 caracteres")
+    if any(c in s for c in "\r\n\x00"):
+        raise Invalid(f"{label}: contém caracteres inválidos")
+    return s
+
+
 def _iso_args_from(params: dict[str, Any]) -> list[str]:
     """Monta as flags do build-iso.sh a partir do formulário, validando tudo.
 
@@ -387,16 +441,28 @@ def _iso_args_from(params: dict[str, Any]) -> list[str]:
         # air-gapped: fonte + modelo + repositório na mídia
         args += ["--iso-source", "auto", "--iso-model", "auto",
                  "--iso-repo", "auto"]
-    return args, distro, disk, role, family, payload
+    # Senhas: vão para o build como HASH crypt, nunca em texto puro (o
+    # texto fica só nesta função, em memória). Sem senha de usuário, o
+    # build-iso.sh gera uma aleatória e mostra (comportamento de sempre);
+    # sem senha de root, o root fica bloqueado.
+    user_pw = _password_or_none(params.get("user_password"), "Senha do usuário")
+    root_pw = _password_or_none(params.get("root_password"), "Senha do root")
+    if user_pw is not None:
+        args += ["--password-hash", _crypt_hash(user_pw)]
+    if root_pw is not None:
+        args += ["--root-password-hash", _crypt_hash(root_pw)]
+    return args, distro, disk, role, family, payload, bool(user_pw), bool(root_pw)
 
 
 def action_preview(params: dict[str, Any]) -> dict[str, Any]:
-    args, distro, disk, role, family, payload = _iso_args_from(params)
+    args, distro, disk, role, family, payload, has_user_pw, has_root = \
+        _iso_args_from(params)
     argv = ["bash", "iso/build-iso.sh", *args, "--dry-run", "--yes"]
     job = new_job(argv, f"Simulação ({distro} · {role} · {family})")
     return {"job": job.id, "argv": argv,
             "summary": {"distro": distro, "disk": disk, "role": role,
-                        "family": family, "payload": payload}}
+                        "family": family, "payload": payload,
+                        "user_password": has_user_pw, "root": has_root}}
 
 
 def action_build(params: dict[str, Any]) -> dict[str, Any]:
@@ -407,7 +473,8 @@ def action_build(params: dict[str, Any]) -> dict[str, Any]:
             "impossível. Use a seção 'Gerar no GitHub Actions' desta página: "
             "o CI faz o build e você baixa o artifact."
         )
-    args, distro, disk, role, family, payload = _iso_args_from(params)
+    args, distro, disk, role, family, payload, has_user_pw, has_root = \
+        _iso_args_from(params)
     out = ISO_OUT / f"ai-cpu-os-{distro}.iso"
     argv = ["bash", "iso/build-iso.sh", *args, "--yes", "--out", str(out)]
     job = new_job(argv, f"Gerando a ISO ({distro} · {role} · {family})")

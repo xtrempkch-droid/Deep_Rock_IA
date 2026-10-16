@@ -612,6 +612,44 @@ if [[ "$DISTRO" == "debian" && -n "$PRESEED_LOCAL" ]]; then
   fi
 fi
 
+section "Senha do root"
+# O root é BLOQUEADO por padrão. Com --root-password-hash, o late-command
+# aplica o hash via `chpasswd -e` (Ubuntu e Debian) e, no Debian, a preseed
+# também habilita o login (root-login true). Aqui conferimos a COERÊNCIA entre
+# os dois — é o tipo de coisa que o build não pega sozinho.
+if [[ -n "$LATE_LOCAL" ]]; then
+  if grep -qE '^ROOT_PASSWORD_HASH="\$[0-9]+\$' "$LATE_LOCAL"; then
+    pass "root habilitado: hash crypt no late-command"
+    if grep -q 'chpasswd -e' "$LATE_LOCAL"; then
+      pass "chpasswd -e define a senha do root (nunca texto puro)"
+    else
+      fail "hash de root sem o 'chpasswd -e' (o root ficaria bloqueado mesmo com hash)"
+    fi
+    if [[ "$DISTRO" == "debian" && -n "$PRESEED_LOCAL" ]]; then
+      if grep -q 'passwd/root-login boolean true' "$PRESEED_LOCAL"; then
+        pass "preseed: root-login true (coerente com o hash)"
+      else
+        fail "preseed com hash de root mas root-login false (incoerente)"
+      fi
+      if grep -qE 'passwd/root-password-crypted password \$' "$PRESEED_LOCAL"; then
+        pass "preseed: senha do root como hash crypt"
+      else
+        fail "preseed sem root-password-crypted (ou o valor não é um hash crypt)"
+      fi
+    fi
+  elif grep -qE '^ROOT_PASSWORD_HASH=""' "$LATE_LOCAL"; then
+    pass "root bloqueado (padrão: sem --root-password-hash)"
+    if [[ "$DISTRO" == "debian" && -n "$PRESEED_LOCAL" ]] \
+       && grep -q 'passwd/root-login boolean true' "$PRESEED_LOCAL"; then
+      fail "preseed com root-login true mas SEM hash de root (incoerente)"
+    fi
+  else
+    fail "late-command sem a linha ROOT_PASSWORD_HASH (template antigo?)"
+  fi
+else
+  skip "sem late-command.sh para conferir a senha do root"
+fi
+
 # Papel/família gravados no template (o .iso-config nasce no alvo).
 #
 # Atenção: depois da substituição NÃO existe mais @@ROLE@@ no arquivo — é

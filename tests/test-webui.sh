@@ -178,6 +178,65 @@ case "$(body_of "$r")" in
 esac
 
 # ---------------------------------------------------------------------------
+# 3-b) Senhas do usuário/root: hash crypt na linha de comando, NUNCA texto puro
+# ---------------------------------------------------------------------------
+PW_USER='Senha-Teste-9x!'
+PW_ROOT='Root-Teste-9x!'
+out="$(api POST /api/preview "{\"distro\":\"ubuntu\",\"disk\":\"/dev/vda\",\"role\":\"auto\",\"family\":\"auto\",\"payload\":\"none\",\"user_password\":\"${PW_USER}\",\"root_password\":\"${PW_ROOT}\"}")"
+st="$(status_of "$out")"
+if [[ "$st" == "200" ]]; then
+  body="$(body_of "$out")"
+  ok "prévia aceita senhas (vira hash antes do comando)"
+  case "$body" in
+    *'"--password-hash"'*'"--root-password-hash"'*)
+      ok "as flags --password-hash e --root-password-hash entram no argv" ;;
+    *) bad "argv sem as flags de hash (senha se perdeu?)" ;;
+  esac
+  # O hash crypt SHA-512 começa com $6$ — texto puro NUNCA pode aparecer.
+# (A redireção vai no MESMO comando `python3` de propósito: o lint do CI exige
+#  redireção anexada ao comando que a usa.)
+  if python3 - "$body" "$PW_USER" "$PW_ROOT" >/dev/null 2>&1 <<'PY'
+import json, sys
+d = json.loads(sys.argv[1])
+argv = " ".join(d.get("argv", []))
+import re
+m = re.search(r"--password-hash (\S+)", argv)
+assert m and m.group(1).startswith("$6$"), f"hash do usuario nao parece crypt: {m and m.group(1)!r}"
+m = re.search(r"--root-password-hash (\S+)", argv)
+assert m and m.group(1).startswith("$6$"), f"hash do root nao parece crypt: {m and m.group(1)!r}"
+assert sys.argv[2] not in argv, "a senha do usuario apareceu em texto puro"
+assert sys.argv[3] not in argv, "a senha do root apareceu em texto puro"
+assert sys.argv[2] not in json.dumps(d), "a senha vazou em outro campo"
+assert sys.argv[3] not in json.dumps(d), "a senha do root vazou em outro campo"
+print("ok")
+PY
+  then
+    ok "senhas viram hash crypt \$6\$ e o texto puro não aparece em lugar nenhum"
+  else
+    bad "senha em texto puro vazou para a resposta/argv"
+  fi
+else
+  bad "prévia com senhas falhou (status $st)"
+fi
+
+# Sem senha de root → argv SEM a flag de root (o build deixa o root bloqueado).
+out="$(api POST /api/preview '{"distro":"ubuntu","disk":"/dev/vda","role":"auto","family":"auto","payload":"none"}')"
+if [[ "$(status_of "$out")" == "200" ]] \
+   && [[ "$(body_of "$out")" != *'--root-password-hash'* \
+     && "$(body_of "$out")" != *'--password-hash'* ]]; then
+  ok "sem senhas no formulário, o argv não leva flags de senha (o build gera/bloqueia)"
+else
+  bad "senha ausente deveria ficar ausente do argv"
+fi
+
+# Senha com quebra de linha (injeção/transporte) → recusada.
+# Nota: '\n' AQUI é JSON (`\n` vira newline de verdade no parse).
+out="$(api POST /api/preview '{"distro":"ubuntu","disk":"/dev/vda","role":"auto","family":"auto","payload":"none","user_password":"abc\ndef"}')"
+[[ "$(status_of "$out")" == "400" ]] \
+  && ok "senha com quebra de linha é recusada (400)" \
+  || bad "senha com \\n deveria ser recusada (deu $(status_of "$out"))"
+
+# ---------------------------------------------------------------------------
 # 3) Prévia (dry-run) funciona SEM xorriso — é o coração da UI
 # ---------------------------------------------------------------------------
 out="$(api POST /api/preview '{"distro":"ubuntu","disk":"/dev/vda","role":"auto","family":"auto","payload":"none"}')"

@@ -54,6 +54,12 @@ MODEL_DST_DIR="/opt/models"
 ISO_SOURCE_NAME="@@LLAMA_SRC_NAME@@"
 SOURCE_DST="/opt/llama-src.tar.gz"
 
+## Senha do ROOT (hash crypt) — vazia = root continua BLOQUEADO (padrão).
+## O autoinstall/Subiquity nao tem campo de root, entao o caminho dos DOIS
+## instaladores e aqui: `chpasswd -e` espera um hash crypt (nunca texto puro)
+## e o aplica dentro do alvo via in_target/curtin.
+ROOT_PASSWORD_HASH="@@ROOT_PASSWORD_HASH@@"
+
 ## ---------------------------------------------------------------------------
 ## Executar um comando DENTRO do sistema instalado.
 ##   d-i:       `in-target` já faz o chroot.
@@ -316,6 +322,23 @@ Comandos úteis:
   cat /var/log/ai-cpu-os-build.log
   bash mods/apply.sh list          # outras modificações portáveis
 INFO
+
+## ---------------------------------------------------------------------------
+## 3-c. Senha do ROOT (hash crypt) — opcional
+## ---------------------------------------------------------------------------
+## Sem hash, o root fica BLOQUEADO (padrão e mais seguro). Com hash, o
+## `chpasswd -e` aplica a senha DENTRO do alvo — o caminho serve aos DOIS
+## instaladores (d-i e Subiquity), porque o autoinstall não tem campo de root.
+## O `-e` é o que garante que o valor é um hash crypt, nunca texto puro.
+if [ -n "${ROOT_PASSWORD_HASH}" ]; then
+    if echo "root:${ROOT_PASSWORD_HASH}" | in_target chpasswd -e; then
+        log "senha do root definida (login de root habilitado)"
+    else
+        log "AVISO: falha ao definir a senha do root (o root segue bloqueado)"
+    fi
+else
+    log "root permanece bloqueado (sem --root-password-hash)"
+fi
 
 log "pós-instalação concluído; o ai-cpu-os será aplicado no primeiro boot"
 

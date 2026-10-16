@@ -107,6 +107,30 @@
         <option value="auto">Tudo na mídia (air-gapped) — fonte + modelo + pacotes (~4 GB)</option>
       </select>
 
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
+        <div>
+          <label for="user-password">Senha do usuário (ai-cpu-os)</label>
+          <input id="user-password" type="password" placeholder="vazio = o build gera e mostra uma" autocomplete="off" spellcheck="false" style="margin-top:4px">
+          <div class="row" style="margin-top:6px">
+            <button class="ghost" id="btn-gen-user" type="button" title="Gerar uma senha forte no navegador">🎲 Gerar</button>
+            <button class="ghost" id="btn-see-user" type="button" title="Mostrar/ocultar">👁 Ver</button>
+          </div>
+        </div>
+        <div>
+          <label for="root-password">Senha do root (opcional)</label>
+          <input id="root-password" type="password" placeholder="vazio = root bloqueado" autocomplete="off" spellcheck="false" style="margin-top:4px">
+          <div class="row" style="margin-top:6px">
+            <button class="ghost" id="btn-gen-root" type="button" title="Gerar uma senha forte no navegador">🎲 Gerar</button>
+            <button class="ghost" id="btn-see-root" type="button" title="Mostrar/ocultar">👁 Ver</button>
+          </div>
+        </div>
+      </div>
+      <div class="muted" style="margin-top:6px">
+        🔒 As senhas vão do navegador para o servidor <b>local</b> (127.0.0.1) e
+        viram <b>hash crypt</b> antes do comando — nunca aparecem em texto puro
+        no log.
+      </div>
+
       <div class="row" style="margin-top:16px">
         <button class="ghost" id="btn-preview">👁 Simular</button>
         <button id="btn-build">⚙ Gerar ISO</button>
@@ -369,7 +393,8 @@ $("btn-build").onclick = () => {
     "Gerar a ISO agora?\n\n" +
     "Base: " + v.distro + "\n" +
     "Papel: " + v.role + " · Família: " + v.family + "\n" +
-    "Conteúdo: " + (v.payload === "auto" ? "tudo na mídia (air-gapped)" : "nenhum") + "\n\n" +
+    "Conteúdo: " + (v.payload === "auto" ? "tudo na mídia (air-gapped)" : "nenhum") + "\n" +
+    "Root: " + (v.root_password ? "habilitado (senha definida)" : "bloqueado (padrão)") + "\n\n" +
     "O disco " + v.disk + " será o alvo da INSTALAÇÃO (na máquina de destino).\n" +
     "O build pode demorar e baixar alguns GB."
   );
@@ -408,8 +433,23 @@ function formValues() {
     role: $("role").value,
     family: $("family").value,
     payload: $("payload").value,
+    user_password: $("user-password").value,
+    root_password: $("root-password").value,
   };
 }
+
+/* Senha forte gerada NO NAVEGADOR (crypto.getRandomValues) — nada de CDN. */
+function randomPassword(n) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#%*+=-_";
+  const out = new Uint32Array(n);
+  crypto.getRandomValues(out);
+  return Array.from(out, (v) => chars[v % chars.length]).join("");
+}
+["user", "root"].forEach((k) => {
+  const inp = $(k + "-password");
+  $("btn-gen-" + k).onclick = () => { inp.value = randomPassword(20); };
+  $("btn-see-" + k).onclick = () => { inp.type = inp.type === "password" ? "text" : "password"; };
+});
 
 /* ---------------- start ---------------- */
 (async () => {

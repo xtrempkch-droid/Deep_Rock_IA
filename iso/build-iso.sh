@@ -151,6 +151,7 @@ USER_FULLNAME="ai-cpu-os"
 # nome e sobrescrevê-la confunde quem lê o script.
 SYS_HOSTNAME=""
 PASSWORD_HASH=""
+ROOT_PASSWORD_HASH=""
 GENERATED_PASSWORD=""
 LOCALE="pt_BR.UTF-8"
 LANG_CODE="pt"
@@ -247,7 +248,11 @@ Opções principais:
   --no-verify           Não roda o iso/verify-iso.sh no fim.
   --hostname NAME       Hostname do sistema instalado (padrão: <usuario>).
   --username NAME       Usuário administrativo (padrão: ai-cpu-os).
-  --password-hash HASH  Hash crypt da senha. Se omitido, gera e mostra um.
+  --password-hash HASH  Hash crypt da senha do usuário. Se omitido, gera e mostra um.
+  --root-password-hash HASH  Hash crypt da senha do ROOT (opcional). Sem ele, o
+                        root fica BLOQUEADO (padrão). Com ele, o root é
+                        habilitado: no Ubuntu via late-command (chpasswd -e);
+                        no Debian via preseed (passwd/root-login true).
   --locale / --keymap / --timezone / --mirror-host / --mirror-dir
   --extra-packages "…"  Pacotes extras instalados no alvo.
   --iso-model VALOR     Modelo .gguf embutido na mídia (a ISO é air-gapped, logo
@@ -322,6 +327,7 @@ parse_args() {
       --hostname)        [[ $# -ge 2 ]] || { log_error "--hostname exige valor"; exit 2; }; SYS_HOSTNAME="$2"; shift 2 ;;
       --username)        [[ $# -ge 2 ]] || { log_error "--username exige valor"; exit 2; }; USERNAME="$2"; shift 2 ;;
       --password-hash)   [[ $# -ge 2 ]] || { log_error "--password-hash exige valor"; exit 2; }; PASSWORD_HASH="$2"; shift 2 ;;
+      --root-password-hash) [[ $# -ge 2 ]] || { log_error "--root-password-hash exige valor"; exit 2; }; ROOT_PASSWORD_HASH="$2"; shift 2 ;;
       --locale)          [[ $# -ge 2 ]] || { log_error "--locale exige valor"; exit 2; }; LOCALE="$2"; shift 2 ;;
       --keymap)          [[ $# -ge 2 ]] || { log_error "--keymap exige valor"; exit 2; }; KEYMAP="$2"; shift 2 ;;
       --timezone)        [[ $# -ge 2 ]] || { log_error "--timezone exige valor"; exit 2; }; TIMEZONE="$2"; shift 2 ;;
@@ -444,6 +450,25 @@ resolve_password() {
   PASSWORD_HASH="$(openssl passwd -6 "$GENERATED_PASSWORD")"
   log_ok "Senha aleatória gerada para o usuário '${USERNAME}' (anote!): ${GENERATED_PASSWORD}"
   log_warn "Troque esta senha após o primeiro login: passwd"
+}
+
+# Senha do ROOT (hash crypt, opcional). Sem ela, o root fica BLOQUEADO —
+# comportamento padrão (e o mais seguro). Com ela, o root é habilitado na
+# instalação: late-command (chpasswd -e) no Ubuntu e preseed
+# (passwd/root-login true) no Debian. Nunca aceitamos senha em TEXTO PURO:
+# `chpasswd -e` e o d-i esperam um hash crypt, e um texto puro aqui viraria
+# "senha = o texto" — falha que só apareceria no primeiro login.
+resolve_root_password() {
+  if [[ -z "$ROOT_PASSWORD_HASH" ]]; then
+    log_info "Root fica BLOQUEADO (padrão). Use --root-password-hash para habilitá-lo."
+    return 0
+  fi
+  if [[ "$ROOT_PASSWORD_HASH" != \$* || "$ROOT_PASSWORD_HASH" == *[[:space:]]* ]]; then
+    log_error "--root-password-hash não parece um hash crypt (esperado \$6\$…): recebi algo com espaço ou sem \$."
+    log_error "Gere com: mkpasswd -m sha-512   (ou openssl passwd -6)."
+    exit 1
+  fi
+  log_ok "Root habilitado com hash crypt (via --root-password-hash)."
 }
 
 # ---------------------------------------------------------------------------
@@ -1343,6 +1368,28 @@ expand_apt_local_block() {
   ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
 }
 
+# Expande o marcador @@ROOT_PRESEED@@ na preseed Debian: com hash de root, o
+# login de root é habilitado (root-login true + senha crypt); sem hash, o root
+# fica BLOQUEADO (comportamento padrão). No caminho Ubuntu o root é habilitado
+# pelo late-command (chpasswd -e) — o autoinstall/Subiquity não tem campo de
+# root, e o d-i só aceita o root pela preseed, que não existe lá.
+expand_root_preseed_block() {
+  local f="$1"
+  awk -v hash="$ROOT_PASSWORD_HASH" '
+    /^@@ROOT_PRESEED@@$/ {
+      if (hash != "") {
+        print "d-i passwd/root-login boolean true"
+        print "d-i passwd/root-password-crypted password " hash
+        print "d-i passwd/root-password-again password " hash
+      } else {
+        print "d-i passwd/root-login boolean false"
+      }
+      next
+    }
+    { print }
+  ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+}
+
 # ---------------------------------------------------------------------------
 # Templates: substituição de marcadores e gravação
 # ---------------------------------------------------------------------------
@@ -1386,8 +1433,9 @@ expand_packages_block() {
 # Substitui tokens @@NOME@@ nos templates (preseed e autoinstall).
 subst_template() {
   local src="$1" dst="$2"
-  local hash_esc store_esc
+  local hash_esc root_hash_esc store_esc
   hash_esc="$(_sed_repl "$PASSWORD_HASH")"
+  root_hash_esc="$(_sed_repl "$ROOT_PASSWORD_HASH")"
   store_esc="$(_sed_repl "$(storage_layout_line)")"
   sed \
     -e "s|@@DISTRO@@|${DISTRO}|g" \
@@ -1400,6 +1448,7 @@ subst_template() {
     -e "s|@@USER_FULLNAME@@|${USER_FULLNAME}|g" \
     -e "s|@@HOSTNAME@@|${SYS_HOSTNAME}|g" \
     -e "s|@@PASSWORD_HASH@@|${hash_esc}|g" \
+    -e "s|@@ROOT_PASSWORD_HASH@@|${root_hash_esc}|g" \
     -e "s|@@LOCALE@@|${LOCALE}|g" \
     -e "s|@@LANG@@|${LANG_CODE}|g" \
     -e "s|@@COUNTRY@@|${COUNTRY}|g" \
@@ -1436,9 +1485,9 @@ inject_common_templates() {
 # Retorna 1 (não aborta) para que o autoteste possa acumular falhas.
 check_no_leftover_tokens() {
   local -a required_tokens=(
-    DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME PASSWORD_HASH
+    DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME PASSWORD_HASH ROOT_PASSWORD_HASH
     LOCALE KEYMAP TIMEZONE EXTRA_PACKAGES PACKAGES_BLOCK STORAGE_LAYOUT ISO_MODEL
-    APT_REPO_PATH APT_LOCAL_SOURCES APT_LOCAL_PRESEED APT_PRIMARY_URI LLAMA_SRC_NAME
+    APT_REPO_PATH APT_LOCAL_SOURCES APT_LOCAL_PRESEED APT_PRIMARY_URI LLAMA_SRC_NAME ROOT_PRESEED
   )
   local t leftover=0
   for t in "${required_tokens[@]}"; do
@@ -1500,6 +1549,7 @@ inject_templates() {
   mkdir -p "$dest"
   subst_template "${ISO_DIR}/preseed/ai-cpu-os.cfg" "${dest}/ai-cpu-os.cfg"
   expand_apt_local_block "${dest}/ai-cpu-os.cfg"
+  expand_root_preseed_block "${dest}/ai-cpu-os.cfg"
   chmod 0644 "${dest}/ai-cpu-os.cfg"
   inject_common_templates "$dest"
   check_no_leftover_tokens "${dest}/ai-cpu-os.cfg" "${dest}/late-command.sh" "${dest}/firstboot.sh" || exit 1
@@ -1985,6 +2035,7 @@ check_templates() {
   tmp="$(mktemp -d)"
 
   PASSWORD_HASH="${PASSWORD_HASH:-\$6\$EXEMPLO\$autoteste}"
+  ROOT_PASSWORD_HASH="${ROOT_PASSWORD_HASH:-\$6\$EXEMPLO\$root}"
 
   local variant disk dir
   for variant in com-disco sem-disco; do
@@ -2001,6 +2052,7 @@ check_templates() {
     subst_template "${ISO_DIR}/preseed/firstboot.sh"          "${dir}/firstboot.sh"
     subst_template "${ISO_DIR}/preseed/ai-cpu-os.cfg"         "${dir}/ai-cpu-os.cfg"
     expand_apt_local_block "${dir}/ai-cpu-os.cfg"
+    expand_root_preseed_block "${dir}/ai-cpu-os.cfg"
 
     log_info "variante '${variant}': storage = $(storage_layout_line)"
     log_info "              packages =${EXTRA_PACKAGES:+ }${EXTRA_PACKAGES}"
@@ -2090,6 +2142,7 @@ main() {
 
   check_deps
   resolve_password
+  resolve_root_password
   acquire_iso
 
   # O modelo é obtido ANTES de montar a árvore: um erro (arquivo errado,
@@ -2135,7 +2188,11 @@ main() {
   log_info "Distro base: ${DISTRO}"
   log_info "Papel gravado: ${ROLE} (auto = detecta o hardware no primeiro boot)"
   log_info "Família gravada: ${FAMILY} (auto = detecta o hardware no primeiro boot)"
-  log_info "Usuário: ${USERNAME} (sudo) · root bloqueado"
+  if [[ -n "$ROOT_PASSWORD_HASH" ]]; then
+    log_info "Usuário: ${USERNAME} (sudo) · root HABILITADO (hash crypt, não exibido)"
+  else
+    log_info "Usuário: ${USERNAME} (sudo) · root bloqueado"
+  fi
   if [[ -n "$MODEL_NAME" ]]; then
     log_info "Modelo embutido: /models/${MODEL_NAME} (o late-command copia para /opt/models)"
   else

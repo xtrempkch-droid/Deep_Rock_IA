@@ -494,12 +494,20 @@ jobs:
           # Default local + recusa explicita de amarrar em outra interface.
           grep -q '"127.0.0.1"' webui/server.py
           grep -q 'args.host not in' webui/server.py
-          # A UI NUNCA deve passar senha: gravar pendrive exige root, entao o
-          # navegador so LISTA os dispositivos e mostra o comando pronto.
-          if grep -qE '(password|sudo -S|askpass)' webui/server.py webui/index.html; then
-            echo "::error::a interface web nao pode lidar com senha (use o terminal)"
+          # Senhas: so as do usuario/root DA ISO (decisao do dono, 2026-10-16),
+          # e SEMPRE como hash crypt antes da linha de comando. Texto puro so
+          # existe em memoria; a flag de texto puro ('--password ') nem existe
+          # no build-iso.sh. O pendrive continua intocado: sudo segue proibido.
+          if grep -qE '(sudo -S|askpass)' webui/server.py webui/index.html; then
+            echo "::error::a interface web nao pode pedir senha de sudo (o pendrive exige o terminal)"
             exit 1
           fi
+          if grep -qE -- '--(root-)?password([ "]|$)' webui/server.py webui/index.html; then
+            echo "::error::senha em TEXTO PURO na linha de comando (so --password-hash/--root-password-hash)"
+            exit 1
+          fi
+          grep -qE 'crypt\.(crypt|mksalt)' webui/server.py \
+            || { echo "::error file=webui/server.py::senha sem hash crypt (texto puro chegaria ao build)"; exit 1; }
           # Sem dependencia de terceiros: esta maquina e limitada e o usuario
           # nao pode ser obrigado a um `pip install` antes de gerar a ISO.
           if grep -qE '^(import|from) (fastapi|flask|django|aiohttp|requests)' webui/server.py; then
