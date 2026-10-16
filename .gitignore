@@ -9,6 +9,8 @@ roles/*/data/
 iso/work/
 iso/out/
 *.iso
+# Trava de instância única do gerador (flock; ver acquire_build_lock em iso/build-iso.sh)
+iso/.build-iso.lock
 
 # Python
 __pycache__/

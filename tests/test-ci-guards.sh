@@ -203,6 +203,20 @@ planta "a UI deixar de recusar bind fora do localhost" webui/server.py \
 planta "a ISO passar a levar o webui/ (Regra 13-b)" iso/build-iso.sh \
   sed_ 's|--exclude=./webui||' iso/build-iso.sh
 
+# --- AVX-512 + trava de instância única do gerador de ISO -------------------
+planta "tirar avx512-test do validate" Makefile \
+  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test pendrive-test iso-check-test ui-test iso-dry-run-both|' Makefile
+planta "tirar iso-lock-test do validate" Makefile \
+  sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-check-test ui-test iso-dry-run-both|' Makefile
+planta "renomear acquire_build_lock()" iso/build-iso.sh \
+  sed_ 's|^acquire_build_lock()|acquire_build_lock_velho()|' iso/build-iso.sh
+planta "renomear download_to()" iso/build-iso.sh \
+  sed_ 's|^download_to()|download_to_velho()|' iso/build-iso.sh
+# A armadilha do run do v0.2.5: `matrix.exec != 'false'` num `if:` NUNCA dá
+# falso (booleano x string) e o passo roda no runner sem a ISA -> SIGILL.
+planta "voltar a comparar matrix.exec com STRING num if:" .github/workflows/build-llama.yml \
+  app "        if: steps.model.outputs.ok == '1' && matrix.exec != 'false'" .github/workflows/build-llama.yml
+
 # --- Repositório apt: a 2ª tentativa tem de ser diagnosticável --------------
 planta "o retry deixar de refrescar o índice (404 de espelho volta)" iso/build-iso.sh \
   sed_ 's|índice fresco para a 2ª tentativa|segunda tentativa|' iso/build-iso.sh

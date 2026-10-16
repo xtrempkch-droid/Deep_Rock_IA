@@ -203,6 +203,7 @@ ai-cpu-os/
 └── tests/
     ├── smoke-test.sh       # Testes rápidos pós-build
     ├── test-families.sh    # Casamento CPU → família (corpus; sem hardware)
+    ├── test-avx512-policy.sh # Política de AVX-512 por família (never/optin/auto)
     ├── families-matrix.txt # ~60 modelos reais → família esperada
     ├── test-iso-selection.sh # Escolha da ISO oficial no SHA256SUMS (sem rede)
     ├── test-iso-repo-filter.sh # Repo apt: filtro + fallback (stubs; sem rede)
@@ -210,6 +211,7 @@ ai-cpu-os/
     ├── test-ci-guards.sh   # Prova que os guardas do CI REPROVAM (cópia temp.)
     ├── test-write-pendrive.sh # Travas do pendrive (gravando num ARQUIVO)
     ├── test-check-iso.sh   # Conferência de ISO baixada (fixtures byte a byte)
+    ├── test-iso-lock.sh    # Trava de instância única do gerador (flock real)
 │   ├── test-webui.sh       # Interface web: API + salvaguardas (sem navegador)
 │   └── fixtures/           # SHA256SUMS REAIS + saída REAL do apt-cache policy
 └── webui/                  # 🖥️ Interface web local (criar/conferir a ISO)
@@ -237,6 +239,8 @@ ai-cpu-os/
 | **Testar o repo apt local (filtro + fallback, sem rede)** | **`tests/test-iso-repo-filter.sh`** |
 | **Testar o verificador da ISO sem xorriso (distro-aware)** | **`tests/test-verify-iso-repo-distro.sh`** |
 | **Saber se um guarda do CI reprova de verdade** | **`tests/test-ci-guards.sh`** |
+| **Testar a política de AVX-512 de uma família (ligar/desligar)** | **`tests/test-avx512-policy.sh`**, **`make avx512-test`**, `docs/FAMILIES.md` § 5 |
+| **Testar a trava de instância única do gerador de ISO (sem gerar ISO)** | **`tests/test-iso-lock.sh`**, **`make iso-lock-test`** |
 | **Usar uma GPU (opcional, explícito)** | **`docs/GPU.md`**, `bash llama-build.sh --gpu-check` |
 | **Aprender o projeto do zero (passo a passo explicado)** | **`docs/TUTORIAL.md`**        |
 | Como o CI compila/valida o sistema     | `.github/workflows/`, `docs/CI.md`, `Makefile` |
@@ -420,8 +424,27 @@ Estas regras são **obrigatórias**:
 ## 8. Última atualização
 
 - **Data:** 2026-10-16
-- **O que mudou:** **Senha de usuário/root na webui + 14 famílias + AVX-512 por
-  padrão (sessões #26 e #27).** (1) A webui ganhou campos de **senha do
+- **O que mudou:** **A "correção" do SIGILL do `build-llama` não corrigia — e o
+  trabalho local de 14/10 foi recuperado (sessão #29).** (1) **Sync:** o `main`
+  local estava **7 commits atrás** e com trabalho **não commitado**; foi
+  preservado numa branch de backup (`backup/local-sessao26-pre-sync`) e
+  alinhado a `origin/main` (o `push` voltou a ser fast-forward). (2) **O bug:**
+  a correção do #28 punha `matrix.exec != 'false'` num **`if:`** — e, no GitHub,
+  **booleano × string** vira **número** (`false`→0, `'false'`→NaN), então o
+  `!=` dá **sempre true** e os passos de execução **nunca** eram pulados: as
+  famílias AVX-512/AMX rodaram no runner sem a ISA e tomaram SIGILL
+  (`exit 132`) **no próprio commit da correção**. O valor agora vai por `env:`
+  e a decisão é no `bash` (o padrão que já funcionava no passo 7); guarda no
+  `project-rules` + violação plantada no `ci-guards-test`. (3) **Recuperado do
+  trabalho local (que não existia no GitHub):** `flock` de instância única +
+  `download_to()` (confere o `.part`, aborta download estagnado) no
+  `build-iso.sh`, com `make iso-lock-test` (**10** asserções); e
+  `make avx512-test` (37 → **61** asserções, cobrindo as **14** famílias).
+  Duas armadilhas novas registradas no `JOURNAL.md` § 6. `ci-guards`: 35 →
+  **40**.
+
+- **Data anterior:** 2026-10-16 — **Senha de usuário/root na webui + 14 famílias
+  + AVX-512 por padrão (sessões #26 e #27).** (1) A webui ganhou campos de **senha do
   usuário** e **senha do root** (opcional) para a ISO: o texto vira **hash
   crypt** no servidor (stdlib `crypt`; no Python 3.13+, `openssl passwd -6
   -stdin` — sem depender de `mkpasswd`) e só o hash entra na linha de comando

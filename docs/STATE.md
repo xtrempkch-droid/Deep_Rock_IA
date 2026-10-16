@@ -242,7 +242,21 @@ Tempo de build do llama.cpp: *(pendente em hardware real)*
 
 > **👉 ESTA É A SEÇÃO REFERENCIADA PELO `AGENTS.md`.**
 
-**Passo 0 — ✅ CONCLUÍDO.** O CI está verde no GitHub: `validate` (4/4 jobs),
+**✅ Recém-fechado (sessão #29, 2026-10-16).** O `main` local foi
+**sincronizado** com o GitHub (estava 7 commits atrás **e** com trabalho local
+não commitado — preservado em `backup/local-sessao26-pre-sync`). E foi corrigido
+um **erro real**: a "correção" do SIGILL do `build-llama` (sessão #28) **não
+funcionava** — `matrix.exec != 'false'` num `if:` do GitHub compara **booleano ×
+string** e **nunca** dá falso, então os passos de execução rodavam no runner sem
+a ISA das famílias AVX-512/AMX (`exit 132`, o run do próprio commit da correção
+ficou vermelho). Agora o valor vai por `env:` e a decisão é no `bash`, com
+guarda no `project-rules`. **Falta o próximo `build-llama` (manual) confirmar
+verde.** O trabalho local único (`flock` de instância única + `download_to` no
+`build-iso.sh`, com `make iso-lock-test`) foi reaplicado sobre a base nova, e o
+`make avx512-test` passou a cobrir as 14 famílias (61 asserções).
+
+**Passo 0 — ✅ CONCLUÍDO (histórico, 2026-10-07).** O CI estava verde no
+GitHub: `validate` (4/4 jobs),
 `build-llama` (compilou os dois perfis + inferência real em 6m04s) e
 `container` (imagem publicada no GHCR). A Release `ai-cpu-os v0.2.0` foi
 publicada com os binários `.tar.gz` dos dois perfis. Ver § 3.1.
@@ -341,6 +355,7 @@ Ao terminar qualquer tarefa:
 
 | Data       | Mudança                                                    |
 |------------|------------------------------------------------------------|
+| 2026-10-16 | 🧷 **Sync com o GitHub + a correção do SIGILL que não corrigia (sessão #29).** O `main` local estava 7 commits atrás e com trabalho não commitado (preservado em `backup/local-sessao26-pre-sync`). A correção do #28 (`matrix.exec != 'false'` no `if:`) **nunca pulava o passo**: no GitHub, booleano × string vira número (`false`→0, `'false'`→NaN) e o `!=` dá sempre true — daí o `exit 132` (SIGILL) em icelake-sp/sapphirerapids-sp/emeraldrapids-sp/graniterapids-sp **no próprio commit da correção**. Agora o valor vai por `env:` e a decisão é no `bash`; guarda no `project-rules` + violação plantada. Recuperados do trabalho local de 14/10: `flock` de instância única + `download_to()` (confere o `.part`, `--speed-time`) no `build-iso.sh` (`make iso-lock-test`, 10 asserções) e `make avx512-test` (37 → **61** asserções, 14 famílias). `ci-guards` 35 → **40**. Ver `JOURNAL.md` sessão #29. |
 | 2026-10-16 | 🧬 **14 famílias + AVX-512 por padrão.** Adicionadas as famílias de servidor `intel-cascadelake-sp` (v6), `intel-icelake-sp` (v7), `intel-sapphirerapids-sp` (v8), `intel-emeraldrapids-sp` (v9), `intel-graniterapids-sp` (Xeon 6 P) e `amd-zen5` (Ryzen 9000/Ryzen AI 300/EPYC Turin). **Decisão do dono:** nas famílias cujas CPUs têm AVX-512, a política virou `auto` — o AVX-512 é o padrão quando a CPU reporta a flag (verificação em runtime mantida; hardcode segue proibido). Novo `--no-avx512` (desliga e troca o `-march` pelo fallback sem AVX-512, via `FAMILY_MARCH_HAS_AVX512`). Corpus: 85 CPUs reais. Ver `JOURNAL.md` sessão #26. |
 | 2026-10-13 | 🎉 **A ISO foi gerada E bootada pela primeira vez** (VM qemu/KVM, Ubuntu 24.04): instalou sozinha, reiniciou e o 1º boot aplicou o ai-cpu-os (`status=ok`, família `intel-haswell`), com llama.cpp compilado no alvo sem rede. **8 bugs reais** só visíveis ao executar (xorriso `-rm`/`-boot_image`/`-map`, GRUB sem `--id`, apt do curtin em chroot sem `/cdrom`, marcadores fora do console, aspas do `-find`, SIGPIPE). Novo § 3.3. Ver `JOURNAL.md` sessão #21. |
 | 2026-10-07 | Criação do arquivo junto com o repositório `0.1.0-alpha`.   |

@@ -217,6 +217,87 @@ run() {
   "$@"
 }
 
+# ---------------------------------------------------------------------------
+# Trava de instância única
+# ---------------------------------------------------------------------------
+# POR QUE EXISTE: dois builds ao mesmo tempo compartilhando o mesmo --work-dir
+# brigam pelos arquivos `.part` (o modelo de ~1,1 GB e a fonte do llama.cpp).
+# Um build renomeia o `.part` para o nome final enquanto o outro ainda escreve
+# nele pelo fd aberto — e o segundo morre com um erro que não explica nada:
+#
+#   mv: cannot stat '…/iso/work/models/Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf.part':
+#   No such file or directory
+#
+# O arquivo NUNCA esteve ausente do disco: ele foi RENOMEADO pelo outro build.
+# O sintoma (a máquina "travando") também casa: dois downloads de 1,1 GB e dois
+# builds pesados na mesma máquina modesta. Um build por vez é a regra.
+#
+# A UI é o gatilho mais provável (dois cliques em "Gerar"); ela também recusa
+# o segundo build (segunda camada, ver webui/server.py).
+acquire_build_lock() {
+  if [[ $DRY_RUN -eq 1 ]]; then
+    # No dry-run nada é escrito, então não há o que proteger — e o CI roda
+    # dry-runs com frequência (não queremos criar trava em árvore de teste).
+    return 0
+  fi
+  local lockfile="${ISO_DIR}/.build-iso.lock"
+  if ! command -v flock >/dev/null 2>&1; then
+    # Degrada com aviso (Regra 13-a): sem flock, seguimos — mas dizemos o risco.
+    log_warn "flock não encontrado: não vou travar instância única."
+    log_warn "NÃO rode dois builds ao mesmo tempo no mesmo --work-dir."
+    return 0
+  fi
+  if ! exec 9>"$lockfile"; then
+    # Não abortamos: não poder escrever no próprio diretório é ambiente, não
+    # entrada do usuário (Regra 13-a). O risco é o mesmo de não ter o flock.
+    log_warn "Não consegui abrir ${lockfile} para travar: seguindo SEM trava."
+    return 0
+  fi
+  if ! flock -n 9; then
+    local dono; dono="$(cat "$lockfile" 2>/dev/null || true)"
+    log_error "Já existe um build da ISO em andamento (trava: ${lockfile})."
+    [[ -n "$dono" ]] && log_error "PID do build que está rodando: ${dono}"
+    log_error "Dois builds no mesmo ${WORK_DIR} corrompem o modelo/fonte (.part)"
+    log_error "e o sintoma é um 'mv: cannot stat … .part' sem explicação."
+    log_error "Espere o outro terminar (ou mate-o) e rode de novo."
+    exit 1
+  fi
+  printf '%s\n' "$$" >&9 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# Download com verificação de verdade
+# ---------------------------------------------------------------------------
+# POR QUE NÃO CONFIAR SÓ NO EXIT DO CURL: já vimos o `.part` não existir depois
+# de um `curl` que retornou 0 (build concorrente, disco cheio, download
+# abortado). O `mv` seguinte então falhava com "No such file or directory", um
+# erro que aponta para o lugar errado.
+#
+# As opções de tempo existem para o OUTRO sintoma relatado: download que
+# "trava" para sempre. `--speed-time/--speed-limit` abortam quando a conexão
+# fica estagnada (não quando ela é apenas LENTA); `--connect-timeout` cobre o
+# caso de não haver resposta nenhuma.
+#
+# Uso: download_to <url> <destino-final> <descrição>
+download_to() {
+  local url="$1" dest="$2" desc="$3"
+  log_info "Baixando ${desc}: ${url}"
+  if ! curl -fL --retry 3 --create-dirs \
+            --connect-timeout 30 --speed-limit 1024 --speed-time 120 \
+            -o "${dest}.part" "$url"; then
+    rm -f "${dest}.part"
+    return 1
+  fi
+  if [[ ! -s "${dest}.part" ]]; then
+    log_warn "O download de ${desc} terminou 'com sucesso' mas ${dest}.part não existe (ou está vazio)."
+    log_warn "Causas prováveis: OUTRO build no mesmo --work-dir, disco cheio, ou o processo foi interrompido."
+    rm -f "${dest}.part"
+    return 1
+  fi
+  mv -f "${dest}.part" "$dest"
+  return 0
+}
+
 confirm() {
   local prompt="$1"
   if [[ $ASSUME_YES -eq 1 || $DRY_RUN -eq 1 ]]; then return 0; fi
@@ -776,14 +857,12 @@ acquire_model() {
       fi
       log_info "Baixando o modelo sugerido (≈1,1 GB): ${SUGGESTED_MODEL_URL}"
       run "Criando ${dir}" mkdir -p "$dir"
-      if ! curl -fL --retry 3 --create-dirs -o "${MODEL_SRC}.part" "$SUGGESTED_MODEL_URL"; then
-        rm -f "${MODEL_SRC}.part"
+      if ! download_to "$SUGGESTED_MODEL_URL" "$MODEL_SRC" "o modelo"; then
         MODEL_SRC=""; MODEL_NAME=""
         log_warn "Falha ao baixar o modelo. A ISO será gerada SEM modelo."
         log_warn "Gere com '--iso-model CAMINHO' apontando para um .gguf que você já tem."
         return 0
       fi
-      mv "${MODEL_SRC}.part" "$MODEL_SRC"
       log_ok "Modelo baixado: ${MODEL_SRC} ($(du -h "$MODEL_SRC" | cut -f1))"
       return 0 ;;
   esac
@@ -854,14 +933,12 @@ acquire_source() {
       fi
       log_info "Baixando a fonte do llama.cpp (master): ${SUGGESTED_SOURCE_URL}"
       run "Criando ${dir}" mkdir -p "$dir"
-      if ! curl -fL --retry 3 --create-dirs -o "${SOURCE_FILE}.part" "$SUGGESTED_SOURCE_URL"; then
-        rm -f "${SOURCE_FILE}.part"
+      if ! download_to "$SUGGESTED_SOURCE_URL" "$SOURCE_FILE" "a fonte do llama.cpp"; then
         SOURCE_FILE=""; SOURCE_NAME=""
         log_warn "Falha ao baixar a fonte. A ISO sera gerada SEM ela (o 1o boot vai exigir rede)."
         log_warn "Use '--iso-source CAMINHO' com um .tar.gz que voce ja tenha."
         return 0
       fi
-      mv "${SOURCE_FILE}.part" "$SOURCE_FILE"
       log_ok "Fonte baixada: ${SOURCE_FILE} ($(du -h "$SOURCE_FILE" | cut -f1))"
       ;;
     *)
@@ -2139,6 +2216,11 @@ main() {
   if [[ "${EUID:-$(id -u)}" -ne 0 && $DRY_RUN -eq 0 ]]; then
     log_warn "Sem root: a extração/remontagem costuma funcionar, mas mtools pode reclamar."
   fi
+
+  # ANTES de tocar em qualquer coisa no disco: um build por vez. Dois builds no
+  # mesmo --work-dir brigam pelos .part do modelo/fonte e o segundo morre com um
+  # "mv: cannot stat" que não explica nada (ver acquire_build_lock).
+  acquire_build_lock
 
   check_deps
   resolve_password

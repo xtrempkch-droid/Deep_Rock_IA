@@ -36,9 +36,10 @@ IMAGE    ?= ai-cpu-os-llama:local
 SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
 
 .PHONY: help lint bashn shellcheck python yaml docs validate dry-run apply \
-        build mods mods-check mods-test families families-test gpu-check \
+        build mods mods-check mods-test families families-test avx512-test gpu-check \
         iso iso-dry-run iso-dry-run-both iso-lint iso-yaml iso-verify iso-vm \
         iso-select-test iso-repo-test iso-verify-test ci-guards-test \
+        iso-lock-test \
         pendrives pendrive pendrive-test iso-check iso-check-test \
         ui ui-test \
         docker docker-check ci clean
@@ -80,7 +81,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-check-test ui-test iso-dry-run-both ## Lint + docs + famílias + testes de ISO + UI + guardas + dry-run
+validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test pendrive-test iso-check-test ui-test iso-dry-run-both ## Lint + docs + famílias + AVX-512 + testes de ISO + UI + guardas + dry-run
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -97,6 +98,10 @@ families: ## Lista as famílias de CPU suportadas
 
 families-test: ## Prova o casamento CPU→família (corpus; não precisa do hardware)
 	@bash tests/test-families.sh
+
+avx512-test: ## Prova a política de AVX-512 das famílias (não precisa do hardware)
+	@bash tests/test-avx512-policy.sh
+
 gpu-check: ## Relata as GPUs presentes e os backends disponíveis (só leitura)
 	@bash llama-build.sh --gpu-check
 
@@ -180,6 +185,9 @@ ui: ## Abre a interface web local (criar/conferir a ISO pelo navegador)
 
 ui-test: ## Prova a interface web (API + salvaguardas; sem navegador, sem rede)
 	@bash tests/test-webui.sh
+
+iso-lock-test: ## Prova a trava de instância única do gerador de ISO (flock real)
+	@bash tests/test-iso-lock.sh
 
 iso-lint: ## Verifica os scripts da ISO e valida templates + ferramentas
 	@bash -n iso/build-iso.sh iso/verify-iso.sh iso/test-vm.sh iso/write-pendrive.sh \

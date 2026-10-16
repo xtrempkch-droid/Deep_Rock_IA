@@ -163,6 +163,20 @@ compute_isa() {
   local has_avx512=0
   if _has_flag avx512f; then has_avx512=1; fi
 
+  # De ONDE vem a verdade sobre a ISA, para o motivo dizer a coisa certa:
+  # em cross-build (AI_ASSUME_FAMILY_ISA=1) o alvo é OUTRA máquina e quem
+  # declara a flag é o family.conf; no build nativo, é o /proc/cpuinfo desta
+  # máquina. Dizer sempre "a CPU reporta" em cross-build seria mentira útil
+  # para ninguém — e já confundiu quem lê o relatório (teste avx512).
+  local isa_tem isa_nao_tem
+  if [[ "${AI_ASSUME_FAMILY_ISA:-0}" == "1" ]]; then
+    isa_tem="a família declara avx512f (cross-build: a ISA vem do family.conf, não desta CPU)"
+    isa_nao_tem="a família não declara avx512f (cross-build)"
+  else
+    isa_tem="a CPU reporta avx512f"
+    isa_nao_tem="a CPU não reporta avx512f"
+  fi
+
   case "${FAMILY_AVX512_POLICY:-never}" in
     never)
       AVX512_ENABLED="no"
@@ -174,9 +188,9 @@ compute_isa() {
         AVX512_REASON="desligado por --no-avx512"
       elif [[ "${AI_ALLOW_AVX512:-0}" == "1" && $has_avx512 -eq 1 ]]; then
         AVX512_ENABLED="yes"
-        AVX512_REASON="política 'optin' + --allow-avx512 e a CPU tem a flag"
+        AVX512_REASON="política 'optin' + --allow-avx512 e ${isa_tem}"
       elif [[ $has_avx512 -eq 0 ]]; then
-        AVX512_REASON="política 'optin', mas a CPU não reporta avx512f"
+        AVX512_REASON="política 'optin', mas ${isa_nao_tem}"
       else
         AVX512_REASON="política 'optin': ligue com --allow-avx512 / AI_ALLOW_AVX512=1"
       fi
@@ -187,9 +201,9 @@ compute_isa() {
         AVX512_REASON="política 'auto', mas desligado por --no-avx512"
       elif [[ $has_avx512 -eq 1 ]]; then
         AVX512_ENABLED="yes"
-        AVX512_REASON="política 'auto' (padrão da família: CPUs com AVX-512 o usam) e a CPU reporta avx512f"
+        AVX512_REASON="política 'auto' (padrão da família: CPUs com AVX-512 o usam) e ${isa_tem}"
       else
-        AVX512_REASON="política 'auto', mas a CPU não reporta avx512f"
+        AVX512_REASON="política 'auto', mas ${isa_nao_tem}"
       fi
       ;;
     *)
@@ -230,6 +244,19 @@ compute_isa() {
         && "${FAMILY_MARCH_EFFECTIVE:-}" == "${FAMILY_MARCH:-}" ]]; then
     FAMILY_MARCH_EFFECTIVE="$FAMILY_MARCH_FALLBACK"
     FAMILY_MARCH_NOTE="AVX-512 desligado: usando o fallback '${FAMILY_MARCH_FALLBACK}' (sem AVX-512)"
+  fi
+
+  # 3-c. Coerência `-march` × AVX-512 (o caso do znver4 com GCC antigo).
+  # AVX-512 LIGADO, mas o -march efetivo é o fallback, que NÃO tem AVX-512
+  # (ex.: znver4→znver3 porque o GCC é 12). Não é erro: as flags do CMake são
+  # o que compila AVX-512 e a CPU alvo tem as instruções. Mas sem aviso o
+  # relatório diria "AVX-512: yes" com um -mtune de geração anterior, o que
+  # confunde quem lê o AI-CPU-OS-BUILD.txt — então AVISAMOS em vez de deixar
+  # passar em silêncio.
+  if [[ "$AVX512_ENABLED" == "yes" \
+        && "${FAMILY_MARCH_HAS_AVX512:-}" == "yes" \
+        && "${FAMILY_MARCH_EFFECTIVE:-}" != "${FAMILY_MARCH:-}" ]]; then
+    FAMILY_MARCH_NOTE="${FAMILY_MARCH_NOTE:+${FAMILY_MARCH_NOTE} · }Atenção: AVX-512 ligado, mas o -march efetivo ('${FAMILY_MARCH_EFFECTIVE}') não traz AVX-512 — o binário sai com AVX-512 pelas flags do CMake, mas com -mtune de geração anterior. Instale um GCC >= ${FAMILY_MARCH_MIN_GCC:-?} para o -march completo."
   fi
 
   # 4. Flags do CMake para o llama.cpp (derivadas da família).

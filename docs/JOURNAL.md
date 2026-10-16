@@ -1968,6 +1968,69 @@ o que dava a impressão de que o negativo funcionava.
 
 
 
+### Sessão #29 — 2026-10-16 · 🧷 Sincronizar com o GitHub + a correção do #28 que não corrigia
+
+- **Objetivo:** o dono pediu "houve mudanças no GitHub; verifique como está e
+  atualize o repo local para não ter erros de envio".
+- **Diagnóstico (medido, não deduzido):** o `main` local estava **7 commits
+  atrás** de `origin/main` (sessões #26/#27/#28 + tag `v0.2.5`) **e** com 20
+  arquivos modificados **não commitados** — o trabalho da sessão #26 *desta*
+  máquina (2026-10-14: AVX-512 por padrão + `flock`/`download_to`). Era isso
+  que fazia o git/push falhar. A comparação arquivo a arquivo provou que o
+  remoto **não tem** `flock`, `--speed-time`, `download_to`, `avx512-test`
+  nem `iso-lock-test`.
+- **Feito:**
+  1. **Sync seguro:** `git add -A` → commit numa **branch de backup**
+     (`backup/local-sessao26-pre-sync`) + patch em `/tmp/backup-sessao26/` →
+     `git reset --hard origin/main`. Resultado: `main == origin/main` e
+     `git push --dry-run` → *Everything up-to-date*.
+  2. **🔴 A correção do #28 NÃO funcionava.** O run do **próprio commit da
+     correção** (`93df769`, `workflow_dispatch`) voltou **vermelho**:
+     `icelake-sp`, `sapphirerapids-sp`, `emeraldrapids-sp` e
+     `graniterapids-sp` morreram no passo **9** ("Inferência real") com
+     `exit code 132` (SIGILL). **Causa raiz:** `if: … && matrix.exec !=
+     'false'` — `exec: false` é **booleano** no YAML e o GitHub coage
+     booleano × string para **NÚMERO** (`false`→0, `'false'`→NaN), então o
+     `!=` dá **sempre true** e o passo **nunca é pulado** (as annotations
+     mostraram o passo 9 rodando nas **8** famílias `exec: false`; as 4 que
+     "passaram" foi porque o runner, por sorte, tinha a ISA). **Conserto:** o
+     valor vai por `env:` e a decisão é feita no **bash** — o mesmo padrão que
+     já funcionava no passo 7. Guarda novo no `project-rules` (âncora
+     `^[[:space:]]*if:.*matrix\.exec`) + violação plantada no
+     `ci-guards-test`.
+  3. **Trabalho local recuperado:** `acquire_build_lock()` (`flock`,
+     instância única) e `download_to()` (confere que o `.part` existe e
+     aborta download estagnado com `--speed-time/--speed-limit`) portados
+     para o `iso/build-iso.sh` **atual** (pós-#26/#27), com a chamada no
+     `main()` antes do `check_deps`. Entraram `tests/test-iso-lock.sh`
+     (**10** asserções) e `tests/test-avx512-policy.sh`, com os alvos
+     `make iso-lock-test` / `make avx512-test` no `validate` (Makefile **e**
+     CI).
+  4. **`avx512-test` estendido de 8 → 14 famílias** (as 6 novas do #26 + o
+     `generic`): **37 → 61 asserções**. O `resolve.sh` ganhou duas melhorias
+     de relatório que o teste cobrava: o motivo do AVX-512 diz **de onde vem
+     a verdade** ("a família declara avx512f" em cross-build; "a CPU reporta
+     avx512f" no nativo) e há **`Atenção:`** quando o AVX-512 está ligado mas
+     o `-march` efetivo é o fallback (znver4→znver3 com GCC 12).
+- **Decisão:** a parte de AVX-512 do trabalho local (política nos
+  `family.conf` + `resolve.sh`) era **superada** pela versão do remoto, mais
+  completa (`FAMILY_MARCH_HAS_AVX512`, 14 famílias) — foi **descartada de
+  propósito**; só o que era **único** foi reaplicado.
+- **Verificado:** `make validate` verde — families **85/85**, avx512 **61/61**,
+  iso-selection 13/13, iso-repo-filter 16/16, verify-repo-distro 6/6,
+  ci-guards **40/40** (eram 35), iso-lock **10/10**, pendrive 16/16,
+  check-iso 20/20, webui 38/38 — mais `iso-dry-run-both` OK e o dry-run do
+  `build.sh` OK (`rc=0`). `yamllint .github/` limpo.
+  ⚠️ **O `sudo` desta máquina pede senha**, então o `make ci` completo (cujo
+  `dry-run` usa `sudo`) **não foi executado**; os dois dry-runs foram rodados
+  direto, sem `sudo`.
+- **O que NÃO foi provado:** o `build-llama` do GitHub **só dispara em
+  tag/manual/semanal** — a prova do conserto é o **próximo run** (manual). A
+  ISO **não** foi gerada nem bootada aqui (sem `xorriso`/`qemu`).
+- **Commits:** *(ver `git log`)*.
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,
@@ -2073,6 +2136,8 @@ o que dava a impressão de que o negativo funcionava.
 | Tokens `@@...@@` em **comentário** de template | O guarda "sobrou marcador" dava **falso positivo** e abortava o build | O guarda checa apenas os **nomes** de marcador reais |
 | `find \| head -1` no `prepare_source_local` | Com `set -o pipefail`, o SIGPIPE do `head` faz o `find` sair 141 e **reprova uma extração que funcionou** | Nunca use `find ... \| head` para "pegar um item": use glob (`"$dir"/*/`) ou `-print -quit` sem pipe |
 | `git push` rejeitado (`non-fast-forward`) | Alguém (você, pelo site) comitou no remoto | `git fetch` → inspecionar → `git rebase origin/main` → push (nunca force no `main`) |
+| `matrix.exec != 'false'` num **`if:`** do GitHub | `exec: false` é **booleano** no YAML e a comparação **booleano × string** vira **número** (`false`→0, `'false'`→NaN): o `!=` dá **sempre true** e o passo **nunca** é pulado (AVX-512 rodando no runner sem a ISA = SIGILL/132) | Decida no **`bash`**, com o valor vindo por **`env:`** (`[[ "${EXEC:-}" == "false" ]]`); guarda no `project-rules` barra a volta |
+| Trabalho **não commitado** num repo com o remoto adiantado | O `push` falha (*non-fast-forward*) e o `git pull`/`reset` pode **perder** a sessão inteira | Antes de sincronizar: `git add -A && git commit` numa **branch de backup** (`backup/…`) **e** salve o patch (`git diff > /tmp/x.diff`); só então `git reset --hard origin/main` (branches de backup guardam os arquivos **untracked**) |
 | `sed -i "s/.*texto.*/.../"` em `.md` | Pode quebrar linha sem intenção | Prefira edições por bloco com contexto |
 | Editar **bloco** de texto incluindo a quebra de linha final | O texto seguinte **gruda** na mesma linha (ex.: `perfil├── .github/`) e corrompe a árvore/lista | **Sempre confira o resultado** (`sed -n ...p`, `git diff`) e inclua a linha seguinte no contexto da edição |
 | Editar um **trecho grande** (uma função inteira) por substituição de bloco | O match pode cair em outro ponto, duplicar trechos e destruir código vizinho — 3 ocorrências em `build-iso.sh` de uma vez, e o `bash -n` acusou erro **longe da causa** | Para edição estrutural, extraia o original com `git show HEAD:arquivo` e reaplique as mudanças por **âncoras exatas** (linha inteira) em script |

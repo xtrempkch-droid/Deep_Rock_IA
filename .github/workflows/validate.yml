@@ -86,6 +86,16 @@ jobs:
           set -euo pipefail
           make families-test
 
+      # A política de AVX-512 (`never`/`optin`/`auto`) de cada família. Nasceu de
+      # um bug real: uma família AVX2 com AVX-512 ligado gera SIGILL no alvo, e
+      # uma família com AVX-512 desligada perde desempenho em silêncio. O teste
+      # exercita o comportamento de verdade (cross-build) e agora cobre as 14
+      # famílias — não só as 8 da era em que foi escrito.
+      - name: "AVX-512 (política das famílias: never/optin/auto)"
+        run: |
+          set -euo pipefail
+          make avx512-test
+
       # A escolha da ISO oficial no SHA256SUMS. Existe porque a geração da ISO
       # Ubuntu morria com `exit code 22` do curl sem pista nenhuma: o
       # SHA256SUMS do Ubuntu marca o modo binário com `*` e lista TODAS as
@@ -140,6 +150,16 @@ jobs:
         run: |
           set -euo pipefail
           make ui-test
+
+      # A trava de instância única do gerador de ISO, provada com `flock` de
+      # verdade (dois processos). Existe porque um sintoma real ("mv: cannot
+      # stat … .part") veio de DOIS builds ao mesmo tempo no mesmo --work-dir:
+      # um renomeia o `.part` enquanto o outro ainda escreve nele. Sem teste,
+      # a trava poderia ser removida numa refatoração sem ninguém reclamar.
+      - name: ISO (trava de instância única do gerador)
+        run: |
+          set -euo pipefail
+          make iso-lock-test
 
       # Prova que os guardas do próprio job REALMENTE derrubam o job, plantando
       # cada violacao numa COPIA temporaria. Existe porque SEIS guardas estavam
@@ -261,6 +281,8 @@ jobs:
             tests/test-write-pendrive.sh
             tests/test-check-iso.sh
             tests/test-webui.sh
+            tests/test-avx512-policy.sh
+            tests/test-iso-lock.sh
             webui/server.py webui/index.html
             tests/fixtures/SHA256SUMS.ubuntu-24.04
             tests/fixtures/SHA256SUMS.debian-13
@@ -427,6 +449,29 @@ jobs:
           # entao renomear a funcao passaria batido. Testado com caso positivo.
           grep -q '^pick_iso_entry()' iso/build-iso.sh
           grep -q '^normalize_iso_name()' iso/build-iso.sh
+          # AVX-512 (política por família) e a TRAVA DE INSTÂNCIA ÚNICA do
+          # gerador de ISO. Mesmo trio de cada um: alvo no Makefile, entrada no
+          # `validate` e o CI CHAMANDO o alvo — comando duplicado diverge.
+          grep -q 'avx512-test' Makefile
+          grep -q 'validate:.*avx512-test' Makefile
+          grep -q 'make avx512-test' .github/workflows/validate.yml
+          grep -q 'iso-lock-test' Makefile
+          grep -q 'validate:.*iso-lock-test' Makefile
+          grep -q 'make iso-lock-test' .github/workflows/validate.yml
+          # Ancorado na DEFINIÇÃO: sem a função, a proteção sumiu (o `.part`
+          # volta a ser renomeado às cegas e o erro volta a ser críptico).
+          grep -q '^acquire_build_lock()' iso/build-iso.sh
+          grep -q '^download_to()' iso/build-iso.sh
+          # ARMADILHA JÁ PISADA (run do v0.2.5 e do main): no `if:` do GitHub,
+          # `matrix.exec != 'false'` compara BOOLEANO com STRING e o passo NUNCA
+          # é pulado — as famílias AVX-512/AMX rodaram no runner SEM a ISA e
+          # tomaram SIGILL (exit 132). O valor tem de ir por `env:`.
+          BUILD_LLAMA_WF=.github/workflows/build-llama.yml
+          if grep -qE '^[[:space:]]*if:.*matrix\.exec' "$BUILD_LLAMA_WF"; then
+            echo "::error file=$BUILD_LLAMA_WF::matrix.exec no if: nunca da falso (booleano x string)."
+            echo "Passe o valor por env: e decida no bash (SIGILL/exit 132 nas familias AVX-512/AMX)."
+            exit 1
+          fi
           # O filtro de candidatos e o fallback um-a-um do download do repo
           # apt. O `-n 25` sozinho (ou `|| true` cru) e o que perdia 25
           # pacotes por lote em silencio — nao pode voltar.

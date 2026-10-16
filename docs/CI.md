@@ -199,6 +199,19 @@ o script que o usuário vai rodar — inclusive a checagem de ISA em
 > famílias têm `exec: false` na matriz: as provas **2** e **3** são puladas
 > nelas (a prova **1** — binários existem — continua valendo). As famílias
 > AVX2 (haswell, broadwell, zen1–zen3) seguem executando tudo.
+>
+> ⚠️ **A decisão de pular TEM de ser tomada no `bash`, nunca no `if:`**
+> (corrigido na sessão #29). A primeira versão usava
+> `if: steps.model.outputs.ok == '1' && matrix.exec != 'false'` — e ela
+> **nunca pulava nada**. No GitHub, `exec: false` é um **booleano** do YAML e a
+> comparação **booleano × string** é convertida para **NÚMERO** (`false`→0,
+> `'false'`→NaN), então o `!=` dá **sempre true**. Resultado: as **8** famílias
+> com `exec: false` rodaram mesmo assim, e as que precisam de `vbmi2`/`ifma`
+> (Ice Lake) ou **AMX** (Sapphire/Emerald/Granite Rapids) morreram com
+> `exit code 132` (SIGILL) — **inclusive no commit que anunciava a correção**.
+> O valor vai por `env:` (`EXEC`) e a decisão é no `bash`, como já se fazia no
+> passo 7; o `project-rules` tem guarda âncora `^[[:space:]]*if:.*matrix\.exec`
+> e a violação é plantada no `ci-guards-test` (§ 6).
 
 ### Artefatos e Release
 
@@ -341,7 +354,7 @@ O que acontece em seguida:
 | `shellcheck` falha com `SC2155` | `readonly VAR="$(cmd)"` mascara o exit code | Separe: `VAR="$(cmd)"` e depois `readonly VAR`. |
 | `shellcheck` falha com `SC2046` | Substituição sem aspas dividindo argumentos | Use arrays (`mapfile`/`"${arr[@]}"`). |
 | `project-rules` falha em "set -euo pipefail" | Script novo sem o cabeçalho | Adicione na 1ª linha útil. |
-| `build-llama` falha com `SIGILL` | Flag de ISA indevida para o alvo | Nas famílias AVX2: `--march` indevido (nunca AVX-512 nelas). Nas famílias AVX-512, o SIGILL só ocorreria se `exec:` fosse esquecido na matriz (elas **não** executam no runner — § 3). |
+| `build-llama` falha com `SIGILL` | Flag de ISA indevida para o alvo | Nas famílias AVX2: `--march` indevido (nunca AVX-512 nelas). Nas famílias AVX-512: **a decisão de pular foi para o `if:`** — lá `matrix.exec != 'false'` **nunca** dá falso (**booleano × string**: `false`→0, `'false'`→NaN) e o passo roda no runner sem a ISA. O valor tem de ir por `env:` e ser comparado no `bash` (§ 3). |
 | `container` falha "denied" no push | Faltou `packages: write` | Confira o bloco `permissions:`. |
 | `container` falha "invalid reference format" | Nome de imagem com maiúsculas | GHCR exige **minúsculas** (já tratado com `${VAR,,}`). |
 | `yamllint` reclama de `on:` | Chave tratada como truthy | Já configurado em `.yamllint.yml` (`check-keys: false`). |

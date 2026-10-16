@@ -167,11 +167,27 @@ jobs:
           fi
 
       - name: Inferência real (prova fim-a-fim)
-        if: steps.model.outputs.ok == '1' && matrix.exec != 'false'
+        # ⚠️ A decisão NÃO pode ficar no `if:` na forma `matrix.exec != 'false'`:
+        # `exec: false` é BOOLEANO no YAML e o GitHub coage a comparação
+        # booleano × string para NÚMERO (false→0, 'false'→NaN) — o `!=` dá true
+        # e o passo NUNCA é pulado. Foi o que derrubou o run da tag v0.2.5 e o
+        # do `main` (SIGILL, exit 132) em icelake-sp, sapphirerapids-sp,
+        # emeraldrapids-sp e graniterapids-sp: famílias cujo binário precisa de
+        # vbmi2/ifma ou AMX, que o runner não tem. A comparação aqui é de
+        # STRING de verdade — passamos o valor por `env`, nunca por `if:`.
+        if: steps.model.outputs.ok == '1'
+        env:
+          EXEC: ${{ matrix.exec }}
         run: |
           set -euo pipefail
           BIN="$GITHUB_WORKSPACE/llama.cpp/build/bin"
+          if [[ "${EXEC:-}" == "false" ]]; then
+            echo "OK: inferência pulada — família AVX-512/AMX (exec: false)."
+            echo "O runner não tem a ISA do alvo: rodar aqui daria SIGILL, e não seria um bug."
+            exit 0
+          fi
           # Se as flags de ISA estivessem erradas, isto falharia com SIGILL.
+          echo "CPU do runner: $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- || echo '?')"
           "$BIN/llama-bench" -m "$RUNNER_TEMP/tiny.gguf" -p 32 -n 16 -t 2
 
       - name: Empacotar artefato
