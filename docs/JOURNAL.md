@@ -9,9 +9,9 @@
 > [`docs/STATE.md`](STATE.md).
 > **Quando escrever:** **ao fim de TODA sessão de trabalho** (ver § 8).
 >
-> **Última entrada:** sessão **#26** (2026-10-16) — 🧬 **14 famílias** (Xeon
-> Scalable v5–v9, Xeon 6 P-cores, Zen 5) e **AVX-512 por padrão** nas famílias
-> que o têm (política `auto`, decisão do dono). Ver § 4.
+> **Última entrada:** sessão **#27** (2026-10-16) — 🔑 **senha de usuário/root na
+> webui** (sempre como hash crypt; root habilitável, bloqueado por padrão) +
+> **14 famílias de CPU com AVX-512 por padrão** (sessão #26). Ver § 4.
 
 ---
 
@@ -1875,6 +1875,62 @@ o que dava a impressão de que o negativo funcionava.
 
 ---
 
+### Sessão #27 — 2026-10-16 · 🔑 Senha de usuário/root na webui (hash crypt)
+
+- **Objetivo:** pedido do dono: ele bateu no **root bloqueado** ao testar o
+  papel **builder** numa máquina instalada pela ISO (o mesmo aconteceria no
+  `inference`). Hoje o build só define a senha do usuário (aleatória ou
+  `--password-hash`) e o root fica bloqueado. Pedido: gerar/definir senha de
+  **root e de usuário** na **webui**.
+- **Feito:**
+  - **`build-iso.sh`**: novo `--root-password-hash` (hash crypt; valida que
+    começa com `$` e não tem espaço — nunca texto puro). `resolve_root_password`
+    roda no main. Resumo do build: "root HABILITADO (hash crypt, não exibido) /
+    root bloqueado".
+  - **Ubuntu**: o late-command ganhou a seção 3-c — `ROOT_PASSWORD_HASH` e
+    `echo "root:<hash>" | in_target chpasswd -e` (o `-e` é o que garante hash,
+    nunca texto puro). O Subiquity não tem campo de root, então esse é o
+    caminho dos DOIS instaladores.
+  - **Debian**: preseed com o marcador `@@ROOT_PRESEED@@` expandido por
+    `expand_root_preseed_block()` (root-login true + senha crypt, ou false).
+  - **`verify-iso.sh`**: nova seção "Senha do root" (coerência: hash no
+    late-command × `chpasswd -e` × root-login da preseed; e o inverso).
+  - **webui**: campos `type=password` para usuário e root (vazio = gerar
+    aleatória / root bloqueado), botões 🎲 (senha no navegador,
+    `crypto.getRandomValues`) e 👁. No servidor, `_crypt_hash()`: stdlib `crypt`
+    (PEP 594 a removeu no Python 3.13 — ambiente desta máquina!) com fallback
+    `openssl passwd -6 -stdin` (a MESMA ferramenta que o build-iso.sh exige; o
+    texto vai pelo STDIN, nunca nos argumentos). **Só o hash entra no argv.**
+    `_password_or_none()` valida (≤128, sem CR/LF/NUL).
+  - **Guardas do CI** (Regra 16 atualizada): proibido `sudo -S`/`askpass`;
+    proibida flag de senha em TEXTO PURO (`--password`/`--root-password`);
+    obrigatório `crypt.crypt|mksalt` no server.py. `ci-guards` foi de 33 → 35
+    (com a planta de cada violação).
+  - **`test-webui.sh`**: +4 asserções — as flags de hash entram no argv, os
+    hashes são `$6$`, o texto puro NÃO aparece em nenhum campo, sem senha no
+    formulário o argv fica sem as flags, e senha com `\n` é recusada (400).
+- **Problemas / armadilhas (não repita):**
+  - **O módulo `crypt` não existe no Python 3.13+** (PEP 594). A máquina roda
+    3.14 — o primeiro teste 500. Fallback `openssl passwd -6 -stdin`.
+  - **Comentário contendo o token literal** `@@ROOT_PRESEED@@` fez o guarda
+    "sobrou marcador" reprovar — a MESMA armadilha já registrada no § 6.
+  - **`test-ci-guards` estourou a cota do /tmp (tmpfs)** ao copiar a árvore
+    inteira: `iso/work` tem GB de cache. Fix: a cópia exclui `iso/work`,
+    `iso/out`, `*.iso`, `*.gguf`.
+  - shellcheck SC2188 (redireção sem comando) e SC1072/1073 (comentário com a
+    palavra `shellcheck`) — a redireção foi para o próprio comando `python3`.
+- **Verificado:** `make validate` verde: families **85/85**, ci-guards
+  **35/35**, webui **38/38**, write-pendrive 16/16, check-iso 20/20; autoteste
+  de templates com o exemplo de root (PASS=42, seção "Senha do root" incluída);
+  dry-runs: root habilitado / bloqueado / hash inválido recusado.
+- **NÃO feito / não testado:**
+  - 🔴 **Nenhuma ISO nova foi gerada/bootada** com a senha de root — o caminho
+    foi exercitado só até dry-run/autoteste. O primeiro boot de verdade com
+    root habilitado é o teste que falta (mesma rotina da sessão #21).
+- **Commits:** *(ver `git log`)*.
+
+---
+
 
 
 ## 5. 🧵 Threads abertas (o que ficou no ar)
@@ -2091,6 +2147,7 @@ Ao **fim de cada sessão**, faça nesta ordem:
 
 | Data | Mudança |
 |------|---------|
+| 2026-10-16 | Sessão #27 — 🔑 **senha de usuário/root na webui**: campos `type=password` + 🎲/👁; hash crypt no servidor (stdlib `crypt`, fallback `openssl passwd -6 -stdin`); só o hash entra no argv. Root: `--root-password-hash` no build, `chpasswd -e` no late-command (Ubuntu e Debian), `@@ROOT_PRESEED@@` na preseed; bloqueado por padrão. `verify-iso.sh` ganhou a seção "Senha do root"; guardas do CI 33→35; webui 38 asserções. Regra 16 atualizada (senhas DA ISO sim; senha de sudo jamais). |
 | 2026-10-16 | Sessão #26 — 🧬 **14 famílias** (Xeon Scalable v5–v9, Xeon 6 P-cores, `amd-zen5`) e **AVX-512 por padrão** (`auto`) nas famílias que o têm — decisão do dono. `--no-avx512` + `FAMILY_MARCH_HAS_AVX512` (troca o `-march` pelo fallback sem AVX-512). Corpus 85 CPUs; matrix do CI 7→14. |
 | 2026-10-13 | Sessão #21 — 🎉 **a ISO é GERADA e BOOTADA.** Numa máquina com 24 vCPU + KVM + Docker, a ISO air-gapped foi construída (container `ubuntu:24.04`), verificada (`PASS=41`) e **bootada numa VM** (instalou sozinha; o 1º boot aplicou o ai-cpu-os, família `intel-haswell`). **8 bugs reais** só visíveis ao executar. § 5.1 deixa de ser "bloqueado"; § 5.2 marca o repo local como **bug resolvido** (o apt do curtin roda em chroot sem `/cdrom`); § 5.3 ganha o resíduo do UI do llama.cpp; § 6 ganha 11 armadilhas novas. |
 | 2026-10-07 | Criação — diário de continuidade (sessões #1–#8), inventário do ambiente, threads abertas e armadilhas. |

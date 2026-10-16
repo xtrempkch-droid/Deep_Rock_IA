@@ -1,12 +1,10 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-14 (� **a ISO volta a ser baixável:** o
-> artifact era gateado pelo limite de 2 GiB da *Release* — a ISO air-gapped de
-> ~4 GB era gerada e **descartada**. Agora o artifact sobe **sempre**, e há
-> **`make iso-check`** (`iso/check-iso.sh`) para conferir o arquivo baixado
-> **sem `xorriso`** — o caminho completo para máquina modesta.
-> Ver § 3.4 e `docs/JOURNAL.md` sessão #23)
+> **Última atualização:** 2026-10-16 (🔑 **senha de usuário/root na webui** —
+> hash crypt antes da linha de comando, root habilitável e bloqueado por
+> padrão — e 🧬 **14 famílias de CPU com AVX-512 por padrão** nas famílias que
+> o têm. Ver `JOURNAL.md` sessões #26/#27)
 
 ---
 

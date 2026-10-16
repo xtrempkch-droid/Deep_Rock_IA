@@ -276,6 +276,7 @@ Opções mais usadas:
 | `--firstboot-reboot` | Reinicia automaticamente ao fim do primeiro boot (aplica C-states). |
 | `--hostname NOME` | Hostname do sistema instalado (padrão: igual ao usuário). |
 | `--password-hash '$6$…'` | Senha do usuário (gere com `mkpasswd -m sha-512`). Se omitido, gera e **mostra** uma. |
+| `--root-password-hash '$6$…'` | Senha do **root** (hash crypt). Se omitido, o root fica **bloqueado** (padrão). |
 | `--username NOME` | Usuário administrativo (padrão `ai-cpu-os`; root fica bloqueado). |
 | `--iso PATH` | Usa uma ISO local (trabalhar offline). |
 | `--out PATH` | Caminho da ISO de saída. |
@@ -418,8 +419,10 @@ vivo** (SSE). Ela também:
   (`verify-iso.sh`, exige `xorriso`) e um caminho para conferir uma ISO
   **baixada** (`check-iso.sh`, **sem** `xorriso` — § 4.3.1);
 - **lista os pendrives** e mostra o comando `sudo make pendrive DEVICE=/dev/sdX`
-  pronto para copiar. A UI **nunca** pede senha: gravar disco exige root, e
-  senha não passa por uma página (§ 4.7).
+  pronto para copiar. A UI **nunca** pede senha de sudo: gravar disco exige
+  root, e senha de sudo não passa por uma página. (As **senhas do usuário e do
+  root da ISO** são outra coisa: o formulário as aceita e o servidor as vira
+  hash crypt antes da linha de comando — § 4.7.)
 
 Três invariantes que valem repetir aqui:
 
@@ -608,15 +611,16 @@ sudo apt install -y util-linux
 |------|--------|--------------|
 | Particiona o disco | ⚠️ **Apaga** o disco de `--disk` | Não desliga — é o objetivo |
 | Cria usuário com sudo | `--username`, senha definida/hash | `--username`, `--password-hash` |
-| Bloqueia o root | Ubuntu: root sem senha/login; Debian: `passwd/root-login false` | `autoinstall.yaml` / preseed |
+| Root | bloqueado por padrão; habilitável com `--root-password-hash` (hash crypt): late-command `chpasswd -e` (Ubuntu e Debian) + preseed `root-login true` (Debian) | omitir `--root-password-hash` |
 | Instala pacotes base | Ubuntu: `packages:`; Debian: `pkgsel/include` | `--extra-packages` |
 | Copia o projeto | `/opt/ai-cpu-os` | — |
 | Grava papel e família | `.iso-config` (lidos no 1º boot) | `--role`, `--family` |
 | Aplica o tuning no 1º boot | mods `system`: sysctl, THP, governor, C-states | `--skip-mods` no `build.sh` |
 
-**Segurança:** a senha **nunca** é gravada em texto puro na ISO — apenas o
-hash crypt (`openssl passwd -6`). No Ubuntu o root não recebe senha (login por
-root desabilitado); no Debian o root fica bloqueado por padrão.
+**Segurança:** as senhas **nunca** são gravadas em texto puro na ISO — apenas o
+hash crypt (`openssl passwd -6` / `crypt`). O **root fica bloqueado por
+padrão**; com `--root-password-hash`, o login de root é habilitado com a senha
+como hash (nunca texto puro: o late-command usa `chpasswd -e`).
 
 ---
 

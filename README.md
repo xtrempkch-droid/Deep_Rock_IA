@@ -538,9 +538,13 @@ partir daí:
 Três coisas que a interface **deliberadamente não faz** — e por que isso é uma
 qualidade, não uma limitação:
 
-- **Não lida com senha.** Gravar pendrive exige root, e senha não deve passar
-  por uma página. Ela só **lista** os dispositivos e mostra o comando; quem
-  escreve no disco é você, no terminal, com as 9 travas do `write-pendrive.sh`.
+- **Não pede senha de sudo.** Gravar pendrive exige root, e senha de sudo não
+  deve passar por uma página. Ela só **lista** os dispositivos e mostra o
+  comando; quem escreve no disco é você, no terminal, com as 9 travas do
+  `write-pendrive.sh`. (As **senhas da ISO** — usuário e root — são outra
+  coisa: o formulário as aceita em campos de senha e o servidor as transforma
+  em **hash crypt** antes de qualquer comando; texto puro não sai do
+  navegador para o log.)
 - **Não instala nada.** Ela é só **biblioteca padrão** do Python 3 — se a sua
   máquina é limitada, um `pip install` não pode ser pré-requisito para gerar a
   ISO.

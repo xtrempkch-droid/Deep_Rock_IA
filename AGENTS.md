@@ -390,9 +390,15 @@ Estas regras são **obrigatórias**:
     - **Somente biblioteca padrão.** Nada de `fastapi`/`flask`/`pip install`:
       a máquina do usuário pode ser limitada, e ele não pode ser obrigado a
       instalar nada para gerar a ISO.
-    - **Nunca lida com senha.** Gravar pendrive exige root; a UI só **lista** os
-      dispositivos e mostra o comando pronto para o usuário rodar no terminal.
-      Nenhuma senha entra no navegador, no servidor ou em log.
+    - **Senhas só as do usuário/root DA ISO, e sempre como hash crypt.**
+      Gravar pendrive exige root; a UI só **lista** os dispositivos e mostra o
+      comando pronto para o usuário rodar no terminal — **nenhuma senha de sudo
+      entra no navegador, no servidor ou em log** (decisão do dono, 2026-10-16).
+      As senhas do usuário/root da ISO são aceitas no formulário (campos
+      `type=password`), viram **hash crypt** (`crypt`/`openssl passwd -6`) ANTES
+      da linha de comando, e só o hash chega ao `build-iso.sh`
+      (`--password-hash`/`--root-password-hash`). Texto puro só existe em
+      memória; os guardas do CI proíbem flag de senha em texto puro e `sudo -S`.
     - **Não tem rota de escrita arbitrária.** Se um dia precisar, isso é uma
       decisão de arquitetura — não um atalho.
     - **A ISO não leva o `webui/`** (`--exclude=./webui` no `build-iso.sh`): é
@@ -413,7 +419,24 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-15
+- **Data:** 2026-10-16
+- **O que mudou:** **Senha de usuário/root na webui + 14 famílias + AVX-512 por
+  padrão (sessões #26 e #27).** (1) A webui ganhou campos de **senha do
+  usuário** e **senha do root** (opcional) para a ISO: o texto vira **hash
+  crypt** no servidor (stdlib `crypt`; no Python 3.13+, `openssl passwd -6
+  -stdin` — sem depender de `mkpasswd`) e só o hash entra na linha de comando
+  (`--password-hash`/`--root-password-hash`); a senha nunca aparece em log nem
+  no `argv`. O root é habilitado no **Ubuntu** via late-command (`chpasswd -e`)
+  e no **Debian** via preseed (`@@ROOT_PRESEED@@` → `root-login true`); sem
+  senha, o root continua **bloqueado** (padrão). O `verify-iso.sh` ganhou a
+  seção "Senha do root" (coerência hash × preseed × late-command). Guardas do
+  CI atualizados: proibido `sudo -S`/flag de senha em texto puro; obrigatório o
+  hash crypt — `ci-guards 35/35`, `webui 38/38`. **A Regra 16 mudou nesse
+  ponto**: a UI continua sem lidar com senha de sudo, mas aceita as senhas DA
+  ISO como hash. (2) As **famílias de CPU** foram expandidas para 14 (Xeon
+  Scalable v5–v9, Xeon 6 P-cores, Zen 5/EPYC Turin) com **AVX-512 como padrão**
+  (política `auto`) nas famílias que o têm — ver Regra 12.
+- **Data anterior:** 2026-10-15
 - **O que mudou:** **Interface web local para gerar/conferir a ISO (sessão #24).**
   Entrou `webui/` (`server.py` + `index.html`) para quem não quer decorar flags:
   a página mostra o hardware detectado, o espaço livre e quais ferramentas
