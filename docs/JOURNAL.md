@@ -2193,11 +2193,15 @@ o que dava a impressão de que o negativo funcionava.
   ci-guards 43, iso-disk 16, write-pendrive 16, check-iso 20, webui 38,
   dry-run dos dois caminhos OK. O teste rodou **20/20** em sequência e **5/5** no
   ambiente hostil (`BASH_ENV` + `trap`), que é o modo de falha do CI.
+- **Confirmado no CI:** `validate` **#58** (`0041c0e`) — **4/4 jobs verdes**, e o
+  passo 17 ("ISO (trava de instância única do gerador)") **passou em 0 s** (sem
+  os 5 s de espera estourando do #57). Leitura pelos `steps[].conclusion` da API
+  (o log do job é 403).
 - **NÃO feito / não testado:**
   - 🔴 **Não sei POR QUE o runner deixou de fazer a otimização entre o #56 e o
     #57** (o mecanismo está provado; a mudança do lado do runner, não). O teste
-    agora é imune aos dois lados disso — mas isso **não** foi confirmado por um
-    run novo do CI: é o próximo passo.
+    ficou **imune aos dois lados** (com e sem a otimização) e o #58 confirmou —
+    mas a causa do lado do runner segue como **dúvida aberta**.
   - ⚠️ Nenhum outro teste da árvore usa `flock` (auditado por `grep`), mas a
     mesma classe de erro — *depender de detalhe do shell* — não foi varrida no
     resto do repositório.
@@ -2262,6 +2266,7 @@ o que dava a impressão de que o negativo funcionava.
 |--------|----------|
 | ⚠️ **O build do llama.cpp ainda busca o UI na rede?** | Achado na sessão #21: `llama-build.sh` usa `-DLLAMA_CURL=OFF` (runtime sem downloads), mas o **build** tentou baixar o **UI** do HuggingFace (`-- UI: downloading … llama-ui … dist.tar.gz`); o `.sha256` falhou na VM e o build **seguiu** → parece *best-effort*. **Confirmar** que a ISO é 100% offline (talvez uma flag `-DLLAMA_BUILD_UI=OFF`/`-DLLAMA_UI=OFF` conforme a versão do llama.cpp). Não bloqueou o teste, mas contraria a Regra 13-b se for obrigatório. |
 | **Distribuir a ISO air-gapped (5,2 GB > 2 GiB da Release)** | Caminhos: pendrive/`scp`, runner self-hosted, ou publicar fora + SHA256 na Release. Decisão de infraestrutura, não de código. |
+| ⚠️ **Por que o runner do GitHub deixou de fazer `exec` no `bash -c` entre os runs #56 e #57?** | O mecanismo que derrubou o `validate` #57 está **provado e reproduzido** (§ 6: um `BASH_ENV` com `trap` desliga a otimização) e o teste ficou **imune aos dois lados**. O que ficou em aberto é **o lado do runner** (imagem/versão do runner? `BASH_ENV`?). Não bloqueia nada — mas se alguém vir de novo um teste reprovando com o código correto, o **desconfiômetro** já está calibrado: suspeite de detalhe do shell, não do gerador. |
 
 > ✅ **Resolvido na sessão #15:** o **modelo `.gguf` vai na mídia** ("um pouco
 > maior não é um problema"). Implementado de ponta a ponta: `--iso-model` →
