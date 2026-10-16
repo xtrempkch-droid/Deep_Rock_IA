@@ -2122,7 +2122,7 @@ o que dava a impressão de que o negativo funcionava.
     **outro PC** e ver a instalação acontecer sozinha.
   - 🔴 **Modo 2 (UEFI)** e **Modo 3 (Debian/preseed)** continuam **sem execução**.
   - ⚠️ O aviso de disco inexistente nunca foi visto contra um alvo real.
-- **Commits:** *(preenchido após o push)*
+- **Commits:** `65a50a9` — fix(iso)!: `--disk auto` era a mitigacao DOCUMENTADA e estava QUEBRADA.
 
 ---
 
