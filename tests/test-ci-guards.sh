@@ -208,6 +208,16 @@ planta "tirar avx512-test do validate" Makefile \
   sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test pendrive-test iso-check-test ui-test iso-dry-run-both|' Makefile
 planta "tirar iso-lock-test do validate" Makefile \
   sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-check-test ui-test iso-dry-run-both|' Makefile
+
+# --- Disco do autoinstall: o modo nº 1 de a automação não acontecer ---------
+# `--disk auto` ia LITERAL para o YAML e virava `match: {path: auto}`: nenhum
+# disco casa e o Subiquity não instala sozinho, sem erro visível.
+planta "--disk auto voltar a ir LITERAL para o YAML (match: {path: auto})" iso/build-iso.sh \
+  sed_ 's|if \[\[ "$DISK" == "auto" \|\| "$DISK" == "any" \|\| "$DISK" == "none" \]\]; then|if false; then|' iso/build-iso.sh
+planta "o default do CI voltar a /dev/vda (só existe em VM)" .github/workflows/iso.yml \
+  sed_ "s#inputs.disk || 'auto'#inputs.disk || '/dev/vda'#" .github/workflows/iso.yml
+planta "tirar iso-disk-test do validate" Makefile \
+  sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test pendrive-test iso-check-test ui-test iso-dry-run-both|' Makefile
 planta "renomear acquire_build_lock()" iso/build-iso.sh \
   sed_ 's|^acquire_build_lock()|acquire_build_lock_velho()|' iso/build-iso.sh
 planta "renomear download_to()" iso/build-iso.sh \

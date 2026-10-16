@@ -250,13 +250,20 @@ o Debian precisa e o que é só para o teste de VM).
 ### 4.2 Primeiro: simular (sempre)
 
 ```bash
+# Simule com o MESMO --disk que você vai usar (a simulação já avisa se o
+# disco não existe nesta máquina):
 bash iso/build-iso.sh --distro ubuntu --disk /dev/nvme0n1 --dry-run
 ```
 
 ### 4.3 Gerar de verdade
 
 ```bash
+# Instalação no SEU disco (o mais seguro quando a máquina é esta):
 sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/nvme0n1
+
+# ISO GENÉRICA, para instalar em OUTRA máquina (ou quando você não sabe qual
+# será o disco do alvo): o instalador escolhe o maior disco disponível.
+sudo bash iso/build-iso.sh --distro ubuntu --disk auto
 
 # legado (Debian netinst + preseed)
 sudo bash iso/build-iso.sh --distro debian --disk /dev/nvme0n1
@@ -265,6 +272,16 @@ sudo bash iso/build-iso.sh --distro debian --disk /dev/nvme0n1
 > ⚠️ **`--disk` é o disco que será APAGADO** na máquina onde a ISO for
 > instalada. Fixá-lo evita o pior cenário (instalar no disco errado). Se você
 > não passar `--disk`, é preciso aceitar explicitamente com `--allow-any-disk`.
+
+> 🎯 **Qual escolher?** Se a ISO vai instalar **na máquina em que você está
+> gerando**, fixe o disco (`--disk /dev/nvme0n1`) — é a proteção contra apagar
+> o disco errado. Se a ISO vai para **outro PC**, use **`--disk auto`**: um
+> caminho fixado que não existe no alvo (`/dev/vda` numa máquina real, por
+> exemplo) faz o instalador **não achar nenhum disco que case** e a instalação
+> automática **não acontece** — sem mensagem de erro. `auto`, `any` e `none` são
+> sinônimos de "não fixe o disco"; o build **avisa** quando o `--disk` informado
+> não existe aqui, e **recusa** (rc 2) um valor que não é um dispositivo de
+> bloco.
 
 Opções mais usadas:
 

@@ -10,9 +10,17 @@ name: iso
 # queimaria a cota de CI a cada push.
 #
 # O artefato servido aqui é uma **prova de que o caminho da ISO funciona** e uma
-# ISO genérica para uso em VM (o disco do autoinstall é /dev/vda, que existe em
-# VMs com virtio). Para instalar em hardware real, regenere localmente com
-# `--disk` apontando para o SEU disco — ver docs/ISO.md.
+# ISO **genérica**, que instala em VM **e em hardware real**: o disco NÃO é
+# fixado (`--disk auto`), então o instalador escolhe o maior disco do alvo.
+#
+# POR QUE NÃO /dev/vda (o que era antes): `/dev/vda` só existe em VM com virtio.
+# Numa máquina real (NVMe /dev/nvme0n1, SATA /dev/sda) o autoinstall fica com
+# `match: {path: /dev/vda}`, NENHUM disco casa e o Subiquity **não instala
+# sozinho** — sem erro visível. Era o modo nº 1 de a instalação automática
+# falhar, e o artefato do CI saía com ele embutido.
+#
+# Para FIXAR um disco (só faça sabendo que ele existe no alvo), use o input
+# `disk` — ver docs/ISO.md.
 on:
   workflow_dispatch:
     inputs:
@@ -34,9 +42,9 @@ on:
         default: auto
         type: string
       disk:
-        description: "Disco do autoinstall (APENAS gravado na ISO; em VM virtio é /dev/vda)"
+        description: "Disco a FIXAR no autoinstall. Use 'auto': o instalador escolhe o maior disco"
         required: false
-        default: /dev/vda
+        default: auto
         type: string
       air_gapped:
         description: "Embutir fonte + modelo + repo (ISO que se basta; MUITO mais lenta)"
@@ -65,7 +73,7 @@ jobs:
       ISO_DISTRO: ${{ inputs.distro || 'ubuntu' }}
       ISO_ROLE: ${{ inputs.role || 'auto' }}
       ISO_FAMILY: ${{ inputs.family || 'auto' }}
-      ISO_DISK: ${{ inputs.disk || '/dev/vda' }}
+      ISO_DISK: ${{ inputs.disk || 'auto' }}
       # 'auto' embute o payload (fonte do llama.cpp + modelo + repo apt);
       # 'none' gera a ISO leve, que e o padrao do CI.
       #

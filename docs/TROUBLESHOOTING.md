@@ -231,12 +231,12 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 
 ## ISO / Remasterização
 
-### ⚠️ SINALIZADO (não resolvido): a instalação automática pode não acontecer
+### ⚠️ SINALIZADO: a instalação automática pode não acontecer
 
-> **Estado:** *sinalizado em 2026-10-16 (sessão #30) — ainda **NÃO resolvido**.*
-> O gatilho do autoinstall foi auditado inteiro e **nenhum defeito novo foi
-> confirmado**. Abaixo, os **três** modos realistas de a ISO instalar sem
-> automatismo, com o que **está** e o que **não está** provado.
+> **Estado:** o **Modo 1 está RESOLVIDO** (2026-10-16, sessão #31). Os modos
+> **2 (UEFI)** e **3 (Debian)** continuam **abertos**. O gatilho do autoinstall
+> foi auditado inteiro e **nenhum defeito novo foi confirmado** (sessão #30).
+> Abaixo: o que **está** provado, o que foi corrigido e o que **não** foi.
 
 **Evidência (lida da ISO oficial 24.04.5 por **HTTP Range**, sem baixar 3 GB):**
 
@@ -246,17 +246,29 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 | `/EFI/boot/grub.cfg` **NÃO existe** (só `bootx64.efi`, `grubx64.efi`, `mmx64.efi`) | a branch *"o UEFI delegará para /boot/grub/grub.cfg"* é o caminho **normal**, não uma exceção |
 | **entry 0** do menu de fábrica = `"Try or Install Ubuntu Server"` (interativo) | é exatamente o que o GRUB sobe quando o `set default` não casa → daí a criticidade do `--id` |
 
-**Modo 1 — disco fixado que não existe no alvo (o mais provável no mundo real).**
-O CI grava `--disk /dev/vda` (é o `default` do `iso.yml`). Bootando essa ISO em
-hardware real (NVMe `/dev/nvme0n1`, SATA `/dev/sda`), o `storage` do autoinstall
-vira `layout: {name: direct, match: {path: /dev/vda}}` → **nenhum disco casa** →
-o Subiquity **não instala sozinho** (aborta/cai em erro). O `verify-iso.sh`
-**não** pega isso: ele confere o *conteúdo* da mídia, não se o caminho do disco
-existe na máquina do alvo.
-*Mitigação hoje:* gere com `--disk auto` (o layout passa a `layout: {name: direct}`
-e o Subiquity escolhe o maior disco) ou com o `--disk` do **seu** disco.
-*Sinalizado (a fazer):* (a) teste que reprove `--disk` inexistente e (b) aviso ao
-final do build quando o `--disk` não casar com nenhum disco da máquina.
+**Modo 1 — disco fixado que não existe no alvo. ✅ RESOLVIDO (sessão #31).**
+O `storage` do autoinstall fixava `layout: {name: direct, match: {path: /dev/vda}}`
+(era o `default` do `iso.yml`). Numa máquina real (NVMe `/dev/nvme0n1`, SATA
+`/dev/sda`) **nenhum disco casa** → o Subiquity **não instala sozinho** (aborta
+ou fica parado), **sem erro visível**. O `verify-iso.sh` **não** pegava: ele
+confere o *conteúdo* da mídia, não se o caminho existe na máquina do alvo.
+
+E a mitigação que a documentação recomendava — `--disk auto` — **não
+funcionava**: o valor era usado **literalmente** e o YAML saía com
+`match: {path: auto}`, um caminho inventado que também não casa com disco
+nenhum. **A mitigação documentada reproduzia o próprio bug.**
+
+| Antes | Agora |
+|---|---|
+| `--disk auto` → `match: {path: auto}` | `--disk auto\|any\|none` → **não fixa o disco** (`layout: {name: direct}`) |
+| `--disk sda` (sem `/dev/`) aceito calado | formato validado (`^/dev/[a-zA-Z0-9]+$`) → **rc 2** |
+| `--disk /dev/naoexiste` gerava ISO em silêncio | **AVISO** na hora e no resumo final ("gere de novo com `--disk auto`") |
+| default do CI = `/dev/vda` | default do CI = **`auto`** → o artefato instala em VM **e** em hardware real |
+
+*Teste que guarda isso:* `make iso-disk-test` (16 asserções) — a semântica do
+YAML gerado (com/sem disco), o `auto`, o formato inválido, o disco ausente e o
+consentimento (`--allow-any-disk`). Com guardas no CI e violação plantada em
+`make ci-guards-test`.
 
 **Modo 2 — UEFI nunca foi bootado.** O `test-vm.sh --boot-mode uefi` exige
 `ovmf` e nunca rodou. A prova de que o UEFI herda o menu patchado é **indireta**

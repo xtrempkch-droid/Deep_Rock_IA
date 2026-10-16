@@ -2065,6 +2065,67 @@ o que dava a impressão de que o negativo funcionava.
 
 ---
 
+### Sessão #31 — 2026-10-16 · 🎯 O Modo 1 era um BUG REAL: `--disk auto` não funcionava
+
+- **Objetivo:** o dono relatou erro ao testar ("criação da ISO apresentou
+  travamento", `mv: cannot stat '…gguf.part'`, e "a ISO pode não instalar
+  automaticamente") e pediu: **corrigir os erros** e **documentar a tentativa
+  para implantar em outro PC**. O `main` local estava **1 commit à frente** do
+  GitHub (só docs) e o CI estava **verde** — não havia erro em aberto no código.
+- **Método:** em vez de "procurar bug no escuro", testei **a mitigação que a
+  própria documentação recomendava** para o Modo 1. Foi onde o bug estava.
+- **O BUG (encontrado em 1 comando):** `--disk auto` — recomendado pela
+  documentação como *a* solução para "o disco fixado não existe no alvo" — era
+  usado **literalmente**: `storage_layout_line()` produzia
+  `layout: {name: direct, match: {path: auto}}`. Isso é um **caminho
+  inventado**: nenhum disco casa, o Subiquity não instala sozinho e **não há
+  erro visível**. **A mitigação documentada reproduzia exatamente o bug que ela
+  deveria evitar.** (E com `--disk auto` no CI isso passaria batido, porque o
+  `verify-iso.sh` confere o *conteúdo* — não a semântica do `match`.)
+- **Feito:**
+  - `--disk auto|any|none` → **não fixa o disco** (`layout: {name: direct}`).
+  - Formato validado: `^/dev/[a-zA-Z0-9]+$`; `sda`, `/etc/passwd`, `/dev/../etc`
+    → **rc 2** (erro de uso, com o próximo passo na mensagem).
+  - **AVISO** quando o `--disk` não existe nesta máquina (na hora e **no resumo
+    final**), porque gerar para outra máquina é legítimo — mas silencioso não.
+  - **Default do CI = `auto`** (era `/dev/vda`, que só existe em VM).
+  - `build-iso.sh --keep-templates`: mantém a árvore do autoteste e imprime
+    `TEMPLATES_DIR=…` — é o que permite **testar a semântica** do YAML gerado
+    (sintaxe o `yamllint` já validava; "o layout não pode restringir disco" não).
+  - Removidas duas chamadas `expand_apt_local_block` **duplicadas** (inócuas —
+    o marcador já tinha sido consumido — mas é resíduo de edição repetida).
+  - **`docs/IMPLANTAR-EM-OUTRO-PC.md`** (novo): roteiro para a máquina de
+    destino, os 3 modos de falha, o que medir e **o que trazer de volta**.
+- **Decisões:**
+  - **Testar a mitigação documentada é um caso de teste.** A doc recomendava uma
+    saída que não existia de fato. Passei a testar o que a doc **promete**, e não
+    só o que o código faz.
+  - **Disco inexistente é AVISO, não erro** (Regra 13-a): a ISO pode ser para
+    outra máquina, onde o disco é outro. Erro fatal só para **entrada inválida**
+    (formato), que é corrigível pelo usuário.
+  - **O default do CI tem de servir para o mundo real**, não só para VM.
+- **Problemas:**
+  - `sed` com `||` **dentro** do padrão quebrou (`|` é o delimitador do `s`) —
+    usei `#`. Erro bobo que custou um ciclo; fica registrado.
+  - **De novo** o `:` dentro de um `name:` do YAML (precisa de aspas) e uma
+    linha > 120 colunas. Os dois já estavam no § 6 — reli o meu próprio § 6
+    **depois** de errar. A lição continua valendo: rode `make yaml` **antes** de
+    escrever o texto, não depois.
+- **Verificado:** `make validate` **verde** — 40 scripts, families 85, avx512 61,
+  iso-selection 13, iso-repo-filter 16, verify-repo-distro 6, **ci-guards 43**,
+  iso-lock 10, **iso-disk 16**, write-pendrive 16, check-iso 20, webui 38,
+  dry-run dos dois caminhos OK.
+- **NÃO feito / não testado:**
+  - 🔴 **Nenhuma ISO foi gerada nem bootada nesta rodada.** O conserto do Modo 1
+    é provado **por teste de comportamento e de conteúdo do YAML**, **não** por
+    uma instalação real. A prova que falta é: gerar com `--disk auto`, bootar no
+    **outro PC** e ver a instalação acontecer sozinha.
+  - 🔴 **Modo 2 (UEFI)** e **Modo 3 (Debian/preseed)** continuam **sem execução**.
+  - ⚠️ O aviso de disco inexistente nunca foi visto contra um alvo real.
+- **Commits:** *(preenchido após o push)*
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,
@@ -2109,6 +2170,7 @@ o que dava a impressão de que o negativo funcionava.
 | **Blocos A–L** (`VALIDATION.md`) | Idem — nenhum resultado preenchido (hardware físico). |
 | **`md5sum.txt` da ISO** | Gerado pelo script, mas **nunca validado** por um instalador real. |
 | **Boot UEFI da ISO** | ⚠️ **não testado.** O `-boot_image replay` (sessão #21) restaurou a imagem EFI oculta do Ubuntu; falta o Debian (`mtools`) e o boot UEFI de fato. |
+| 🎯 **Instalar de verdade em OUTRO PC** | ⚠️ O Modo 1 (disco fixado inexistente) foi **corrigido e testado** na sessão #31 — mas **por teste**, não por uma instalação. Falta: gerar com `--disk auto`, gravar o pendrive e **bootar na outra máquina**. Roteiro pronto em `docs/IMPLANTAR-EM-OUTRO-PC.md`. |
 | 🖥️ **A interface web num NAVEGADOR de verdade** | ⚠️ **nunca foi aberta** — nem por quem escreveu (sessão #24). Os **34** casos de `make ui-test` exercitam a **API**: lista branca, validadores, SSE, recusa sem `xorriso`, ausência de rota de escrita, bind em `127.0.0.1`. **Tudo que for visual** (layout, um botão que não responde, contraste) é afirmação não verificada. Abrir `make ui` numa máquina com browser e clicar em **Simular** resolveria. |
 | 🖥️ **A UI numa máquina COM `xorriso`** | ⚠️ O caminho "gerar a ISO" pelo navegador só foi provado **recusando** (esta máquina não tem `xorriso`). O caminho feliz (job roda, SSE mostra o progresso real até o fim, a ISO nova aparece na lista) **não** foi exercitado ponta a ponta. |
 | ⚠️ **Gatilho do autoinstall (sinalizado, sessão #30)** | **Auditado, nenhum defeito novo confirmado**, mas a automação pode falhar em 3 modos: **(1)** `--disk` fixado que não existe no alvo (default do CI = `/dev/vda`); **(2)** **UEFI nunca bootado**; **(3)** **Debian/preseed nunca executado**. Detalhes e evidência em `docs/TROUBLESHOOTING.md` § "SINALIZADO". |
@@ -2219,6 +2281,9 @@ o que dava a impressão de que o negativo funcionava.
 | Descartar a saída da ferramenta que falhou (`>/dev/null 2>&1`) | O build dizia `Pacote pedido está AUSENTE: git` — **falso**, o pacote existe. A resposta real do `apt` não foi para lugar nenhum, e a sessão inteira caçou um bug inexistente | Capture (`saida="$(cmd 2>&1)"`) e **logue a última linha**. Se a mensagem não distingue "não existe" de "o download falhou", ela é zero-útil |
 | Ferramenta de diagnóstico que só lê o **log do job** | O log exige **token** (403). Sem token o diagnóstico é ilegível — no run #16 só as **anotações** (públicas) contaram a história | Leve a causa para a **anotação** (o filtro `PAT` do `iso.yml`) e use `…/check-runs/<job_id>/annotations` para ler |
 | Rodar workflow **manual** (`workflow_dispatch`) e ninguém avisar da falha | O run #16 falhou em 2026-10-14 e eu só descobri no dia seguinte, de passagem, olhando a lista de runs por outro motivo | Registre o run pendente em `docs/STATE.md`/§ 5; considere disparar a ISO leve no `main` para o CI virar sinal |
+| **Recomendar na documentação uma saída que o código não implementa** | A doc dizia *"gere com `--disk auto`"* como mitigação do disco fixado — e `--disk auto` ia **literal** para o YAML (`match: {path: auto}`): a mitigação **reproduzia o bug**. Ninguém testava o que a doc promete | Trate **a promessa da doc como caso de teste**: se a doc recomenda uma flag/valor, existe um teste que a exercita. Foi assim que o bug apareceu em 1 comando |
+| `sed` com `|` (ou qualquer delimitador) **dentro** do padrão | `sed "s|a || b|c|"` → `unknown option to 's'`. O `||` do shell/YAML vira delimitador | Troque o delimitador (`s#…#…#`) ou escape-o. Vale para todo `sed_` de teste de guarda |
+| Escrever YAML e rodar o `yamllint` **depois** | Errei o `:` no `name:` e a linha >120 **de novo** (sessão #31) — os dois já estavam documentados aqui. Reli o § 6 depois de errar, não antes | Rode `make yaml` **enquanto** edita, e consulte este § **antes** de escrever o YAML |
 | Confiar no **`.list`** que a Ubuntu publica ao lado da ISO | Ele é **incompleto** (omite `/boot`, `/install`, `/.disk` e quase todo `/dists`). Concluí que faltava `/boot/grub` e quase reportei um bug falso | Para saber a estrutura real da ISO, leia a **própria ISO**: *path table* + *directory records* por HTTP Range (~KB), sem baixar 3 GB |
 
 ---

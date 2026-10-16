@@ -76,12 +76,13 @@ docs: ## Verifica se os documentos obrigatórios existem
 	         docs/STATE.md docs/HARDWARE.md docs/TUNING.md \
 	         docs/TROUBLESHOOTING.md docs/TUTORIAL.md docs/CI.md \
 	         docs/VALIDATION.md docs/ISO.md docs/JOURNAL.md \
-	         docs/FAMILIES.md docs/MODS.md docs/GPU.md; do \
+	         docs/FAMILIES.md docs/MODS.md docs/GPU.md \
+	         docs/IMPLANTAR-EM-OUTRO-PC.md; do \
 	  [[ -f "$$f" ]] || { echo "FALTANDO: $$f"; exit 1; }; \
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test pendrive-test iso-check-test ui-test iso-dry-run-both ## Lint + docs + famílias + AVX-512 + testes de ISO + UI + guardas + dry-run
+validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test pendrive-test iso-check-test ui-test iso-dry-run-both ## Lint + docs + famílias + AVX-512 + testes de ISO + UI + guardas + dry-run
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -188,6 +189,9 @@ ui-test: ## Prova a interface web (API + salvaguardas; sem navegador, sem rede)
 
 iso-lock-test: ## Prova a trava de instância única do gerador de ISO (flock real)
 	@bash tests/test-iso-lock.sh
+
+iso-disk-test: ## Prova o tratamento do disco do autoinstall (auto/inválido/ausente)
+	@bash tests/test-iso-disk.sh
 
 iso-lint: ## Verifica os scripts da ISO e valida templates + ferramentas
 	@bash -n iso/build-iso.sh iso/verify-iso.sh iso/test-vm.sh iso/write-pendrive.sh \

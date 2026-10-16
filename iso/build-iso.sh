@@ -27,6 +27,8 @@
 #   --distro NAME         ubuntu (padrão) | debian
 #   --disk DEV            Disco alvo do particionamento (APAGADO). Obrigatório
 #                         sem --dry-run, a menos que --allow-any-disk seja usado.
+#                         `--disk auto` = não fixa o disco (o instalador escolhe
+#                         o maior) — é o valor certo quando a ISO é para OUTRO PC.
 #   --allow-any-disk      Não fixa o disco: o instalador escolhe sozinho.
 #   --out PATH            Caminho da ISO de saída (padrão: iso/out/ai-cpu-os-<distro>-<data>.iso)
 #   --iso PATH            Usa uma ISO local em vez de baixar.
@@ -136,6 +138,8 @@ readonly ISO_REPO_BUDGET_MB=6000
 DISTRO="ubuntu"
 DISK=""
 ALLOW_ANY_DISK=0
+# 1 = o --disk informado não existe nesta máquina (deixa rastro no resumo final).
+DISK_MISSING_ON_BUILD=0
 OUT_ISO=""
 INPUT_ISO=""
 ISO_URL=""
@@ -169,6 +173,9 @@ KEEP_WORK=0
 DRY_RUN=0
 ASSUME_YES=0
 CHECK_TEMPLATES=0
+# 1 = o autoteste de templates NÃO apaga a árvore e imprime TEMPLATES_DIR=…
+# (o teste de disco inspeciona o YAML gerado; também ajuda a depurar).
+KEEP_TEMPLATES=0
 
 # --- modelo na mídia (--iso-model) ------------------------------------------
 # auto  → baixa o modelo sugerido NA MÁQUINA QUE GERA A ISO (aqui a rede é
@@ -315,6 +322,9 @@ Uso:
 Opções principais:
   --distro NAME         ubuntu (padrão, autoinstall) | debian (preseed).
   --disk DEV            Disco alvo do particionamento (APAGADO).
+  --disk auto           NÃO fixa o disco: o instalador escolhe o maior. Use isto
+                        quando a ISO vai instalar em OUTRA máquina (um disco
+                        fixado que não existe no alvo impede a automação).
   --allow-any-disk      Não fixa o disco (o instalador escolhe).
   --out PATH            ISO de saída (padrão: iso/out/ai-cpu-os-<distro>-<data>.iso).
   --iso PATH            Usa uma ISO local em vez de baixar.
@@ -362,6 +372,7 @@ Opções principais:
   --work-dir DIR        Diretório de trabalho (padrão: iso/work).
   --keep-work           Não apaga o diretório de trabalho.
   --check-templates     Autoteste: substitui os templates e valida o YAML gerado
+  --keep-templates      Não apaga a árvore do autoteste (imprime TEMPLATES_DIR=…)
                         (não gera ISO, não precisa de disco nem root).
   --dry-run             Simula tudo, sem alterar nada.
   --yes                 Não pede confirmação.
@@ -423,6 +434,7 @@ parse_args() {
       --work-dir)        [[ $# -ge 2 ]] || { log_error "--work-dir exige valor"; exit 2; }; WORK_DIR="$2"; shift 2 ;;
       --keep-work)       KEEP_WORK=1; shift ;;
       --check-templates) CHECK_TEMPLATES=1; DRY_RUN=1; shift ;;
+      --keep-templates) KEEP_TEMPLATES=1; shift ;;
       --dry-run)         DRY_RUN=1; shift ;;
       --yes)             ASSUME_YES=1; shift ;;
       -h|--help)         usage; exit 0 ;;
@@ -452,8 +464,45 @@ parse_args() {
 
   if [[ -z "$DISK" && $ALLOW_ANY_DISK -eq 0 && $DRY_RUN -eq 0 ]]; then
     log_error "Informe o disco alvo com --disk /dev/xxx (será APAGADO)."
-    log_error "Se você entende o risco e quer deixar o instalador escolher, use --allow-any-disk."
+    log_error "Se você entende o risco e quer deixar o instalador escolher, use --disk auto (ou --allow-any-disk)."
     exit 2
+  fi
+
+  # `--disk auto` NÃO pode virar `match: {path: auto}` no autoinstall: isso é um
+  # caminho que não existe, nenhum disco casa e o Subiquity NÃO instala sozinho.
+  # Era exatamente o que acontecia — e a documentação recomendava `--disk auto`
+  # como a mitigação para "o disco fixado não existe no alvo". A mitigação
+  # documentada estava quebrada; aqui ela passa a significar de verdade
+  # "não fixe o disco" (equivalente a --allow-any-disk).
+  if [[ "$DISK" == "auto" || "$DISK" == "any" || "$DISK" == "none" ]]; then
+    log_info "--disk ${DISK}: o disco NÃO será fixado (o instalador escolhe o maior)."
+    DISK=""
+    ALLOW_ANY_DISK=1
+  fi
+
+  # Formato do disco: um caminho de dispositivo de bloco. Pegar um erro de
+  # digitação AQUI é barato; descobrir na instalação, não.
+  if [[ -n "$DISK" && ! "$DISK" =~ ^/dev/[a-zA-Z0-9]+$ ]]; then
+    log_error "--disk ${DISK}: não parece um dispositivo de bloco (ex.: /dev/nvme0n1, /dev/sda)."
+    log_error "Use --disk auto para deixar o instalador escolher."
+    exit 2
+  fi
+
+  # O disco fixado existe NESTA máquina? Se não, é quase certo que ele não
+  # existe NO ALVO também — o modo mais provável de a instalação automática
+  # falhar em hardware real (o default do CI era /dev/vda, que só existe em VM).
+  # É AVISO, não erro: gerar a ISO para OUTRA máquina é legítimo, e o disco do
+  # alvo pode simplesmente não estar plugado aqui. Mas quem lê o log precisa
+  # saber que a mídia sai com um disco fixado que esta máquina não tem.
+  #
+  # Vale também em --dry-run de propósito: "simular primeiro" é exatamente a
+  # hora de descobrir que o disco digitado não existe.
+  if [[ -n "$DISK" && ! -b "$DISK" ]]; then
+    log_warn "O disco fixado ${DISK} NÃO existe nesta máquina."
+    log_warn "Se ele também não existir no ALVO, o Subiquity não acha disco que case"
+    log_warn "e a instalação automática NÃO acontece. Se a ISO é para outro PC, use"
+    log_warn "--disk auto (o instalador escolhe o maior disco) ou o --disk do alvo."
+    DISK_MISSING_ON_BUILD=1
   fi
 
   if [[ -z "$OUT_ISO" ]]; then
@@ -1594,8 +1643,6 @@ inject_templates() {
     expand_packages_block "${UBUNTU_STAGE}/autoinstall.yaml"
     # Idem para o repositório local: a fonte extra entra — ou some por completo.
     expand_apt_local_block "${UBUNTU_STAGE}/autoinstall.yaml"
-    # Idem para o repositório local: a fonte extra entra — ou some por completo.
-    expand_apt_local_block "${UBUNTU_STAGE}/autoinstall.yaml"
     chmod 0644 "${UBUNTU_STAGE}/autoinstall.yaml"
     inject_common_templates "${UBUNTU_STAGE}/preseed"
     check_no_leftover_tokens "${UBUNTU_STAGE}/autoinstall.yaml" \
@@ -2124,7 +2171,6 @@ check_templates() {
     subst_template "${ISO_DIR}/autoinstall/autoinstall.yaml" "${dir}/autoinstall.yaml"
     expand_packages_block "${dir}/autoinstall.yaml"
     expand_apt_local_block "${dir}/autoinstall.yaml"
-    expand_apt_local_block "${dir}/autoinstall.yaml"
     subst_template "${ISO_DIR}/preseed/late-command.sh"       "${dir}/late-command.sh"
     subst_template "${ISO_DIR}/preseed/firstboot.sh"          "${dir}/firstboot.sh"
     subst_template "${ISO_DIR}/preseed/ai-cpu-os.cfg"         "${dir}/ai-cpu-os.cfg"
@@ -2169,7 +2215,16 @@ check_templates() {
   done
 
   DISK=""
-  rm -rf "$tmp" 2>/dev/null || true
+  if [[ $KEEP_TEMPLATES -eq 1 ]]; then
+    # Não remove a árvore e imprime o caminho de forma MECÂNICA (a linha
+    # `TEMPLATES_DIR=…` é o que o teste lê para inspecionar o YAML gerado —
+    # o autoteste valida a sintaxe, mas só um teste consegue checar SEMÂNTICA,
+    # como "sem --disk, o layout não pode restringir disco").
+    log_info "TEMPLATES_DIR=${tmp}"
+    log_warn "Árvore dos templates MANTIDA em ${tmp} (--keep-templates)."
+  else
+    rm -rf "$tmp" 2>/dev/null || true
+  fi
   if [[ -n "$MODEL_NAME" ]]; then
     log_info "Modelo embutido: /models/${MODEL_NAME} (copiado para /opt/models no 1º boot)"
   else
@@ -2301,6 +2356,15 @@ main() {
     log_warn "Partição automática apaga: ${DISK}"
   else
     log_warn "Disco não fixado: o instalador usará o primeiro disco disponível."
+  fi
+  # Rastro no resumo: quem gerou a ISO para OUTRA máquina precisa ver isto na
+  # última tela, não no meio de 200 linhas de log. É o modo nº 1 de a instalação
+  # automática não acontecer (ver docs/TROUBLESHOOTING.md "SINALIZADO").
+  if [[ $DISK_MISSING_ON_BUILD -eq 1 ]]; then
+    log_warn "⚠ A mídia sai com o disco ${DISK} FIXADO, e ele não existe aqui."
+    log_warn "  No alvo, o Subiquity procura um disco com esse caminho; se não achar,"
+    log_warn "  a instalação automática NÃO acontece (sem erro visível). Se a ISO é"
+    log_warn "  para outro PC, gere de novo com: --disk auto"
   fi
   log_info "Testar em VM: qemu-system-x86_64 -m 4096 -enable-kvm -cdrom '${OUT_ISO}' -boot d"
   log_info "No sistema instalado, o tuning é aplicado no primeiro boot:"

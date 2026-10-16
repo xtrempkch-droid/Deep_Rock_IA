@@ -161,6 +161,15 @@ jobs:
           set -euo pipefail
           make iso-lock-test
 
+      # O modo nº 1 de a instalação automática NÃO acontecer: o autoinstall
+      # fixa um disco que o alvo não tem (`match: {path: /dev/vda}`), nenhum
+      # disco casa e o Subiquity para sem erro visível. Pior: a mitigação
+      # documentada (`--disk auto`) gerava `match: {path: auto}` — quebrada.
+      - name: "ISO (disco do autoinstall: auto x fixado x inválido)"
+        run: |
+          set -euo pipefail
+          make iso-disk-test
+
       # Prova que os guardas do próprio job REALMENTE derrubam o job, plantando
       # cada violacao numa COPIA temporaria. Existe porque SEIS guardas estavam
       # na forma `! grep`, que o `set -e` ignora quando o comando e invertido
@@ -245,6 +254,7 @@ jobs:
             docs/HARDWARE.md docs/TUNING.md docs/TROUBLESHOOTING.md
             docs/TUTORIAL.md docs/CI.md docs/VALIDATION.md docs/ISO.md
             docs/JOURNAL.md
+            docs/IMPLANTAR-EM-OUTRO-PC.md
             iso/build-iso.sh iso/preseed/ai-cpu-os.cfg
             iso/preseed/late-command.sh iso/preseed/firstboot.sh
             iso/preseed/ai-cpu-os-firstboot.service
@@ -283,6 +293,7 @@ jobs:
             tests/test-webui.sh
             tests/test-avx512-policy.sh
             tests/test-iso-lock.sh
+            tests/test-iso-disk.sh
             webui/server.py webui/index.html
             tests/fixtures/SHA256SUMS.ubuntu-24.04
             tests/fixtures/SHA256SUMS.debian-13
@@ -462,6 +473,21 @@ jobs:
           # volta a ser renomeado às cegas e o erro volta a ser críptico).
           grep -q '^acquire_build_lock()' iso/build-iso.sh
           grep -q '^download_to()' iso/build-iso.sh
+          # DISCO DO AUTOINSTALL: `--disk auto` tem de significar "nao fixar o
+          # disco" DE VERDADE. Antes o valor ia LITERAL para o YAML e virava
+          # `match: {path: auto}` — um caminho inventado, que nao casa com disco
+          # nenhum: a mitigacao documentada reproduzia o proprio bug.
+          grep -q 'iso-disk-test' Makefile
+          grep -q 'validate:.*iso-disk-test' Makefile
+          grep -q 'make iso-disk-test' .github/workflows/validate.yml
+          grep -qE 'DISK" == "auto"' iso/build-iso.sh
+          # O default do CI nao pode ser um caminho que so existe em VM: a ISO
+          # do artefato sairia sem instalar sozinha em hardware real.
+          if grep -qE "inputs\.disk \|\| '/dev/vda'" .github/workflows/iso.yml; then
+            echo "::error file=.github/workflows/iso.yml::default do disco voltou a /dev/vda (so existe em VM)"
+            exit 1
+          fi
+          grep -q "inputs.disk || 'auto'" .github/workflows/iso.yml
           # ARMADILHA JÁ PISADA (run do v0.2.5 e do main): no `if:` do GitHub,
           # `matrix.exec != 'false'` compara BOOLEANO com STRING e o passo NUNCA
           # é pulado — as famílias AVX-512/AMX rodaram no runner SEM a ISA e

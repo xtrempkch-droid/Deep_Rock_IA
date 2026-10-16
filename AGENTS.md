@@ -161,6 +161,7 @@ ai-cpu-os/
 │   ├── TUTORIAL.md         # TUTORIAL explicado (obrigatório por marco/versão)
 │   ├── VALIDATION.md       # Protocolo de testes em hardware (preenchível)
 │   ├── ISO.md              # 🎯 A ISO de instalação (decisões e como gerar)
+│   ├── IMPLANTAR-EM-OUTRO-PC.md # 🖥️ Instalar/validar em OUTRA máquina (roteiro)
 │   ├── GPU.md              # 🎮 Usar GPU (opcional, sempre explícito)
 │   └── JOURNAL.md          # 📓 Diário de sessões + continuidade (retomada)
 │   └── build-runner.sh # Build Docker + push p/ registry local

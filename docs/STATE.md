@@ -306,7 +306,31 @@ explícito e aponta o GitHub Actions (Regra 13-a). Nova **Regra 16** no
 ⚠️ **Não provado:** a UI **nunca foi aberta num navegador de verdade** — os
 testes exercitam a API. Nada aqui é afirmação sobre o visual.
 
-**Passo 1-c — ⚠️ SINALIZADO (sessão #30, 2026-10-16) — não resolvido:**
+**Passo 1-d — ✅ Modo 1 RESOLVIDO (sessão #31, 2026-10-16); modos 2 e 3 seguem
+abertos.** Dos **3 modos sinalizados** na sessão #30 de a instalação automática
+não acontecer, o **modo 1** (o mais provável no mundo real) foi **corrigido** e
+tem teste:
+
+- **`--disk auto` estava QUEBRADO** — e era justamente a mitigação que a
+  documentação recomendava. O valor ia **literal** para o YAML e virava
+  `match: {path: auto}`: um caminho inventado, que não casa com disco nenhum.
+  Agora `auto|any|none` significam **não fixar o disco** (`layout: {name: direct}`).
+- **Formato do disco validado** (`^/dev/[a-zA-Z0-9]+$`) → `rc 2` em vez de ISO
+  quebrada.
+- **Aviso** quando o `--disk` informado não existe nesta máquina (na hora **e**
+  no resumo final, recomendando `--disk auto`).
+- **Default do CI = `auto`**: o artefato do GitHub Actions passa a instalar em
+  VM **e** em hardware real (era `/dev/vda`, que só existe em VM).
+
+Teste: **`make iso-disk-test`** (16 asserções) + 3 guardas no CI com violação
+plantada (`make ci-guards-test`: 40 → **43**).
+
+**🗺️ Para implantar em OUTRO PC:** existe agora um roteiro dedicado —
+[`docs/IMPLANTAR-EM-OUTRO-PC.md`](IMPLANTAR-EM-OUTRO-PC.md) — com o checklist da
+máquina de destino, os 3 modos de falha, o que medir e **o que trazer de volta**
+quando algo falhar. Ele registra também o que está provado e o que **não** está.
+
+**Passo 1-c — (histórico, sessão #30) ⚠️ SINALIZADO:**
 "a ISO pode não instalar automaticamente". Auditei o gatilho do autoinstall
 inteiro (evidência lida da ISO 24.04.5 oficial por HTTP Range) e **não achei
 defeito novo**: `/boot/grub/grub.cfg` existe, é o único menu e é ele que ambos
