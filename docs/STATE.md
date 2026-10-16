@@ -85,7 +85,7 @@ Legenda: ✅ sim · ❌ não · ⚠️ parcial
 
 | Workflow      | Estado | Evidência |
 |---------------|--------|-----------|
-| `validate`    | ✅ **verde** | Run #1 (main, `6da0c35`) e #2: 4/4 jobs (Lint, Regras, Dry-run xeon, Dry-run ryzen). Também verde na tag `v0.2.0` e no PR do Dependabot. |
+| `validate`    | ✅ **verde** | Runs históricos: #1 (main, `6da0c35`) e #2 (4/4 jobs), tag `v0.2.0` e PR do Dependabot. **#56 (`v0.2.6`) verde; #57 vermelho** — o teste `iso-lock` dependia da otimização `exec` do bash, não garantida (sessão #32). Corrigido; **aguardando o run do push para reconfirmar**. |
 | `build-llama` | ✅ **verde (build real!)** | Run #1 na tag `v0.2.0` (`4cde4bb`): **6m04s** · Run #2 (manual, `main`): ✅ — os dois perfis compilam, os binários executam e a **inferência real** roda. |
 | `container`   | ✅ **verde** | Runs #3/#4/#5/#7, **#8 (correção do RPATH)** e **#9 (PR do Dependabot)**: ✅ — imagens publicadas no GHCR. O job do PR passou em 8m28s **incluindo o passo "Smoke da imagem (PR)"**. |
 
@@ -242,6 +242,26 @@ Tempo de build do llama.cpp: *(pendente em hardware real)*
 
 > **👉 ESTA É A SEÇÃO REFERENCIADA PELO `AGENTS.md`.**
 
+**✅ Recém-fechado (sessão #32, 2026-10-16).** O `validate` **#57** estava
+vermelho no `main` e a causa **não** era o `--disk auto` do commit vizinho (o
+`tests/test-iso-lock.sh` estava idêntico ao do run verde #56): o **detentor da
+trava** no teste era `bash -c '…; sleep 30' &` e o teste matava o PID do job
+contando que o bash **trocasse de identidade** pelo último comando (*exec*) —
+uma otimização que **não é garantida** (basta um `BASH_ENV` com `trap` para
+desligá-la; aí o `sleep` é um filho que herda o fd 9 e a trava sobrevive ao
+`kill`). O teste foi reescrito (**10 → 13 asserções**): detentor determinístico
+(`sleep 300 9>&- &` + `wait` + `flock -w 20`), pré-voo que exige a trava livre e
+aponta **quem** a segura, e todo `FALHOU` vira **anotação** (`::error::`, o único
+canal público sem token). **Próximo passo: o CI (run do push) ficar verde nesse
+passo.**
+
+**✅ Recém-fechado (sessão #31, 2026-10-16).** O "Modo 1" (a ISO não instalar
+sozinha em outro PC) **era um bug real**: `--disk auto` — a mitigação que a
+própria documentação recomendava — ia **literal** para o autoinstall
+(`match: {path: auto}`), um caminho inventado, e o Subiquity parava **sem erro
+visível**. Agora `--disk auto` não fixa o disco de verdade, o formato é validado
+e o default do CI virou `auto`. Ver `docs/IMPLANTAR-EM-OUTRO-PC.md`.
+
 **✅ Recém-fechado (sessão #29, 2026-10-16).** O `main` local foi
 **sincronizado** com o GitHub (estava 7 commits atrás **e** com trabalho local
 não commitado — preservado em `backup/local-sessao26-pre-sync`). E foi corrigido
@@ -392,7 +412,7 @@ Ao terminar qualquer tarefa:
 
 | Data       | Mudança                                                    |
 |------------|------------------------------------------------------------|
-| 2026-10-16 | 🧷 **Sync com o GitHub + a correção do SIGILL que não corrigia (sessão #29).** O `main` local estava 7 commits atrás e com trabalho não commitado (preservado em `backup/local-sessao26-pre-sync`). A correção do #28 (`matrix.exec != 'false'` no `if:`) **nunca pulava o passo**: no GitHub, booleano × string vira número (`false`→0, `'false'`→NaN) e o `!=` dá sempre true — daí o `exit 132` (SIGILL) em icelake-sp/sapphirerapids-sp/emeraldrapids-sp/graniterapids-sp **no próprio commit da correção**. Agora o valor vai por `env:` e a decisão é no `bash`; guarda no `project-rules` + violação plantada. Recuperados do trabalho local de 14/10: `flock` de instância única + `download_to()` (confere o `.part`, `--speed-time`) no `build-iso.sh` (`make iso-lock-test`, 10 asserções) e `make avx512-test` (37 → **61** asserções, 14 famílias). `ci-guards` 35 → **40**. Ver `JOURNAL.md` sessão #29. |
+| 2026-10-16 | 🧷 **`validate` #57 vermelho: o teste da trava dependia do `exec` do bash (sessão #32).** O `tests/test-iso-lock.sh` matava o detentor da trava contando que o `bash -c '…; sleep 30'` **trocasse de identidade** pelo último comando; essa otimização **não é garantida** (um `BASH_ENV` com `trap` já a desliga) e então o `sleep`, como filho, herda o fd 9: a trava sobrevivia ao `kill` e a asserção final falhava com o gerador **correto** (sintoma no CI: `exit code 2`, passo de 6 s = 5 s de laço de espera estourando). Detentor reescrito (`sleep 300 9>&- &` + `wait` + `flock -w 20`), pré-voo que exige a trava livre e diz **quem** a segura, e todo `FALHOU` vira **anotação** `::error::`. Asserções 10 → **13**; `make validate` verde. Ver `JOURNAL.md` sessão #32. | O `main` local estava 7 commits atrás e com trabalho não commitado (preservado em `backup/local-sessao26-pre-sync`). A correção do #28 (`matrix.exec != 'false'` no `if:`) **nunca pulava o passo**: no GitHub, booleano × string vira número (`false`→0, `'false'`→NaN) e o `!=` dá sempre true — daí o `exit 132` (SIGILL) em icelake-sp/sapphirerapids-sp/emeraldrapids-sp/graniterapids-sp **no próprio commit da correção**. Agora o valor vai por `env:` e a decisão é no `bash`; guarda no `project-rules` + violação plantada. Recuperados do trabalho local de 14/10: `flock` de instância única + `download_to()` (confere o `.part`, `--speed-time`) no `build-iso.sh` (`make iso-lock-test`, 10 asserções) e `make avx512-test` (37 → **61** asserções, 14 famílias). `ci-guards` 35 → **40**. Ver `JOURNAL.md` sessão #29. |
 | 2026-10-16 | 🧬 **14 famílias + AVX-512 por padrão.** Adicionadas as famílias de servidor `intel-cascadelake-sp` (v6), `intel-icelake-sp` (v7), `intel-sapphirerapids-sp` (v8), `intel-emeraldrapids-sp` (v9), `intel-graniterapids-sp` (Xeon 6 P) e `amd-zen5` (Ryzen 9000/Ryzen AI 300/EPYC Turin). **Decisão do dono:** nas famílias cujas CPUs têm AVX-512, a política virou `auto` — o AVX-512 é o padrão quando a CPU reporta a flag (verificação em runtime mantida; hardcode segue proibido). Novo `--no-avx512` (desliga e troca o `-march` pelo fallback sem AVX-512, via `FAMILY_MARCH_HAS_AVX512`). Corpus: 85 CPUs reais. Ver `JOURNAL.md` sessão #26. |
 | 2026-10-13 | 🎉 **A ISO foi gerada E bootada pela primeira vez** (VM qemu/KVM, Ubuntu 24.04): instalou sozinha, reiniciou e o 1º boot aplicou o ai-cpu-os (`status=ok`, família `intel-haswell`), com llama.cpp compilado no alvo sem rede. **8 bugs reais** só visíveis ao executar (xorriso `-rm`/`-boot_image`/`-map`, GRUB sem `--id`, apt do curtin em chroot sem `/cdrom`, marcadores fora do console, aspas do `-find`, SIGPIPE). Novo § 3.3. Ver `JOURNAL.md` sessão #21. |
 | 2026-10-07 | Criação do arquivo junto com o repositório `0.1.0-alpha`.   |

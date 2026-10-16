@@ -127,7 +127,7 @@ mudou algo no projeto, registre a sessão em `docs/JOURNAL.md` (Regra 14).
 | Relato (do dono, testando) | O que foi feito |
 |---|---|
 | "a criação da ISO ubuntu apresentou **travamento**; teste será feito em outra máquina" | `download_to()`: `--connect-timeout` + `--speed-limit/--speed-time` (aborta conexão **estagnada**, não conexão lenta) e **confere que o `.part` existe e não está vazio** antes do `mv` |
-| "`mv: cannot stat '…/models/…gguf.part': No such file or directory`" | Duas causas: (a) **dois builds ao mesmo tempo** no mesmo `--work-dir` (um renomeia o `.part` que o outro ainda escreve) → **trava `flock`** de instância única; (b) o `mv` às cegas → checagem antes. Teste: `make iso-lock-test` (10) |
+| "`mv: cannot stat '…/models/…gguf.part': No such file or directory`" | Duas causas: (a) **dois builds ao mesmo tempo** no mesmo `--work-dir` (um renomeia o `.part` que o outro ainda escreve) → **trava `flock`** de instância única; (b) o `mv` às cegas → checagem antes. Teste: `make iso-lock-test` (13) |
 | "modo 1: a ISO pode não instalar automaticamente em outro PC" | `--disk auto` (que era **quebrado**) agora funciona; formato do disco validado; **aviso** de disco inexistente; **default do CI = `auto`**. Teste: `make iso-disk-test` (16) |
 | "olhe o suporte a AVX-512 e mude o padrão das famílias" | As famílias que **têm** AVX-512 passaram a `auto` (liga sozinho); `--no-avx512` desliga. Teste: `make avx512-test` (61) |
 
@@ -143,7 +143,7 @@ make validate  →  TUDO VERDE
   iso-repo-filter    16      ← filtro/fallback do repositório apt
   verify-repo-distro  6      ← verificador distro-aware
   ci-guards          43      ← cada guarda provado por violação plantada
-  iso-lock           10      ← trava de instância única (flock real)
+  iso-lock           13      ← trava de instância única (flock real)
   iso-disk           16      ← --disk auto / inválido / ausente
   write-pendrive     16      ← travas do gravador (alvo = arquivo)
   check-iso          20      ← ISO baixada (fixtures byte a byte)

@@ -424,7 +424,23 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-16
+- **Data:** 2026-10-16 (sessão #32)
+- **O que mudou:** **`validate` #57 vermelho — o teste da trava dependia de uma
+  otimização que o bash NÃO promete.** O `tests/test-iso-lock.sh` segurava a
+  trava num `bash -c '…; sleep 30' &` e a soltava com `kill`, contando que o
+  bash **trocasse de identidade** pelo último comando (*exec*). Essa otimização
+  não é garantida — basta um `BASH_ENV` com `trap` para o bash desistir dela, e
+  aí o `sleep` é um **filho que herda o fd 9**: a trava sobrevive ao `kill` e a
+  asserção final reprova **com o gerador correto** (no CI: `exit code 2` num
+  passo de 6 s — os 5 s do laço de espera estourando). O teste foi reescrito
+  (**10 → 13 asserções**): detentor determinístico (`sleep 300 9>&- &` + `wait`,
+  `flock -w 20` para não perder a corrida para as sondas do próprio teste — que
+  também o deixava **flaky**), pré-voo que exige a trava livre e aponta **quem**
+  a segura, e todo `FALHOU` virando **anotação** `::error::` (o único canal
+  público sem token). Diagnóstico e modo de falha reproduzível em
+  `docs/JOURNAL.md` § 4 (sessão #32) e § 6; `make validate` verde.
+
+- **Data anterior:** 2026-10-16
 - **O que mudou:** **A "correção" do SIGILL do `build-llama` não corrigia — e o
   trabalho local de 14/10 foi recuperado (sessão #29).** (1) **Sync:** o `main`
   local estava **7 commits atrás** e com trabalho **não commitado**; foi

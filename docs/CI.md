@@ -83,35 +83,53 @@ Dispara em **todo push para `main` e em todo Pull Request**.
 3. `python3 -m compileall roles/` — valida o `shell-ia.py`.
 4. `yamllint` — valida workflows, compose e templates.
 5. `make families-test` — casamento CPU → família contra ~60 CPUs reais.
-6. `make iso-lint` + `make iso-yaml` — scripts da ISO e templates substituídos.
-7. `make iso-select-test` — escolha da ISO oficial no `SHA256SUMS`, contra
+6. `make avx512-test` — política de AVX-512 (`never`/`optin`/`auto`) das **14**
+   famílias. Existe porque uma família AVX2 com AVX-512 ligado gera `SIGILL` no
+   alvo, e uma família com AVX-512 desligada perde desempenho **em silêncio**.
+7. `make iso-lint` + `make iso-yaml` — scripts da ISO e templates substituídos.
+8. `make iso-select-test` — escolha da ISO oficial no `SHA256SUMS`, contra
    arquivos **reais** guardados em `tests/fixtures/`. Existe porque a geração da
    ISO Ubuntu morria com **`exit code 22`** (404 do curl) sem pista alguma: o
    `SHA256SUMS` do Ubuntu marca o modo binário com `*` e lista **todas** as
    point releases — nenhuma das duas coisas aparece numa fixture inventada de
    duas linhas.
-8. `make iso-repo-test` — download do repositório apt local, com `apt-cache` e
+9. `make iso-repo-test` — download do repositório apt local, com `apt-cache` e
    `apt-get` **substituídos por stubs**. Existe porque `apt-get download a b c`
    aborta o **lote inteiro** quando um nome não tem candidato, e o `|| true`
    engolia até 25 pacotes por lote — falha **dependente da release do host**,
    logo impossível de pegar com um dry-run.
-9. `make iso-verify-test` — o `verify-iso.sh` tem de ser **distro-aware**.
+10. `make iso-verify-test` — o `verify-iso.sh` tem de ser **distro-aware**.
    Ele procurava o repositório em uso só no `/autoinstall.yaml`, e numa ISO
    **Debian** (que usa preseed) isso reprovava uma ISO **correta** (run #10).
-10. `make iso-check-test` — a conferência de uma ISO **baixada**
+11. `make iso-check-test` — a conferência de uma ISO **baixada**
     (`iso/check-iso.sh`), construída sobre fixtures byte a byte. Existe para a
     máquina que **não tem `xorriso`**: valida tamanho, SHA256, a assinatura
     `CD001`, o Volume ID e a assinatura de boot — sem privilégio e sem rede.
-11. `make ci-guards-test` — planta as violações numa cópia temporária e exige
+12. `make iso-lock-test` — trava de instância única do gerador (`flock` real, dois
+    processos). Existe porque um sintoma real (`mv: cannot stat … .part`) veio de
+    **dois builds ao mesmo tempo** no mesmo `--work-dir`. O detentor do teste é
+    **determinístico** (`sleep 300 9>&- &` + `wait`, `flock -w 20`): ele não
+    depende da otimização `exec` do bash e não perde a corrida para as sondas do
+    próprio teste — as duas causas do `validate` **#57** vermelho (§ 8.3).
+13. `make iso-disk-test` — disco do autoinstall (`auto` × fixado × inválido).
+    Existe porque o **modo nº 1** de a instalação automática não acontecer é o
+    `match: {path: /dev/vda}` de um disco que o alvo não tem — e a mitigação
+    documentada (`--disk auto`) gerava `match: {path: auto}`.
+14. `make ci-guards-test` — planta as violações numa cópia temporária e exige
     que o job **falhe**. Existe porque seis guardas estavam na forma `! cmd`,
     que o `set -e` ignora — nunca derrubaram nada.
-12. `make ui-test` — sobe o servidor da Interface Web numa porta livre e
+15. `make pendrive-test` — travas do gravador (`dd` num dispositivo): recusa o
+    disco que contém `/`, exige **disco inteiro** (`TYPE=disk` — um `sr0`/DVD tem
+    `RM=1` e passaria), exige a assinatura `CD001`, confere se **cabe** e **lê de
+    volta** comparando byte a byte. Grava num **ARQUIVO** com o `lsblk`
+    simulado: nenhum dispositivo real é tocado.
+16. `make ui-test` — sobe o servidor da Interface Web numa porta livre e
     exercita a **API** (sem navegador e sem rede): a página é servida e **não
     carrega nada de CDN**, a lista branca recusa valores maliciosos, o SSE
     entrega o log e o `done`, e — o ponto central — **sem `xorriso` a geração é
     RECUSADA com o motivo explícito** em vez de falhar em silêncio (Regra 13-a).
     Também prova que **não existe rota de escrita** e que o bind é `127.0.0.1`.
-13. `make iso-dry-run-both` — dry-run dos DOIS caminhos (ubuntu e debian) **sem
+17. `make iso-dry-run-both` — dry-run dos DOIS caminhos (ubuntu e debian) **sem
    flags extras**, exatamente como o `make validate` local.
 
 ### Job `dry-run` (matriz: `xeon` e `ryzen`)
@@ -357,6 +375,7 @@ O que acontece em seguida:
 | `build-llama` falha com `SIGILL` | Flag de ISA indevida para o alvo | Nas famílias AVX2: `--march` indevido (nunca AVX-512 nelas). Nas famílias AVX-512: **a decisão de pular foi para o `if:`** — lá `matrix.exec != 'false'` **nunca** dá falso (**booleano × string**: `false`→0, `'false'`→NaN) e o passo roda no runner sem a ISA. O valor tem de ir por `env:` e ser comparado no `bash` (§ 3). |
 | `container` falha "denied" no push | Faltou `packages: write` | Confira o bloco `permissions:`. |
 | `container` falha "invalid reference format" | Nome de imagem com maiúsculas | GHCR exige **minúsculas** (já tratado com `${VAR,,}`). |
+| Passo do `validate` vermelho e **sem log** (HTTP 403: o log exige token) | Sem acesso ao texto do erro, sobra o `exit code` — que aponta para o **`make`**, não para a asserção | Leia as **anotações** (públicas): `…/actions/runs/<id>/jobs` dá `steps[].conclusion` e `…/check-runs/<job_id>/annotations` dá arquivo:linha:mensagem. Os testes deste repositório emitem `::error::` justamente para isso (ex.: `tests/test-iso-lock.sh`). **E compare com o último run VERDE**: o horário de cada passo (`started_at`/`completed_at`) denuncia espera que estourou (§ 8.3). |
 | `yamllint` reclama de `on:` | Chave tratada como truthy | Já configurado em `.yamllint.yml` (`check-keys: false`). |
 | Job `build-llama` não roda no push | Comportamento **intencional** | Use `workflow_dispatch` (Actions → Run workflow) ou crie uma tag. |
 | `cmake` falha: `Could NOT find PkgConfig (missing: PKG_CONFIG_EXECUTABLE)` | O backend BLAS do ggml usa `find_package(PkgConfig)` e faltava `pkg-config` | Adicione `pkg-config` aos pacotes do builder (já corrigido — ver § 8.1). |
@@ -456,6 +475,52 @@ gatilho que os ative pelo menos uma vez.
 > `load: true`, a imagem não fica no store local do runner e não há como
 > executá-la ali. Em `push`/tag, a garantia vem da **auto-verificação dentro
 > do próprio `Dockerfile`**, que roda em todo build de imagem.
+
+### 8.3 Terceiro caso real: o teste da trava dependia de uma otimização do bash
+
+No run **#57** (2026-10-16, `main`), o **passo 17** do job `lint` —
+`make iso-lock-test` — falhou com `Process completed with exit code 2` e
+**nenhuma pista no texto** (o log do job é **403** sem token). Como achar a
+causa sem o log:
+
+1. `…/actions/runs/<run_id>/jobs` → `steps[].conclusion` diz **qual passo**
+falhou (o `make` devolve **2** quando a receita falha, então o `2` é do `make`,
+não da asserção).
+2. `…/check-runs/<job_id>/annotations` → a única anotação era
+   `Process completed with exit code 2` (arquivo `.github`, linha 13):
+generica, mas confirma que **não** houve erro de infraestrutura.
+3. **Comparar com o último run verde** (`#56`, mesmo `runs-on`, 80 min antes):
+   o passo 17 levou **0 s** lá e **6 s** aqui. `git diff --stat <verde> HEAD`
+   mostrou que o **arquivo do teste estava idêntico** e que o único arquivo
+funcional alterado era `iso/build-iso.sh` (disco do autoinstall) — que o teste
+não usa.
+4. Os **~6 s** são a pista: são os **5 s de um laço de espera** que estoura +
+   o resto do passo. A asserção que falha nesse caso é a **última** do teste
+("a trava continuou presa depois do build anterior terminar").
+
+**Causa raiz (provada, não suposta).** O detentor da trava era
+`bash -c '…; sleep 30' &` e o teste o matava contando que o bash **trocasse de
+identidade** pelo último comando (*exec*). Essa otimização **não é garantida**:
+basta um `BASH_ENV` que defina um `trap` para o bash desistir dela — e então o
+`sleep` é um **filho que herda o fd 9**. `kill` mata só o pai, o filho continua
+segurando o `flock` e o teste reprova **com o gerador correto**. Reprodução
+exata do sintoma do CI (mesma asserção, 9/10, ~8 s):
+
+```bash
+printf 'trap ":" EXIT\n' > /tmp/besen.sh
+BASH_ENV=/tmp/besen.sh bash tests/test-iso-lock.sh
+```
+
+**Correção aplicada (`tests/test-iso-lock.sh`, 10 → 13 asserções):** detentor
+sem filho herdando o fd (`sleep 300 9>&- &` + `wait`), `flock -w 20` no lugar de
+`-n` (o detentor perdia a corrida para as **sondas** do próprio teste — ~1 de
+cada 3 execuções; teste **flaky**), pré-voo que exige a trava livre e diz
+**quem** a segura, e todo `FALHOU` virando **anotação** `::error::`.
+
+**Lição registrada:** *não dependa de otimização de shell que a doc não
+promete*. `exec` do último comando, `&&` como última instrução de função e
+`! cmd` com `set -e` já derrubaram este repositório — e um diagnóstico que só
+existe no log do job é um diagnóstico que você **não tem**.
 
 ---
 

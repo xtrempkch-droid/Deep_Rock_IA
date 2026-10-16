@@ -2126,6 +2126,85 @@ o que dava a impressão de que o negativo funcionava.
 
 ---
 
+### Sessão #32 — 2026-10-16 · 🧷 `validate` #57 vermelho: o teste da trava dependia de uma otimização que o bash **não promete**
+
+- **Objetivo:** o dono relatou o `validate` **#57 vermelho** no `main` e pediu
+  para corrigir. O log do job é **403** sem token, então o caminho foi:
+  `/actions/runs/<id>/jobs` (dá `steps[].conclusion`) → **anotações**
+  (`Process completed with exit code 2`).
+- **Método (é o que vale registrar):** comparar o run vermelho com o **último
+  verde** (`#56`, mesmo `runs-on`, horário próximo) em vez de ler código no
+  escuro.
+  - `git diff --stat 1079ceb HEAD` (o commit do #56 até o HEAD): **o único
+    arquivo funcional que mudou é `iso/build-iso.sh`** (disco do autoinstall) e
+    `tests/test-iso-lock.sh` está **idêntico** nos dois runs.
+  - `#57`: o passo 17 (`make iso-lock-test`) levou **6 s** e falhou; no `#56` ele
+    levou **0 s** e passou.
+  - **6 s ≈ os 5 s de um laço de espera que estoura** → a asserção que falhou era
+    a última: *"a trava continuou presa depois do build anterior terminar"*. O
+    build do teste rodou (não foi recusado) — a trava já não estava presa.
+- **Causa raiz (mecanismo provado, não suposto):** o detentor da trava era
+  `bash -c '…; sleep 30' &` e o teste matava o PID do job contando que o bash
+  **trocasse de identidade** pelo último comando (*exec*). Essa otimização **não
+  é garantida** — basta um `BASH_ENV` que defina um `trap` para o bash desistir
+  dela, e então o `sleep` fica um **filho que herda o fd 9**: o `kill` mata só o
+  pai e a trava continua presa. Reproduzido em 1 comando, com a assinatura exata
+  do CI (mesma asserção, ~6-8 s):
+
+  ```bash
+  printf 'trap ":" EXIT\n' > /tmp/besen.sh
+  BASH_ENV=/tmp/besen.sh bash tests/test-iso-lock.sh   # 9/10: FALHOU a trava continuou presa
+  ```
+
+- **Feito (`tests/test-iso-lock.sh` reescrito, 10 → 13 asserções):**
+  - Detentor **determinístico**: `sleep 300 9>&- &` + `wait` — o filho **não**
+    herda o fd 9 e quem segura a trava é o próprio `bash`; matar o detentor
+    solta a trava **em qualquer ambiente**, com ou sem a otimização.
+  - **`flock -w 20`** (esperando) no detentor, e não `-n`: com `-n` o detentor
+    perdia a corrida para as **sondas do próprio teste** (`flock -c true`, que
+    pegam a trava por um instante) e o teste era **flaky** (~1 de cada 3).
+  - **Pré-voo:** a trava tem de estar **livre** ao começar; se não estiver, diz
+    **quem** a segura (PID lido do arquivo + varredura de `/proc` por **todos**
+    os fds) e falha na hora, em vez de dar falso negativo lá na frente.
+  - **Anotação do GitHub:** todo `FALHOU` também emite
+    `::error::test-iso-lock: …` — é o único canal **público** quando o job fica
+    vermelho sem token (já estava no § 6 como lição; agora está no código).
+  - **Nunca toca a rede:** os builds reais do teste ganharam
+    `--iso none --iso-model none --iso-source none --iso-repo none --no-verify`
+    e teto de `timeout 180`. Antes, uma falha na trava faria o teste (e o CI)
+    **baixar 2,6 GB de ISO / 1,1 GB de modelo**.
+- **Decisões:**
+  - **Nunca depender de otimização de shell que a doc não promete**: `exec` do
+    último comando, `&&` como última instrução da função e `! cmd` com `set -e`
+    — as três já derrubaram este repositório.
+  - **Teste flaky é pior que teste ausente** (treina a pessoa a ignorar o CI).
+    Um teste que depende de corrida vence às vezes: use **espera** (`-w`).
+- **Problemas (2, os dois meus):**
+  1. **Instrumentar um `bash -c '…'` adicionando um `printf '%s:%s '`**: a aspa
+     simples **fechou o `bash -c`** antes da hora, o resto do texto virou
+     *argumento* e o shell criou um **arquivo `_`** na raiz do repositório
+     (`exec 9>"_"`). Passei um bom tempo caçando "o detentor não toma a trava"
+     quando o defeito era da **minha instrumentação**. As armadilhas de quoting
+     valem também para DEPURAR.
+  2. O § 5.2 do `IMPLANTAR-EM-OUTRO-PC.md` e o resumo desta sessão citavam
+     `iso-lock` com **10** asserções — atualizados (13).
+- **Verificado:** `make validate` **verde** — iso-lock **13/13**, families 85,
+  avx512 61, iso-selection 13, iso-repo-filter 16, verify-repo-distro 6,
+  ci-guards 43, iso-disk 16, write-pendrive 16, check-iso 20, webui 38,
+  dry-run dos dois caminhos OK. O teste rodou **20/20** em sequência e **5/5** no
+  ambiente hostil (`BASH_ENV` + `trap`), que é o modo de falha do CI.
+- **NÃO feito / não testado:**
+  - 🔴 **Não sei POR QUE o runner deixou de fazer a otimização entre o #56 e o
+    #57** (o mecanismo está provado; a mudança do lado do runner, não). O teste
+    agora é imune aos dois lados disso — mas isso **não** foi confirmado por um
+    run novo do CI: é o próximo passo.
+  - ⚠️ Nenhum outro teste da árvore usa `flock` (auditado por `grep`), mas a
+    mesma classe de erro — *depender de detalhe do shell* — não foi varrida no
+    resto do repositório.
+- **Commits:** `fix(ci)!: a trava do teste dependia do \`exec\` do bash — \`validate\` #57 vermelho` (hash abaixo).
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,
@@ -2285,6 +2364,9 @@ o que dava a impressão de que o negativo funcionava.
 | `sed` com `|` (ou qualquer delimitador) **dentro** do padrão | `sed "s|a || b|c|"` → `unknown option to 's'`. O `||` do shell/YAML vira delimitador | Troque o delimitador (`s#…#…#`) ou escape-o. Vale para todo `sed_` de teste de guarda |
 | Escrever YAML e rodar o `yamllint` **depois** | Errei o `:` no `name:` e a linha >120 **de novo** (sessão #31) — os dois já estavam documentados aqui. Reli o § 6 depois de errar, não antes | Rode `make yaml` **enquanto** edita, e consulte este § **antes** de escrever o YAML |
 | Confiar no **`.list`** que a Ubuntu publica ao lado da ISO | Ele é **incompleto** (omite `/boot`, `/install`, `/.disk` e quase todo `/dists`). Concluí que faltava `/boot/grub` e quase reportei um bug falso | Para saber a estrutura real da ISO, leia a **própria ISO**: *path table* + *directory records* por HTTP Range (~KB), sem baixar 3 GB |
+| Assumir que `bash -c '…; cmd'` faz **`exec` do último comando** | A otimização **não é garantida** (basta um `BASH_ENV` com `trap` para o bash desistir dela). Quando ela não acontece, o `cmd` é um **filho** que herda os fds do pai: matar o PID do job mata só o pai e o filho **continua segurando** o `flock` — em `tests/test-iso-lock.sh` isso reprovava o teste com o gerador **correto** (`validate` #57: `exit code 2`, passo de 6 s = 5 s de laço que estourava) | Se o processo tem de MORRER quando você o mata, garanta que nenhum filho herde o recurso (`cmd 9>&-`) **e** que o pai continue vivo (`wait` é builtin: não há troca de identidade). Não conte com a otimização |
+| **Sondar** uma `flock` com `flock -n FILE -c true` enquanto um detentor tenta `flock -n` | As sondas pegam a trava por um instante. O detentor que tenta **uma vez** com `-n` perde a corrida em ~1 de cada 3 execuções e o teste fica **flaky** (verde, verde, vermelho) — pior que um teste ausente, porque treina a ignorar o CI | Quem **quer** a trava espera: `flock -w 20` (ou um laço de tentativas). `-n` é para o **build**, que pode falhar rápido e dizer o motivo |
+| Instrumentar um `bash -c '…'` adicionando texto com **aspa simples** | `printf '%s:%s '` dentro da string **fechou o `bash -c`** antes da hora: o resto do script virou *argumento* (`$0` = pedaço de código), `"$1"` ficou `_`, o shell criou um arquivo `_` na raiz (`exec 9>"_"`) e eu caçei o bug **na minha instrumentação** por vários ciclos | Instrumente por **arquivo** (script em `/tmp` chamado pelo detentor) ou sem aspas simples; ao ver `$0`/`$1` estranhos, **suspeite do seu próprio texto** primeiro |
 
 ---
 
