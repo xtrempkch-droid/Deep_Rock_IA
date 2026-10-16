@@ -189,6 +189,20 @@ validate_target() {
   [[ -n "$dev" ]] || { log_error "--device é obrigatório (veja --list)."; return 2; }
   [[ "$dev" == /dev/* ]] || { log_error "--device tem de ser um caminho /dev/... (recebi '${dev}')."; return 2; }
 
+  name="$(basename "$dev")"
+
+  # 1. TRAVA MÁXIMA: o disco da raiz. Sem override — de propósito. Vem ANTES da
+  # checagem de block device: num ambiente onde o device ainda não existe
+  # (ex.: container, ou pendrive não plugado), o NOME já é suficiente para
+  # identificar o disco do sistema — e essa trava não pode depender de nada.
+  local root_disk
+  root_disk="$(root_disk_name)"
+  if [[ -n "$root_disk" && "$name" == "$root_disk" ]]; then
+    log_error "'${dev}' é o disco que contém o sistema em execução (/)."
+    log_error "GRAVAR AQUI DESTRUIRIA A MÁQUINA. Recusado — e não há opção para forçar."
+    return 1
+  fi
+
   # 2. Existe e é dispositivo de bloco?
   if ! dev_is_block_device "$dev"; then
     log_error "'${dev}' não é um dispositivo de bloco."
@@ -196,7 +210,6 @@ validate_target() {
     return 2
   fi
 
-  name="$(basename "$dev")"
   type="$(dev_field "$dev" TYPE)"
 
   # 3. Disco inteiro (não partição, não DVD, não loop).
@@ -207,15 +220,6 @@ validate_target() {
     elif [[ "$type" == "part" ]]; then
       log_error "Você passou uma PARTIÇÃO. Use o disco, sem o número: /dev/${name%%[0-9]*}"
     fi
-    return 1
-  fi
-
-  # 1. TRAVA MÁXIMA: o disco da raiz. Sem override — de propósito.
-  local root_disk
-  root_disk="$(root_disk_name)"
-  if [[ -n "$root_disk" && "$name" == "$root_disk" ]]; then
-    log_error "'${dev}' é o disco que contém o sistema em execução (/)."
-    log_error "GRAVAR AQUI DESTRUIRIA A MÁQUINA. Recusado — e não há opção para forçar."
     return 1
   fi
 
