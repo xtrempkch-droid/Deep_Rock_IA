@@ -46,16 +46,22 @@ jobs:
             desc: "Broadwell-EP (Xeon E5 v4): AVX2/FMA/F16C — sem AVX-512"
           - family: intel-skylake-avx512
             desc: "Skylake-SP (Xeon Scalable v5): AVX-512 auto (liga no cross-build via família)"
+            exec: false
           - family: intel-cascadelake-sp
             desc: "Cascade Lake-SP (v6): cascadelake + AVX-512/VNNI auto"
+            exec: false
           - family: intel-icelake-sp
             desc: "Ice Lake-SP (v7): icelake-server + AVX-512 auto"
+            exec: false
           - family: intel-sapphirerapids-sp
             desc: "Sapphire Rapids (v8): sapphirerapids + AVX-512/AMX auto"
+            exec: false
           - family: intel-emeraldrapids-sp
             desc: "Emerald Rapids (v9): emeraldrapids + AVX-512/AMX auto"
+            exec: false
           - family: intel-graniterapids-sp
             desc: "Granite Rapids (Xeon 6 P): graniterapids (GCC>=14; senão fallback sapphirerapids)"
+            exec: false
           - family: amd-zen1
             desc: "Zen/Zen+ (Ryzen 1000/2000): AVX2/FMA/F16C — sem AVX-512"
           - family: amd-zen2
@@ -64,8 +70,10 @@ jobs:
             desc: "Zen 3 (Ryzen 5000): znver3 — exige GCC >= 11"
           - family: amd-zen4
             desc: "Zen 4 (Ryzen 7000/EPYC Genoa): znver4 + AVX-512 auto — exige GCC >= 13"
+            exec: false
           - family: amd-zen5
             desc: "Zen 5 (Ryzen 9000/EPYC Turin): znver5 + AVX-512 auto (GCC>=14; senão fallback znver4)"
+            exec: false
     steps:
       - uses: actions/checkout@v7
 
@@ -134,8 +142,16 @@ jobs:
           for b in llama-server llama-cli llama-bench; do
             test -x "$BIN/$b" || { echo "::error::binário ausente: $b"; exit 1; }
           done
-          "$BIN/llama-bench" --help > /dev/null
-          echo "OK: binários compilados e executáveis nesta CPU."
+          # Famílias AVX-512 (exec: false) compilam para um ALVO com AVX-512;
+          # rodá-las AQUI, num runner sem AVX-512, daria SIGILL — e não seria um
+          # bug. A existência dos binários já é conferida acima; o smoke de
+          # execução só faz sentido para binários que o runner roda.
+          if [[ "${{ matrix.exec }}" != "false" ]]; then
+            "$BIN/llama-bench" --help > /dev/null
+            echo "OK: binários compilados e executáveis nesta CPU."
+          else
+            echo "OK: binários AVX-512 compilados (não executados aqui: o runner não tem AVX-512)."
+          fi
 
       - name: Baixar modelo minúsculo de teste
         id: model
@@ -151,7 +167,7 @@ jobs:
           fi
 
       - name: Inferência real (prova fim-a-fim)
-        if: steps.model.outputs.ok == '1'
+        if: steps.model.outputs.ok == '1' && matrix.exec != 'false'
         run: |
           set -euo pipefail
           BIN="$GITHUB_WORKSPACE/llama.cpp/build/bin"

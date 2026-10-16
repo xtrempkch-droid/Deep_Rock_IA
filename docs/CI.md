@@ -191,6 +191,15 @@ o script que o usuário vai rodar — inclusive a checagem de ISA em
    não derruba o job (links de modelos mudam; ver
    [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md)).
 
+> ⚠️ **Famílias AVX-512 são "compile-only" no CI (desde 2026-10-16).** Com o
+> AVX-512 como padrão (política `auto`, Regra 12), o cross-build
+> (`--assume-family-isa`) gera binário **com AVX-512** para essas famílias —
+> o que é **correto para o alvo**, mas que o runner (sem AVX-512) **não roda**:
+> `llama-bench --help` daria `SIGILL` e não seria um bug. Por isso essas
+> famílias têm `exec: false` na matriz: as provas **2** e **3** são puladas
+> nelas (a prova **1** — binários existem — continua valendo). As famílias
+> AVX2 (haswell, broadwell, zen1–zen3) seguem executando tudo.
+
 ### Artefatos e Release
 
 Cada perfil gera `ai-cpu-os-llama-<perfil>-<ref>.tar.gz` com `bin/`,
@@ -332,7 +341,7 @@ O que acontece em seguida:
 | `shellcheck` falha com `SC2155` | `readonly VAR="$(cmd)"` mascara o exit code | Separe: `VAR="$(cmd)"` e depois `readonly VAR`. |
 | `shellcheck` falha com `SC2046` | Substituição sem aspas dividindo argumentos | Use arrays (`mapfile`/`"${arr[@]}"`). |
 | `project-rules` falha em "set -euo pipefail" | Script novo sem o cabeçalho | Adicione na 1ª linha útil. |
-| `build-llama` falha com `SIGILL` | Flag de ISA indevida para o alvo | Verifique `--march`: **nunca** AVX-512 nestes hardwares. |
+| `build-llama` falha com `SIGILL` | Flag de ISA indevida para o alvo | Nas famílias AVX2: `--march` indevido (nunca AVX-512 nelas). Nas famílias AVX-512, o SIGILL só ocorreria se `exec:` fosse esquecido na matriz (elas **não** executam no runner — § 3). |
 | `container` falha "denied" no push | Faltou `packages: write` | Confira o bloco `permissions:`. |
 | `container` falha "invalid reference format" | Nome de imagem com maiúsculas | GHCR exige **minúsculas** (já tratado com `${VAR,,}`). |
 | `yamllint` reclama de `on:` | Chave tratada como truthy | Já configurado em `.yamllint.yml` (`check-keys: false`). |
@@ -371,7 +380,8 @@ real no host também teria falhado**.
 
 **Lição registrada:** "lint verde" não significa "build comprovado". Foi
 preciso o CI **executar** o build para revelar o problema — exatamente por
-isso o `build-llama` roda uma inferência real, e não apenas compila.
+isso o `build-llama` roda uma inferência real nas famílias AVX2 (e **compila
+apenas** nas AVX-512, que o runner não executa — § 3).
 
 ### 8.2 Segundo caso real: `exit code 127` no smoke da imagem (RPATH)
 

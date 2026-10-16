@@ -9,9 +9,9 @@
 > [`docs/STATE.md`](STATE.md).
 > **Quando escrever:** **ao fim de TODA sessão de trabalho** (ver § 8).
 >
-> **Última entrada:** sessão **#27** (2026-10-16) — 🔑 **senha de usuário/root na
-> webui** (sempre como hash crypt; root habilitável, bloqueado por padrão) +
-> **14 famílias de CPU com AVX-512 por padrão** (sessão #26). Ver § 4.
+> **Última entrada:** sessão **#28** (2026-10-16) — 🔴 o `build-llama` do CI
+> quebrou com **SIGILL** (AVX-512 `auto` + cross-build executado em runner sem
+> AVX-512); famílias AVX-512 viraram **compile-only** no CI. Ver § 4.
 
 ---
 
@@ -1931,6 +1931,41 @@ o que dava a impressão de que o negativo funcionava.
 
 ---
 
+### Sessão #28 — 2026-10-16 · 🔴 O `build-llama` do CI quebrou com SIGILL (AVX-512 auto)
+
+- **Objetivo:** o dono reportou "erro" no commit de docs da sessão #27. Era o
+  workflow **`build-llama`** disparado na branch `v0.2.5`: **5 jobs de famílias
+  Intel AVX-512 falharam** (skylake-avx512, cascadelake-sp, sapphirerapids-sp,
+  emeraldrapids-sp, graniterapids-sp).
+- **Causa raiz (medida, não deduzida):** log do job → `Illegal instruction
+  (core dumped) "$BIN/llama-bench" --help`, `exit code 132`. A política AVX-512
+  `auto` (sessão #26) fez o **cross-build** (`--assume-family-isa`) gerar
+  binário **com AVX-512** para essas famílias — correto para o ALVO — mas o
+  passo "Verificar binários e execução" roda `llama-bench` no **runner sem
+  AVX-512** → SIGILL. (Zen4/zen5/icelake "passaram" por sorte: caíram em
+  runners Genoa com AVX-512 — **não-determinístico**, pior ainda.)
+- **Feito:**
+  - Matriz do `build-llama.yml`: famílias AVX-512 ganharam **`exec: false`** —
+    elas **compilam** (prova que o caminho AVX-512 existe e os binários são
+    gerados) mas **não executam** no runner. As famílias AVX2 (haswell,
+    broadwell, zen1–zen3) seguem executando tudo.
+  - Passo "Verificar binários e execução": só roda `llama-bench --help` quando
+    `matrix.exec != false`; senão, avisa que é compile-only. Idem o passo de
+    inferência real (`if: ... && matrix.exec != 'false'`).
+  - Docs: `CI.md` § 3 ("As três provas" com a nota compile-only; linha do
+    SIGILL na tabela de troubleshooting) e `FAMILIES.md` § 9.3 (marcador ¹).
+- **Lição (registrada para não repetir):** política `auto` + cross-build +
+  "executar no runner" é uma combinação que **inverte** o propósito do smoke:
+  o SIGILL passa a ser *esperado* para o alvo, não um erro. O smoke de execução
+  só vale quando o binário é para A CPU do runner — senão, compile-only.
+- **Verificado:** `make validate` verde (families 85/85, ci-guards 35/35,
+  webui 38/38) + `yamllint build-llama.yml` limpo. **O workflow real não foi
+  re-executado** — o `build-llama` só dispara em tag/manual/semanal; a prova
+  será o próximo run.
+- **Commits:** *(ver `git log`)*.
+
+---
+
 
 
 ## 5. 🧵 Threads abertas (o que ficou no ar)
@@ -2147,6 +2182,7 @@ Ao **fim de cada sessão**, faça nesta ordem:
 
 | Data | Mudança |
 |------|---------|
+| 2026-10-16 | Sessão #28 — 🔴 `build-llama` com **SIGILL**: AVX-512 `auto` (sessão #26) + cross-build gerava binário AVX-512 que o runner **sem AVX-512** executava. Famílias AVX-512 viraram **compile-only** (`exec: false` na matriz); smoke de execução só nas AVX2. |
 | 2026-10-16 | Sessão #27 — 🔑 **senha de usuário/root na webui**: campos `type=password` + 🎲/👁; hash crypt no servidor (stdlib `crypt`, fallback `openssl passwd -6 -stdin`); só o hash entra no argv. Root: `--root-password-hash` no build, `chpasswd -e` no late-command (Ubuntu e Debian), `@@ROOT_PRESEED@@` na preseed; bloqueado por padrão. `verify-iso.sh` ganhou a seção "Senha do root"; guardas do CI 33→35; webui 38 asserções. Regra 16 atualizada (senhas DA ISO sim; senha de sudo jamais). |
 | 2026-10-16 | Sessão #26 — 🧬 **14 famílias** (Xeon Scalable v5–v9, Xeon 6 P-cores, `amd-zen5`) e **AVX-512 por padrão** (`auto`) nas famílias que o têm — decisão do dono. `--no-avx512` + `FAMILY_MARCH_HAS_AVX512` (troca o `-march` pelo fallback sem AVX-512). Corpus 85 CPUs; matrix do CI 7→14. |
 | 2026-10-13 | Sessão #21 — 🎉 **a ISO é GERADA e BOOTADA.** Numa máquina com 24 vCPU + KVM + Docker, a ISO air-gapped foi construída (container `ubuntu:24.04`), verificada (`PASS=41`) e **bootada numa VM** (instalou sozinha; o 1º boot aplicou o ai-cpu-os, família `intel-haswell`). **8 bugs reais** só visíveis ao executar. § 5.1 deixa de ser "bloqueado"; § 5.2 marca o repo local como **bug resolvido** (o apt do curtin roda em chroot sem `/cdrom`); § 5.3 ganha o resíduo do UI do llama.cpp; § 6 ganha 11 armadilhas novas. |

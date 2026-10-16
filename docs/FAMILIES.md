@@ -306,18 +306,23 @@ Legenda: **corpus** = casamento exercitado por `make families-test`;
 |---|---|---|---|---|
 | `intel-haswell` (E5 v3) | ✅ | ✅ | ❌ | alvo histórico do projeto |
 | `intel-broadwell` (E5 v4) | ✅ | ✅ | ❌ | **alvo atual** (E5-2680 v4) |
-| `intel-skylake-avx512` (Scalable v5) | ✅ | ✅ | ❌ | AVX-512 **auto** (padrão quando a CPU tem) |
-| `intel-cascadelake-sp` (v6) | ✅ | ✅ | ❌ | novo em 2026-10-16; AVX-512/VNNI auto |
-| `intel-icelake-sp` (v7) | ✅ | ✅ | ❌ | novo em 2026-10-16; AVX-512 auto |
-| `intel-sapphirerapids-sp` (v8) | ✅ | ✅ | ❌ | novo em 2026-10-16; AVX-512+AMX auto |
-| `intel-emeraldrapids-sp` (v9) | ✅ | ✅ | ❌ | novo em 2026-10-16; AVX-512+AMX auto |
-| `intel-graniterapids-sp` (Xeon 6 P) | ✅ | ✅ | ❌ | novo em 2026-10-16; GCC>=14 senão fallback sapphirerapids |
+| `intel-skylake-avx512` (Scalable v5) | ✅ | ✅¹ | ❌ | AVX-512 **auto** (padrão quando a CPU tem) |
+| `intel-cascadelake-sp` (v6) | ✅ | ✅¹ | ❌ | novo em 2026-10-16; AVX-512/VNNI auto |
+| `intel-icelake-sp` (v7) | ✅ | ✅¹ | ❌ | novo em 2026-10-16; AVX-512 auto |
+| `intel-sapphirerapids-sp` (v8) | ✅ | ✅¹ | ❌ | novo em 2026-10-16; AVX-512+AMX auto |
+| `intel-emeraldrapids-sp` (v9) | ✅ | ✅¹ | ❌ | novo em 2026-10-16; AVX-512+AMX auto |
+| `intel-graniterapids-sp` (Xeon 6 P) | ✅ | ✅¹ | ❌ | novo em 2026-10-16; GCC>=14 senão fallback sapphirerapids |
 | `amd-zen1` (1000/2000) | ✅ | ✅ | ❌ | inclui APUs e EPYC Naples |
 | `amd-zen2` (3000/4000) | ✅ | ✅ | ❌ | **alvo atual** (Ryzen 5 3500X) |
 | `amd-zen3` (5000/6000) | ✅ | ✅ | ❌ | exercitado no CI **sem** hardware |
-| `amd-zen4` (7000/8000, EPYC Genoa) | ✅ | ✅ | ❌ | ⚠️ exige GCC ≥ 13; AVX-512 **auto** (Zen 4 tem a flag) |
-| `amd-zen5` (9000, EPYC Turin) | ✅ | ✅ | ❌ | novo em 2026-10-16; znver5 exige GCC ≥ 14 (senão fallback znver4); AVX-512 de 512 bits nativo |
+| `amd-zen4` (7000/8000, EPYC Genoa) | ✅ | ✅¹ | ❌ | ⚠️ exige GCC ≥ 13; AVX-512 **auto** (Zen 4 tem a flag) |
+| `amd-zen5` (9000, EPYC Turin) | ✅ | ✅¹ | ❌ | novo em 2026-10-16; znver5 exige GCC ≥ 14 (senão fallback znver4); AVX-512 de 512 bits nativo |
 | `generic` | ✅ | ❌ | ❌ | fallback; sem `-march` |
+
+> ¹ **compile-only no CI**: as famílias AVX-512 compilam (prova que o caminho
+> AVX-512 existe) mas **não executam** no runner — o runner do GitHub não tem
+> AVX-512, e rodar ali um binário AVX-512 daria SIGILL (esperado, não bug).
+> Ver `docs/CI.md` § 3.
 
 **O que "pronto" quer dizer aqui, sem engano:** as famílias estão
 **prontas para uso** no sentido de que (a) o casamento CPU → família é
