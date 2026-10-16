@@ -235,8 +235,14 @@ jobs:
             families/resolve.sh families/_base/family.conf
             families/intel-haswell/family.conf families/intel-broadwell/family.conf
             families/intel-skylake-avx512/family.conf families/generic/family.conf
+            families/intel-cascadelake-sp/family.conf
+            families/intel-icelake-sp/family.conf
+            families/intel-sapphirerapids-sp/family.conf
+            families/intel-emeraldrapids-sp/family.conf
+            families/intel-graniterapids-sp/family.conf
             families/amd-zen1/family.conf families/amd-zen2/family.conf
             families/amd-zen3/family.conf families/amd-zen4/family.conf
+            families/amd-zen5/family.conf
             llama-build.sh mods/apply.sh mods/README.md
             mods/kernel-tuning/mod.conf mods/kernel-tuning/apply.sh mods/kernel-tuning/revert.sh
             mods/hugepages/mod.conf mods/hugepages/apply.sh mods/hugepages/revert.sh

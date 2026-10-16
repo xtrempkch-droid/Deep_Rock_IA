@@ -119,10 +119,11 @@ detect_isa() {
   log_info "AMX:     $(yn $HAS_AMX)"
 
   if [[ $HAS_AVX512 -eq 1 ]]; then
-    log_warn "AVX-512 detectado: presente nas famílias Intel Skylake-SP+ (v5+) e AMD Zen 5+."
-    log_warn "Não é habilitado automaticamente — exige opt-in explícito (--allow-avx512)."
+    log_warn "AVX-512 detectado: presente nas famílias Intel Skylake-SP+ (v5+) e AMD Zen 4/5."
+    log_warn "Nas famílias que o têm, o AVX-512 é o PADRÃO (política 'auto' — decisão do dono)."
+    log_warn "Para medir AVX2 antes: --no-avx512."
   else
-    log_ok "Sem AVX-512/AMX (esperado para as famílias Haswell/Broadwell-EP e Zen 1-4)."
+    log_ok "Sem AVX-512/AMX (esperado para as famílias Haswell/Broadwell-EP e Zen 1-3)."
   fi
 }
 
@@ -357,7 +358,7 @@ print_recommendations() {
   log_info "  sudo bash llama-build.sh --family ${FAMILY_ID}"
 
   if [[ $HAS_AVX512 -eq 1 && "$AVX512_ENABLED" == "no" ]]; then
-    log_warn "Esta CPU tem AVX-512 mas a política da família é '${FAMILY_AVX512_POLICY}' — ver docs/FAMILIES.md para opt-in."
+    log_warn "Esta CPU tem AVX-512 mas ele está DESLIGADO (política '${FAMILY_AVX512_POLICY}'${AI_NO_AVX512:+ ou --no-avx512}) — ver docs/FAMILIES.md § 5."
   fi
 }
 

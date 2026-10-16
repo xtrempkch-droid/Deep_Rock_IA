@@ -7,14 +7,17 @@
 # ISA corretos (ver families/).
 #
 # Uso:
-#   bash llama-build.sh [--family auto|<id>] [--allow-avx512] [--native]
-#                       [--dir /opt/llama.cpp] [--jobs N]
+#   bash llama-build.sh [--family auto|<id>] [--allow-avx512] [--no-avx512]
+#                       [--native] [--dir /opt/llama.cpp] [--jobs N]
 #                       [--ref REF | --source CAMINHO]
 #                       [--dry-run] [--yes]
 #
 #   --family auto      Detecta a família pelo nome do CPU (padrão).
 #   --family <id>      Força uma família (ex.: intel-broadwell, amd-zen2).
 #   --allow-avx512     Liga AVX-512 nas famílias com política 'optin'.
+#   --no-avx512        Desliga AVX-512 mesmo nas famílias com política 'auto'
+#                      (o padrão das CPUs que o têm). Útil para medir AVX2 vs
+#                      AVX-512 — o -march cai no fallback sem AVX-512.
 #   --assume-family-isa  CROSS-BUILD: confia na ISA declarada pela família em
 #                      vez de olhar o /proc/cpuinfo DESTA máquina. É o modo
 #                      correto para compilar para OUTRA máquina (CI/release).
@@ -446,6 +449,7 @@ main() {
       --source)        [[ $# -ge 2 ]] || { log_error "--source exige valor"; exit 2; }; SRC_LOCAL="$2"; shift 2 ;;
       --family)        [[ $# -ge 2 ]] || { log_error "--family exige valor"; exit 2; }; FORCE_FAMILY="$2"; shift 2 ;;
       --allow-avx512)  export AI_ALLOW_AVX512=1; shift ;;
+      --no-avx512)     export AI_NO_AVX512=1; shift ;;
       --assume-family-isa) export AI_ASSUME_FAMILY_ISA=1; shift ;;
       --native)        USE_NATIVE=1; shift ;;
       --gpu)           [[ $# -ge 2 ]] || { log_error "--gpu exige o backend"; exit 2; }; GPU_BACKEND="$2"; shift 2 ;;

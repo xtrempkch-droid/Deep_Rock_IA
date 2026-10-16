@@ -30,16 +30,44 @@ intel-broadwell|Intel(R) Xeon(R) CPU E5-2660 v4 @ 2.00GHz
 intel-broadwell|Intel(R) Xeon(R) CPU E5-2699 v4 @ 2.20GHz
 intel-broadwell|Intel(R) Xeon(R) CPU E7-8880 v4 @ 2.20GHz
 
-## --- Intel Xeon Scalable v5/v6+ (AVX-512) → intel-skylake-avx512 -------------
-## v5 = Skylake-SP, v6 = Cascade Lake, v7 = Ice Lake, v8 = Sapphire Rapids.
-## Todas têm AVX-512 (o v8 tem AMX): ficam na mesma família, com opt-in.
+## --- Intel Xeon Scalable v5 (Skylake-SP) → intel-skylake-avx512 --------------
+## 1ª geração: Bronze 31xx, Silver 41xx, Gold 51xx/61xx, Platinum 81xx, W-21xx.
 intel-skylake-avx512|Intel(R) Xeon(R) Gold 6132 CPU @ 2.60GHz
 intel-skylake-avx512|Intel(R) Xeon(R) Platinum 8180 CPU @ 2.50GHz
 intel-skylake-avx512|Intel(R) Xeon(R) Silver 4110 CPU @ 2.10GHz
-intel-skylake-avx512|Intel(R) Xeon(R) Bronze 3204 CPU @ 1.90GHz
-intel-skylake-avx512|Intel(R) Xeon(R) Gold 5218 CPU @ 2.30GHz
-intel-skylake-avx512|Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz
-intel-skylake-avx512|Intel(R) Xeon(R) Gold 6438Y+ @ 2.00GHz
+intel-skylake-avx512|Intel(R) Xeon(R) Bronze 3104 CPU @ 1.70GHz
+intel-skylake-avx512|Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz
+
+## --- Intel Xeon Scalable v6 (Cascade Lake-SP) → intel-cascadelake-sp ---------
+intel-cascadelake-sp|Intel(R) Xeon(R) Bronze 3204 CPU @ 1.90GHz
+intel-cascadelake-sp|Intel(R) Xeon(R) Gold 5218 CPU @ 2.30GHz
+intel-cascadelake-sp|Intel(R) Xeon(R) Gold 6248R CPU @ 3.00GHz
+intel-cascadelake-sp|Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+intel-cascadelake-sp|Intel(R) Xeon(R) W-2295 CPU @ 3.00GHz
+
+## --- Intel Xeon Scalable v7 (Ice Lake-SP) → intel-icelake-sp -----------------
+intel-icelake-sp|Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz
+intel-icelake-sp|Intel(R) Xeon(R) Silver 4316 CPU @ 2.30GHz
+intel-icelake-sp|Intel(R) Xeon(R) Platinum 8380 CPU @ 2.30GHz
+intel-icelake-sp|Intel(R) Xeon(R) W-3375 CPU @ 2.50GHz
+
+## --- Intel Xeon Scalable v8 (Sapphire Rapids) → intel-sapphirerapids-sp ------
+## Inclui o Xeon Max (HBM) — mesmo silício.
+intel-sapphirerapids-sp|Intel(R) Xeon(R) Gold 6438Y+ @ 2.00GHz
+intel-sapphirerapids-sp|Intel(R) Xeon(R) Platinum 8490H CPU @ 1.90GHz
+intel-sapphirerapids-sp|Intel(R) Xeon(R) Max 9480 CPU @ 1.90GHz
+intel-sapphirerapids-sp|Intel(R) Xeon(R) W-3495X CPU @ 1.90GHz
+
+## --- Intel Xeon Scalable v9 (Emerald Rapids) → intel-emeraldrapids-sp --------
+intel-emeraldrapids-sp|Intel(R) Xeon(R) Gold 6558Y+ @ 2.40GHz
+intel-emeraldrapids-sp|Intel(R) Xeon(R) Platinum 8592V CPU @ 2.00GHz
+intel-emeraldrapids-sp|Intel(R) Xeon(R) W-3595X CPU @ 2.00GHz
+
+## --- Intel Xeon 6 P-cores (Granite Rapids) → intel-graniterapids-sp ----------
+## Só os P-cores têm AVX-512: o 6xxxE (Sierra Forest) cai em generic.
+intel-graniterapids-sp|Intel(R) Xeon(R) 6980P CPU @ 2.00GHz
+intel-graniterapids-sp|Intel(R) Xeon(R) 6780P CPU @ 2.00GHz
+generic|Intel(R) Xeon(R) 6766E CPU @ 1.90GHz
 
 ## --- AMD Zen / Zen+ → amd-zen1 ----------------------------------------------
 amd-zen1|AMD Ryzen 5 1600 Six-Core Processor
@@ -83,14 +111,22 @@ amd-zen4|AMD Ryzen 7 8845HS w/ Radeon 780M Graphics
 amd-zen4|AMD Ryzen Threadripper 7960X 24-Core Processor
 amd-zen4|AMD EPYC 9554 64-Core Processor
 amd-zen4|AMD EPYC 8324P 32-Core Processor
+amd-zen4|AMD EPYC 9754 128-Core Processor
+amd-zen4|AMD EPYC 9684X 96-Core Processor
+amd-zen4|AMD EPYC 4124P 16-Core Processor
 
-## --- Zen 5 pousa em amd-zen4 (aproximação DELIBERADA) ------------------------
-## O GCC já conhece znver5, mas o projeto usa znver4 por padrão até o
-## toolchain/validação acompanhar. Ver docs/FAMILIES.md § 2 (nota do Zen 4).
-## Estes casos existem para DOCUMENTAR o pouso, não para celebrá-lo.
-amd-zen4|AMD Ryzen 9 9950X 16-Core Processor
-amd-zen4|AMD Ryzen 7 9700X 8-Core Processor
-amd-zen4|AMD EPYC 9005 Series Processor
+## --- AMD Zen 5 → amd-zen5 ---------------------------------------------------
+## Ryzen 9000, Ryzen AI 300 (Strix Point), Threadripper 9000 e EPYC 9005 (Turin).
+## Zen 5 é o primeiro Zen com datapath AVX-512 de 512 bits NATIVO.
+amd-zen5|AMD Ryzen 9 9950X 16-Core Processor
+amd-zen5|AMD Ryzen 7 9700X 8-Core Processor
+amd-zen5|AMD Ryzen 5 9600X 6-Core Processor
+amd-zen5|AMD Ryzen 9 9900X3D 12-Core Processor
+amd-zen5|AMD Ryzen AI 9 HX 370 w/ Radeon 890M
+amd-zen5|AMD Ryzen Threadripper 9960X 24-Core Processor
+amd-zen5|AMD EPYC 9005 Series Processor
+amd-zen5|AMD EPYC 9755 128-Core Processor
+amd-zen5|AMD EPYC 9175F 16-Core Processor
 
 ## --- Sem família (fallback) → generic ---------------------------------------
 ## CPUs que NÃO pertencem a nenhuma família suportada. O `generic` não é erro:
@@ -100,5 +136,4 @@ generic|Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz
 generic|Intel(R) Core(TM) i5-9400F CPU @ 2.90GHz
 generic|Intel(R) Atom(TM) CPU N450 @ 1.66GHz
 generic|Intel(R) Xeon(R) CPU E3-1270 v6 @ 3.80GHz
-generic|AMD Ryzen AI 9 HX 370 w/ Radeon 890M
 generic|AMD FX(tm)-8350 Eight-Core Processor

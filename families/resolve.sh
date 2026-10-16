@@ -94,8 +94,10 @@ load_family() {
 pick_family() {
   local cpu_model="${1:-}"
   local -a order=(
-    amd-zen4 amd-zen3 amd-zen2 amd-zen1
-    intel-skylake-avx512 intel-broadwell intel-haswell
+    amd-zen5 amd-zen4 amd-zen3 amd-zen2 amd-zen1
+    intel-graniterapids-sp intel-emeraldrapids-sp intel-sapphirerapids-sp
+    intel-icelake-sp intel-cascadelake-sp intel-skylake-avx512
+    intel-broadwell intel-haswell
   )
   local id f pattern
   for id in "${order[@]}"; do
@@ -167,7 +169,10 @@ compute_isa() {
       AVX512_REASON="política 'never': a família ${FAMILY_ID} não tem AVX-512 (habilitar causaria SIGILL)"
       ;;
     optin)
-      if [[ "${AI_ALLOW_AVX512:-0}" == "1" && $has_avx512 -eq 1 ]]; then
+      if [[ "${AI_NO_AVX512:-0}" == "1" ]]; then
+        AVX512_ENABLED="no"
+        AVX512_REASON="desligado por --no-avx512"
+      elif [[ "${AI_ALLOW_AVX512:-0}" == "1" && $has_avx512 -eq 1 ]]; then
         AVX512_ENABLED="yes"
         AVX512_REASON="política 'optin' + --allow-avx512 e a CPU tem a flag"
       elif [[ $has_avx512 -eq 0 ]]; then
@@ -177,9 +182,12 @@ compute_isa() {
       fi
       ;;
     auto)
-      if [[ $has_avx512 -eq 1 ]]; then
+      if [[ "${AI_NO_AVX512:-0}" == "1" ]]; then
+        AVX512_ENABLED="no"
+        AVX512_REASON="política 'auto', mas desligado por --no-avx512"
+      elif [[ $has_avx512 -eq 1 ]]; then
         AVX512_ENABLED="yes"
-        AVX512_REASON="política 'auto' e a CPU reporta avx512f"
+        AVX512_REASON="política 'auto' (padrão da família: CPUs com AVX-512 o usam) e a CPU reporta avx512f"
       else
         AVX512_REASON="política 'auto', mas a CPU não reporta avx512f"
       fi
@@ -208,6 +216,20 @@ compute_isa() {
         FAMILY_MARCH_NOTE="GCC ${gcc_major} < ${FAMILY_MARCH_MIN_GCC}: sem -march específico"
       fi
     fi
+  fi
+
+  # 3-b. AVX-512 DESLIGADO (sem a flag na CPU ou --no-avx512) e o -march da
+  # família já habilita AVX-512 por conta própria (skylake-avx512,
+  # sapphirerapids, znver4/znver5...): troca para o fallback SEM AVX-512.
+  # Sem isto o GCC continuaria emitindo AVX-512 via -march mesmo com a
+  # política desligada. Só se o GCC ainda não trocou (senão respeitamos a
+  # decisão dele, que já é um fallback).
+  if [[ "$AVX512_ENABLED" != "yes" \
+        && "${FAMILY_MARCH_HAS_AVX512:-}" == "yes" \
+        && -n "${FAMILY_MARCH_FALLBACK:-}" \
+        && "${FAMILY_MARCH_EFFECTIVE:-}" == "${FAMILY_MARCH:-}" ]]; then
+    FAMILY_MARCH_EFFECTIVE="$FAMILY_MARCH_FALLBACK"
+    FAMILY_MARCH_NOTE="AVX-512 desligado: usando o fallback '${FAMILY_MARCH_FALLBACK}' (sem AVX-512)"
   fi
 
   # 4. Flags do CMake para o llama.cpp (derivadas da família).
@@ -258,6 +280,7 @@ _family_main() {
     case "$1" in
       --quiet)          quiet=1; shift ;;
       --allow-avx512)   export AI_ALLOW_AVX512=1; shift ;;
+      --no-avx512)      export AI_NO_AVX512=1; shift ;;
       --family)         [[ $# -ge 2 ]] || { echo "--family exige valor" >&2; exit 2; }; FORCE_FAMILY="$2"; shift 2 ;;
       -h|--help)
         sed -n '3,30p' "$_self" | sed 's/^# \{0,1\}//'
