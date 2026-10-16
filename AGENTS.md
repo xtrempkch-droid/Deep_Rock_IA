@@ -170,8 +170,14 @@ ai-cpu-os/
 │   ├── _base/family.conf   # Padrões herdados por todas as famílias
 │   ├── intel-haswell/      # Xeon E5 v3 (AVX2)
 │   ├── intel-broadwell/    # Xeon E5 v4 (AVX2) — herda de intel-haswell
-│   ├── intel-skylake-avx512/ # Scalable v5/v6 — AVX-512 por opt-in
-│   ├── amd-zen1/ … amd-zen4/ # Ryzen 1000/2000 … 7000/9000 (herança em cadeia)
+│   ├── intel-skylake-avx512/     # Xeon Scalable v5 — AVX-512 auto
+│   ├── intel-cascadelake-sp/     # Xeon Scalable v6 (cascadelake) — AVX-512 auto
+│   ├── intel-icelake-sp/         # Xeon Scalable v7 (icelake-server) — AVX-512 auto
+│   ├── intel-sapphirerapids-sp/  # Xeon Scalable v8 (sapphirerapids) — AVX-512+AMX auto
+│   ├── intel-emeraldrapids-sp/   # Xeon Scalable v9 (emeraldrapids) — AVX-512+AMX auto
+│   ├── intel-graniterapids-sp/   # Xeon 6 P-cores (graniterapids) — AVX-512+AMX auto
+│   ├── amd-zen1/ … amd-zen5/ # Ryzen 1000/2000 … 9000 + EPYC (herança em cadeia;
+│   │                          #  zen4/zen5 têm AVX-512 auto)
 │   └── generic/            # Fallback x86-64 (ISA em runtime, AVX-512 auto)
 ├── roles/                  # 🎯 O que a máquina FAZ (independente da CPU)
 │   ├── README.md           # Fronteira papel × família
@@ -288,9 +294,12 @@ Estas regras são **obrigatórias**:
 12. **NUNCA** escreva `-mavx512*` / `GGML_AVX512=ON` **fixo** em código,
     script ou imagem. Mas **AVX-512 não é proibido para sempre**: ele é
     decidido pela `FAMILY_AVX512_POLICY` (`never` | `optin` | `auto`) do
-    `family.conf`, sempre com verificação em runtime e opt-in explícito
-    (`--allow-avx512`). Máquinas com AVX-512/AMX (Skylake-SP, Zen 5, futuras)
-    são suportadas — via família, nunca por flag hardcoded. Em containers,
+    `family.conf`, sempre com verificação em runtime. **Decisão do dono
+    (2026-10-16):** nas famílias cujas CPUs **têm** AVX-512 (Skylake-SP+,
+    Zen 4/5, EPYC Genoa/Turin), a política é **`auto`** — se a CPU reportar a
+    flag, o AVX-512 é o **padrão** (mais desempenho), sem `--allow-avx512`.
+    `--no-avx512` desliga (e troca o `-march` pelo fallback sem AVX-512);
+    `optin` ficou reservado para exceções explícitas. Em containers,
     `GGML_NATIVE` deve permanecer `OFF` (dentro do Docker o CMake detectaria a
     CPU do runner de CI, não a do alvo).
 12-b. **Padrão de build = portátil, não nativo.** O default do `llama-build.sh`

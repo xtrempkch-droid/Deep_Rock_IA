@@ -18,8 +18,10 @@
 - **Commit de referência:** `1d14cbb` (último commit verde antes da refatoração)
 - **Sistema operacional alvo:** **Ubuntu Server 22.04+/24.04+** (referência do
   projeto); Debian 12+ continua suportado como base das mods.
-- **Suporte de hardware:** por **família de microarquitetura** (8 famílias, com
-  herança) — ver [`docs/FAMILIES.md`](FAMILIES.md). O modelo “um perfil por
+- **Suporte de hardware:** por **família de microarquitetura** (14 famílias, com
+  herança — incluindo Xeon Scalable v5–v9/Xeon 6, EPYC Naples→Turin e Zen 5,
+  com **AVX-512 como padrão** nas famílias que o têm, decisão do dono de
+  2026-10-16) — ver [`docs/FAMILIES.md`](FAMILIES.md). O modelo “um perfil por
   processador” foi descontinuado.
 
 ---
@@ -341,6 +343,7 @@ Ao terminar qualquer tarefa:
 
 | Data       | Mudança                                                    |
 |------------|------------------------------------------------------------|
+| 2026-10-16 | 🧬 **14 famílias + AVX-512 por padrão.** Adicionadas as famílias de servidor `intel-cascadelake-sp` (v6), `intel-icelake-sp` (v7), `intel-sapphirerapids-sp` (v8), `intel-emeraldrapids-sp` (v9), `intel-graniterapids-sp` (Xeon 6 P) e `amd-zen5` (Ryzen 9000/Ryzen AI 300/EPYC Turin). **Decisão do dono:** nas famílias cujas CPUs têm AVX-512, a política virou `auto` — o AVX-512 é o padrão quando a CPU reporta a flag (verificação em runtime mantida; hardcode segue proibido). Novo `--no-avx512` (desliga e troca o `-march` pelo fallback sem AVX-512, via `FAMILY_MARCH_HAS_AVX512`). Corpus: 85 CPUs reais. Ver `JOURNAL.md` sessão #26. |
 | 2026-10-13 | 🎉 **A ISO foi gerada E bootada pela primeira vez** (VM qemu/KVM, Ubuntu 24.04): instalou sozinha, reiniciou e o 1º boot aplicou o ai-cpu-os (`status=ok`, família `intel-haswell`), com llama.cpp compilado no alvo sem rede. **8 bugs reais** só visíveis ao executar (xorriso `-rm`/`-boot_image`/`-map`, GRUB sem `--id`, apt do curtin em chroot sem `/cdrom`, marcadores fora do console, aspas do `-find`, SIGPIPE). Novo § 3.3. Ver `JOURNAL.md` sessão #21. |
 | 2026-10-07 | Criação do arquivo junto com o repositório `0.1.0-alpha`.   |
 | 2026-10-07 | Commit inicial `85a083e` realizado; 26 arquivos versionados. |

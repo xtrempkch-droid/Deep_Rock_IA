@@ -89,6 +89,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | **O modelo `.gguf` vai na mídia** (`--iso-model auto|<caminho>|none`) + `late-command` copiando para `/opt/models` + `AI_MODEL_FILE` no `firstboot` + **`--model-file`** no papel `inference` (instala modelo local sem rede) | 2026-10-12 | 2026-10-12 |
 | **Repositório apt local na mídia** (`--iso-repo auto|DIR|none`): fecho de dependências, índice gerado com `dpkg-deb`, embutido em `/apt-repo` e usado como fonte EXTRA (Ubuntu: seção `sources` do curtin; Debian: `apt-setup/local0/*`); build recusa release diferente | 2026-10-12 | 2026-10-12 |
 | 🎉 **A ISO é GERADA e BOOTADA (Ubuntu)** — primeira vez: build `exit 0`, `verify-iso.sh` **PASS=41/FAIL=0**, `test-vm.sh` **exit 0** (instalou sozinha; 1º boot aplicou com `status=ok`, família `intel-haswell`, llama.cpp compilado do tarball da mídia). **8 bugs reais** corrigidos (`xorriso`, GRUB `--id`, repo no chroot do curtin, marcadores, SIGPIPE, aspas do `-find`) | 2026-10-13 | 2026-10-13 |
+| 🧬 **14 famílias de CPU + AVX-512 por padrão** — servidores Xeon Scalable v5–v9/Xeon 6 P (`intel-cascadelake-sp` … `intel-graniterapids-sp`), EPYC Turin e Ryzen 9000 (`amd-zen5`); política AVX-512 `auto` nas famílias que o têm (decisão do dono), com `--no-avx512` e fallback de `-march` sem AVX-512 | 2026-10-16 | 2026-10-16 |
 | **`webui/` — interface web local** (`server.py` + `index.html`) para gerar/conferir a ISO **sem decorar flags**: mostra hardware/espaço/ferramentas, monta o `make iso`, roda com log **ao vivo** (SSE), lista `iso/out` e **lista os pendrives** com o comando pronto (nunca pede senha). Só **stdlib**, só **`127.0.0.1`**, lista branca fechada; sem `xorriso` **recusa com o motivo** e aponta o GitHub Actions + `make ui`/`make ui-test` (34 asserções) | 2026-10-15 | 2026-10-15 |
 | **Regra 16** no `AGENTS.md` (invariantes da interface web) + **9 guardas novos** no CI, cada um provado por violação plantada (`make ci-guards-test`: 22 → **31** casos) + `webui/` **excluído da ISO** (`--exclude=./webui`) | 2026-10-15 | 2026-10-15 |
 
@@ -193,6 +194,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 
 | Data       | Mudança                                                        |
 |------------|----------------------------------------------------------------|
+| 2026-10-16 | 🧬 **14 famílias** (Xeon Scalable v5–v9/Xeon 6 P + `amd-zen5`) e **AVX-512 como padrão** nas famílias que o têm (política `auto`, decisão do dono; `--no-avx512` para comparar com AVX2). |
 | 2026-10-13 | 🎉 **A ISO é gerada e bootada** (Ubuntu, VM com KVM, sessão #21): moveu "Em Progresso" → "Concluído". O que fica em aberto na ISO: caminho **Debian**, **UEFI** e **hardware físico**; e o resíduo air-gapped do UI do llama.cpp. |
 | 2026-10-07 | Criação inicial do roadmap junto com o repositório `0.1.0-alpha`. |
 | 2026-10-07 | Adicionado `docs/TUTORIAL.md` + diretriz de tutorial por marco/versão. |

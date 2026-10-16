@@ -106,8 +106,11 @@ ai-cpu-os/
 │   ├── resolve.sh          # o "cérebro": pick_family/load_family/compute_isa
 │   ├── _base/family.conf   # padrões herdados por todos
 │   ├── intel-haswell/  intel-broadwell/  intel-skylake-avx512/
-│   ├── amd-zen1/ amd-zen2/ amd-zen3/ amd-zen4/
+│   ├── intel-cascadelake-sp/  intel-icelake-sp/  intel-sapphirerapids-sp/
+│   ├── intel-emeraldrapids-sp/  intel-graniterapids-sp/
+│   ├── amd-zen1/ amd-zen2/ amd-zen3/ amd-zen4/ amd-zen5/
 │   └── generic/            # fallback x86-64
+│                           # (AVX-512: política 'auto' nas famílias que o têm)
 │
 ├── roles/                  # 🎯 PARA QUE SERVE
 │   ├── README.md
@@ -629,7 +632,7 @@ Leia isto **antes** de afirmar que algo funciona.
 |---|---|---|---|
 | Scripts (sintaxe/lint) | ✅ | ✅ `make validate` | n/a |
 | Casamento CPU → família | ✅ | ✅ corpus (~60 CPUs) | ⚠️ só nos 2 alvos |
-| Build do llama.cpp | ✅ | ✅ CI compila **e executa** (7 famílias em ~4 que rodam no CI) | ❌ |
+| Build do llama.cpp | ✅ | ✅ CI compila **e executa** (14 famílias) | ❌ |
 | Build **offline** (`--source`) | ✅ | ⚠️ `--dry-run` (dir + tarball) e extração real com ferramentas de build **simuladas**; **compilação real de um fonte do llama.cpp não executada** | ❌ |
 | Modelo **embutido na ISO** (`--iso-model`) | ✅ | ✅ **validado num boot real (sessão #21)**: o `late-command` copiou para `/opt/models` e o 1º boot o usou via `AI_MODEL_FILE`, sem rede | ❌ (só na VM) |
 | Repositório apt **na mídia** (`--iso-repo`) | ✅ | ✅ **validado (sessão #21, era bug)**: a seção `sources` do Subiquity **não funciona** (o curtin roda `apt-get update` num chroot sem `/cdrom`); agora o late-command carrega o repo para o **alvo** (`/opt/apt-repo`) e o 1º boot o usa — sem rede. ⚠️ O caminho **Debian** (`apt-setup/local0/*`) segue **suposição** | ❌ (só na VM) |

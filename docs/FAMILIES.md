@@ -32,16 +32,27 @@ exatamente o mesmo build do llama.cpp.
 |---|---|---|---|---|---|
 | `intel-haswell` | Haswell-EP (Xeon E5 **v3**) | `haswell` | qualquer | nunca | — |
 | `intel-broadwell` | Broadwell-EP (Xeon E5 **v4**) | `broadwell` | qualquer | nunca | `intel-haswell` |
-| `intel-skylake-avx512` | Skylake-SP / Cascade Lake (Scalable **v5/v6**) | `skylake-avx512` | 6 | **opt-in** | `intel-broadwell` |
+| `intel-skylake-avx512` | Skylake-SP (Scalable **v5**) | `skylake-avx512` | 6 | **auto** | `intel-broadwell` |
+| `intel-cascadelake-sp` | Cascade Lake-SP (Scalable **v6**) | `cascadelake` | 8 | **auto** | `intel-skylake-avx512` |
+| `intel-icelake-sp` | Ice Lake-SP (Scalable **v7**) | `icelake-server` | 8 | **auto** | `intel-cascadelake-sp` |
+| `intel-sapphirerapids-sp` | Sapphire Rapids (Scalable **v8**, Xeon Max) | `sapphirerapids` | 12 | **auto** + AMX | `intel-icelake-sp` |
+| `intel-emeraldrapids-sp` | Emerald Rapids (Scalable **v9**) | `emeraldrapids` | 13 | **auto** + AMX | `intel-sapphirerapids-sp` |
+| `intel-graniterapids-sp` | Granite Rapids (Xeon 6, **P-cores**) | `graniterapids` | 14 | **auto** + AMX | `intel-emeraldrapids-sp` |
 | `amd-zen1` | Zen / Zen+ (Ryzen **1000/2000**) | `znver1` | 6 | nunca | — |
 | `amd-zen2` | Zen 2 (Ryzen **3000/4000**) | `znver2` | 9 | nunca | `amd-zen1` |
 | `amd-zen3` | Zen 3 (Ryzen **5000/6000**) | `znver3` | 11 | nunca | `amd-zen2` |
-| `amd-zen4` | Zen 4 (Ryzen **7000/8000/9000**, EPYC Genoa/Siena) | `znver4` | 13 | nunca | `amd-zen3` |
+| `amd-zen4` | Zen 4 (Ryzen **7000/8000**, EPYC Genoa/Siena) | `znver4` | 13 | **auto** | `amd-zen3` |
+| `amd-zen5` | Zen 5 (Ryzen **9000**, Ryzen AI 300, EPYC Turin) | `znver5` | 14 | **auto** | `amd-zen4` |
 | `generic` | qualquer x86-64 | *(nenhum)* | — | **auto** | — |
 
 > A série **8000** de desktop/APU (8500G, 8600G, 8700G, 8845HS) é **Zen 4** — um
 > caso que já escapou para o `generic` antes do corpus existir (§ 9.2).
-> E **EPYC 9005 (Turin)** é Zen 5: pousa aqui por decisão deliberada (§ 9.4).
+> **EPYC** por microarquitetura: Naples→`amd-zen1`, Rome→`amd-zen2`,
+> Milan→`amd-zen3`, Genoa/Bergamo/Siena→`amd-zen4`, Turin→`amd-zen5`.
+> **Xeon Scalable** por geração: v5→`intel-skylake-avx512`,
+> v6→`intel-cascadelake-sp`, v7→`intel-icelake-sp`, v8→`intel-sapphirerapids-sp`,
+> v9→`intel-emeraldrapids-sp`, Xeon 6 P-cores→`intel-graniterapids-sp`.
+> Os E-cores do Xeon 6 (Sierra Forest, `6xxxE`) não têm AVX-512: caem em `generic`.
 
 > Um `-march` novo demais faz o compilador **rejeitar** a flag. Por isso cada
 > família declara `FAMILY_MARCH_MIN_GCC` e um `FAMILY_MARCH_FALLBACK`: o
@@ -68,7 +79,9 @@ flowchart TD
 ```
 
 A ordem de teste é do mais específico para o mais genérico:
-`amd-zen4 → amd-zen3 → amd-zen2 → amd-zen1 → intel-skylake-avx512 →
+`amd-zen5 → amd-zen4 → amd-zen3 → amd-zen2 → amd-zen1 →
+intel-graniterapids-sp → intel-emeraldrapids-sp → intel-sapphirerapids-sp →
+intel-icelake-sp → intel-cascadelake-sp → intel-skylake-avx512 →
 intel-broadwell → intel-haswell → generic`.
 
 Ver a decisão sem aplicar nada:
@@ -91,7 +104,11 @@ bash build.sh --list-families            # tabela das famílias
 families/_base/family.conf          (padrões de todos)
    └─ intel-haswell                  -march=haswell,  AVX2, policy=never
         └─ intel-broadwell           -march=broadwell (o resto herda)
-             └─ intel-skylake-avx512 -march=skylake-avx512, policy=optin
+             └─ intel-skylake-avx512 -march=skylake-avx512, policy=auto
+                  └─ intel-cascadelake-sp   -march=cascadelake
+                       └─ intel-icelake-sp  -march=icelake-server
+                            └─ intel-sapphirerapids-sp  -march=sapphirerapids (+AMX)
+                                 └─ intel-emeraldrapids-sp → intel-graniterapids-sp
 ```
 
 Consequência prática: **corrigir o tuning em `intel-haswell` corrige também
@@ -107,24 +124,37 @@ O `load_family()` tem proteção contra ciclo (guarda de 16 níveis) para que um
 ## 5. Política de AVX-512 (`FAMILY_AVX512_POLICY`)
 
 O projeto **não proíbe** AVX-512 para sempre — ele impede que ele seja ligado
-**por acidente**. Três políticas:
+**sem verificação**. Três políticas:
 
 | Política | Comportamento | Usada por |
 |---|---|---|
-| `never` | Nunca liga, mesmo se a CPU tiver | Haswell, Broadwell, Zen 1–4 |
-| `optin` | Só liga com `--allow-avx512` **e** flag presente (ou família assumida) | Skylake-SP |
-| `auto` | Liga se a CPU reportar `avx512f` | `generic` |
+| `never` | Nunca liga, mesmo se a CPU tiver | Haswell, Broadwell, Zen 1–3 |
+| `optin` | Só liga com `--allow-avx512` **e** flag presente (ou família assumida) | *(hoje nenhuma família usa: era o Skylake-SP antes da decisão de 2026-10-16)* |
+| `auto` | Liga se a CPU reportar `avx512f` (verificação em runtime) | Skylake-SP+, Zen 4/5 e `generic` |
+
+> 🎯 **Decisão do dono (2026-10-16):** nas famílias cujas CPUs **têm** AVX-512,
+> a política é `auto` — se a CPU reportar a flag, o AVX-512 é o **padrão**
+> (mais desempenho), sem precisar de `--allow-avx512`. A verificação continua
+> em runtime (Regra 8) e o hardcode continua proibido (Regra 12).
+>
+> **Para medir AVX2 antes** (ou se o AVX-512 derrubar a frequência — notório no
+> Skylake-SP): `--no-avx512`. Com ele, o `resolve.sh` também troca o `-march`
+> pelo fallback **sem AVX-512** (ex.: `skylake-avx512` → `broadwell`,
+> `znver4` → `znver3`) — senão o GCC continuaria emitindo AVX-512 via `-march`.
 
 Como o AVX-512 é um *exemplo* dessa lógica, o mesmo mecanismo serve para AMX
-(`-DGGML_AMX=ON` só entra quando a flag existe).
+(`-DGGML_AMX=ON` só entra quando a flag existe — Sapphire Rapids em diante).
 
 **Regra que continua valendo (AGENTS.md, regra 12):** nunca escreva
-`-mavx512*` fixo em código, script ou imagem. O caminho é sempre
-família → política → verificação em runtime → opt-in explícito.
+`-mavx512*`/`GGML_AVX512=ON` **fixo** em código, script ou imagem. O caminho é
+sempre família → política → verificação em runtime.
 
 ```bash
-# Ligar AVX-512 numa máquina Skylake-SP (se você confirma que é o alvo):
-sudo bash llama-build.sh --family intel-skylake-avx512 --allow-avx512
+# Skylake-SP: AVX-512 liga SOZINHO (política auto). Para comparar com AVX2:
+sudo bash llama-build.sh --family intel-skylake-avx512 --no-avx512
+
+# Família com política 'optin' (se um dia voltar a existir): opt-in explícito
+sudo bash llama-build.sh --family <id> --allow-avx512
 ```
 
 ---
@@ -192,9 +222,16 @@ FAMILY_NOTES="..."
    nomes reais; o casamento é por ERE sobre o `model name`).
 2. `FAMILY_MARCH_MIN_GCC` é o GCC em que a flag passou a existir **e** existe um
    `FAMILY_MARCH_FALLBACK` utilizável.
-3. `FAMILY_AVX512_POLICY` é `never`/`optin` — `auto` só para `generic`.
-4. Adicione `families/<id>/family.conf` à lista `required` do workflow
-   `validate.yml` e à tabela deste documento.
+3. `FAMILY_AVX512_POLICY` é `never` (família sem AVX-512) ou `auto` (família
+   cujas CPUs o têm — decisão do dono de 2026-10-16). `optin` ficou reservado
+   para exceções explícitas.
+4. Se o `-march` habilita AVX-512 por conta própria, declare
+   `FAMILY_MARCH_HAS_AVX512="yes"` (é o que permite o `--no-avx512` trocar pelo
+   fallback sem AVX-512).
+5. Adicione `families/<id>/family.conf` à lista `required` do workflow
+   `validate.yml`, à matrix do `build-llama.yml`, à ordem de `pick_family` no
+   `resolve.sh`, a este documento e ao corpus `tests/families-matrix.txt`
+   (com o caso real que motivou).
 
 ---
 
@@ -225,7 +262,7 @@ FAMILY_NOTES="..."
 
 ### 9.1 O corpus (`tests/test-families.sh`)
 
-O projeto mantém um **corpus de ~60 modelos de CPU reais** em
+O projeto mantém um **corpus de ~85 modelos de CPU reais** em
 `tests/families-matrix.txt`, no formato `<família-esperada>|<model name>`. O
 teste roda a **mesma função que o build usa** (`pick_family`) e compara.
 
@@ -269,28 +306,36 @@ Legenda: **corpus** = casamento exercitado por `make families-test`;
 |---|---|---|---|---|
 | `intel-haswell` (E5 v3) | ✅ | ✅ | ❌ | alvo histórico do projeto |
 | `intel-broadwell` (E5 v4) | ✅ | ✅ | ❌ | **alvo atual** (E5-2680 v4) |
-| `intel-skylake-avx512` (v5+) | ✅ | ✅ | ❌ | AVX-512 por opt-in; cobre v5–v8 e futuros |
-| `amd-zen1` (1000/2000) | ✅ | ✅ | ❌ | inclui APUs |
+| `intel-skylake-avx512` (Scalable v5) | ✅ | ✅ | ❌ | AVX-512 **auto** (padrão quando a CPU tem) |
+| `intel-cascadelake-sp` (v6) | ✅ | ✅ | ❌ | novo em 2026-10-16; AVX-512/VNNI auto |
+| `intel-icelake-sp` (v7) | ✅ | ✅ | ❌ | novo em 2026-10-16; AVX-512 auto |
+| `intel-sapphirerapids-sp` (v8) | ✅ | ✅ | ❌ | novo em 2026-10-16; AVX-512+AMX auto |
+| `intel-emeraldrapids-sp` (v9) | ✅ | ✅ | ❌ | novo em 2026-10-16; AVX-512+AMX auto |
+| `intel-graniterapids-sp` (Xeon 6 P) | ✅ | ✅ | ❌ | novo em 2026-10-16; GCC>=14 senão fallback sapphirerapids |
+| `amd-zen1` (1000/2000) | ✅ | ✅ | ❌ | inclui APUs e EPYC Naples |
 | `amd-zen2` (3000/4000) | ✅ | ✅ | ❌ | **alvo atual** (Ryzen 5 3500X) |
 | `amd-zen3` (5000/6000) | ✅ | ✅ | ❌ | exercitado no CI **sem** hardware |
-| `amd-zen4` (7000/8000/9000) | ✅ | ✅ | ❌ | ⚠️ exige GCC ≥ 13 para `znver4` |
+| `amd-zen4` (7000/8000, EPYC Genoa) | ✅ | ✅ | ❌ | ⚠️ exige GCC ≥ 13; AVX-512 **auto** (Zen 4 tem a flag) |
+| `amd-zen5` (9000, EPYC Turin) | ✅ | ✅ | ❌ | novo em 2026-10-16; znver5 exige GCC ≥ 14 (senão fallback znver4); AVX-512 de 512 bits nativo |
 | `generic` | ✅ | ❌ | ❌ | fallback; sem `-march` |
 
-**O que "pronto" quer dizer aqui, sem engano:** as famílias Zen 3 e Zen 4 estão
+**O que "pronto" quer dizer aqui, sem engano:** as famílias estão
 **prontas para uso** no sentido de que (a) o casamento CPU → família é
 verificado por teste, (b) o CI **compila** um binário para elas, e (c) o
 `-march` tem fallback automático para GCC antigo. O que **não** existe é
-medição em hardware Zen 3/4 — então trate-as como *suportadas e não medidas*,
+medição em hardware — então trate-as como *suportadas e não medidas*,
 não como *recomendadas*.
 
-> Para validar Zen 3/4 de verdade: rode `bash families/resolve.sh` e
+> Para validar de verdade: rode `bash families/resolve.sh` e
 > `sudo ./build.sh --dry-run` na máquina e preencha o **Bloco N** de
 > `docs/VALIDATION.md`. É o que falta para tirar o ❌ da coluna "hardware".
 
 ### 9.4 Nota sobre Zen 5 e o `-march`
 
-Zen 5 (Ryzen 9000 desktop, EPYC 9005/Turin) **pousa em `amd-zen4`** hoje, por
-decisão deliberada: o GCC 14 já conhece `znver5`, mas o projeto prefere um
-`-march` mais antigo e previsível a um que pode não existir no compilador do
-usuário. Quando a validação acompanhar, o caminho é criar `families/amd-zen5/`
-com `FAMILY_INHERITS="amd-zen4"` — a herança faz o resto (ver § 7).
+Zen 5 (Ryzen 9000 desktop, Ryzen AI 300, EPYC 9005/Turin) tem família própria
+desde 2026-10-16: `families/amd-zen5/` com `FAMILY_INHERITS="amd-zen4"`.
+
+O único cuidado é o toolchain: `-march=znver5` exige **GCC >= 14**. No Ubuntu
+24.04 (GCC 13) o `resolve.sh` troca sozinho para `znver4` e avisa — instale
+`gcc-14` (`apt install gcc-14`) para o march completo. A mesma lógica vale para
+`intel-graniterapids-sp` (GCC 14; fallback `sapphirerapids`).
