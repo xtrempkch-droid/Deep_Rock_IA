@@ -45,7 +45,11 @@ GATEWAY=""
 DNS="1.1.1.1,8.8.8.8"
 TARGET_ROOT="/"
 DRY_RUN=0
+eth_ifaces=()
+n=""
+matched=0
 
+readonly SYSFS_NET="${NET_SYSFS:-/sys/class/net}"
 readonly NETPLAN_NAME="99-ai-cpu-os.yaml"
 readonly CLOUD_INIT_NAME="99-ai-cpu-os-disable-network.cfg"
 
@@ -198,6 +202,37 @@ if [[ "$MODE" == "none" ]]; then
   log_info "Se a intenção é deixar o instalador decidir, use --mode auto."
 else
   netplan_body | write_if_changed "$NETPLAN_FILE"
+
+  # Um netplan VÁLIDO que não casa com placa nenhuma é um sucesso do script e
+  # um fracasso do objetivo: a máquina continua sem IP e o sintoma é idêntico
+  # ao de antes. Acontece com Wi-Fi (`wlp*`/`wlx*`), USB-Ethernet (`enx…` só
+  # casa `en*`? casa, mas) e nomes fora do padrão previsível. Aqui a gente
+  # AVISA com o nome real da placa em vez de deixar a pessoa descobrir sozinha.
+  if [[ -z "$IFACE" && "$MODE" != "static" ]]; then
+    eth_ifaces=()
+    if [[ -d "$SYSFS_NET" ]]; then
+      for d in "$SYSFS_NET"/*; do
+        n="${d##*/}"
+        [[ "$n" == "lo" ]] && continue
+        # Só interfaces físicas com suporte a Ethernet/Wi-Fi (exclui túneis,
+        # bridges, docker0 e veth).
+        [[ -e "$d/device" || -e "$d/phy80211" ]] || continue
+        eth_ifaces+=("$n")
+      done
+    fi
+    if [[ ${#eth_ifaces[@]} -gt 0 ]]; then
+      matched=0
+      for n in "${eth_ifaces[@]}"; do
+        [[ "$n" == en* || "$n" == eth* ]] && matched=1
+      done
+      if [[ $matched -eq 0 ]]; then
+        log_warn "Nenhuma interface desta máquina casa 'en*'/'eth*' — o netplan gravado não vai pegar NADA."
+        log_warn "Interfaces encontradas: ${eth_ifaces[*]}"
+        log_warn "Rode de novo com a placa explícita, ex.:"
+        log_warn "  sudo bash $0 --interface ${eth_ifaces[0]}"
+      fi
+    fi
+  fi
 fi
 
 # ---------------------------------------------------------------------------

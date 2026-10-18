@@ -110,7 +110,7 @@ case "$out" in
 esac
 
 # ---------------------------------------------------------------------------
-# 4) ~--interface~: bloco nominal (sem glob)
+# 4) --interface: bloco nominal (sem glob)
 # ---------------------------------------------------------------------------
 r="$(mk_root "$WORK/b")"
 run_apply --root "$r" --interface enp5s0 >/dev/null
@@ -230,6 +230,41 @@ if grep -q '^MOD_SETS="network"' "${REPO_ROOT}/mods/network/mod.conf"; then
 else
   bad "a mod não tem conjunto próprio (poderia mexer na rede em apply --set system)"
 fi
+
+# ---------------------------------------------------------------------------
+# 10-b) O aviso que evita "rodei e continuou sem rede"
+# ---------------------------------------------------------------------------
+# Um netplan VÁLIDO que não casa com placa nenhuma é um sucesso do script e um
+# fracasso do objetivo. Simulamos uma máquina cuja placa é `wlp3s0` (Wi-Fi) via
+# NET_SYSFS e exigimos o aviso com o nome real da placa.
+r="$(mk_root "$WORK/g")"
+mkdir -p "$WORK/fakenet/wlp3s0/device"
+out="$(NET_SYSFS="$WORK/fakenet" run_apply --root "$r")"
+case "$out" in
+  *"não vai pegar NADA"*) ok "avisa quando nenhuma placa casa en*/eth*" ;;
+  *) bad "não avisou que o netplan não casaria nenhuma placa" ;;
+esac
+case "$out" in
+  *"--interface wlp3s0"*) ok "o aviso sugere a placa REAL (--interface wlp3s0)" ;;
+  *) bad "o aviso não sugere a placa encontrada" ;;
+esac
+
+# Com --interface explícito, NÃO pode avisar (o usuário já resolveu).
+r="$(mk_root "$WORK/h")"
+out="$(NET_SYSFS="$WORK/fakenet" run_apply --root "$r" --interface wlp3s0)"
+case "$out" in
+  *"não vai pegar NADA"*) bad "avisou mesmo com --interface explícito" ;;
+  *) ok "com --interface explícito não há aviso (nada a corrigir)" ;;
+esac
+
+# Placa que casa `en*` não gera aviso.
+r="$(mk_root "$WORK/i")"
+mkdir -p "$WORK/fakenet2/enp5s0/device"
+out="$(NET_SYSFS="$WORK/fakenet2" run_apply --root "$r")"
+case "$out" in
+  *"não vai pegar NADA"*) bad "avisou 'não pega nada' com enp5s0 (falso positivo)" ;;
+  *) ok "enp5s0 casa en*: sem aviso" ;;
+esac
 
 # ---------------------------------------------------------------------------
 # 11) OPCIONAL: o netplan REAL aceita o YAML que geramos?

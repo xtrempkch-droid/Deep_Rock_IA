@@ -404,8 +404,8 @@ A mod grava `99-ai-cpu-os.yaml` (0600), move o netplan do instalador/cloud-init
 para `.bak`, desliga a rede do cloud-init e **valida com `netplan generate`
 antes de aplicar** (config inválida não derruba a rede que está funcionando).
 Conjunto próprio (`network`): **nunca** entra em `apply --set system`.
-`make network-test` (**37 asserções**, árvore falsa via `--root`, sem root/rede)
-+ `make network-fix` (atalho nesta máquina). Guardas: `ci-guards` 54 → **62**.
+`make network-test` (**41 asserções**, árvore falsa via `--root`, sem root/rede)
++ `make network-fix` (atalho nesta máquina). Guardas: `ci-guards` 54 → **63**.
 
 **Passo 1-f — ✅ EXECUTADO E PROVADO EM VM (2026-10-17, sessão #33).** A ISO com
 `--network auto` foi **gerada e instalada numa VM qemu/KVM**, e o que este

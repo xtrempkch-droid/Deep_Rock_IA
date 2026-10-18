@@ -472,6 +472,9 @@ jobs:
           grep -q 'ai-cpu-os.bak' mods/network/apply.sh
           grep -q '99-ai-cpu-os-disable-network.cfg' mods/network/apply.sh
           grep -q -- '--root' mods/network/apply.sh
+          # Um netplan valido que nao casa placa nenhuma mantem o sintoma
+          # ('sem rede'); o script tem de AVISAR e sugerir --interface.
+          grep -q 'não vai pegar NADA' mods/network/apply.sh
           grep -q -- '--dry-run' mods/network/apply.sh
           grep -q 'restaurado' mods/network/revert.sh
           # Ancorado na DEFINIÇÃO do alvo: 'network-fix' também aparece no

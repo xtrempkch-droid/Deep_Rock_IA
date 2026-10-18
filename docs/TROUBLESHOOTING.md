@@ -454,6 +454,10 @@ sudo bash /opt/ai-cpu-os/mods/network/apply.sh --mode static \
   aplica (a rede atual continua de pé). Para desfazer:
   `sudo bash /opt/ai-cpu-os/mods/network/revert.sh` (restaura os backups).
   Ver `docs/MODS.md` § 3 e `make network-test`.
+  ⚠️ **Se a placa não se chama `en*`/`eth*`** (Wi-Fi `wlp*`/`wlx*`, nome fora do
+  padrão), o netplan acima não casa nada e o sintoma continua igual — a mod
+  **avisa** e sugere a placa real. Passe `--interface <nome>`; para conferir os
+  nomes: `ip -br link`. Depois: `ip -br addr`.
 - **Não tem o projeto na máquina?** Copie `mods/network/` + `mods/apply.sh`
   (ou clone o repositório) e rode o mesmo comando. Alternativa manual, sem
   nada disso: crie `/etc/netplan/99-rede.yaml` com `dhcp4: true` e rode

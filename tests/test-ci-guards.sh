@@ -258,6 +258,8 @@ planta "a mod network perder o --root (impede testar sem root)" mods/network/app
   sed_ 's|--root|--raiz|g' mods/network/apply.sh
 planta "o revert deixar de restaurar o netplan original" mods/network/revert.sh \
   sed_ 's|restaurado|removido|' mods/network/revert.sh
+planta "a mod network deixar de avisar que o glob não casa placa" mods/network/apply.sh \
+  sed_ 's|não vai pegar NADA|verifique a rede|' mods/network/apply.sh
 planta "a mod network entrar no conjunto system (mexeria na rede no build)" mods/network/mod.conf \
   sed_ 's|^MOD_SETS="network"|MOD_SETS="system"|' mods/network/mod.conf
 planta "tirar network-test do validate" Makefile \

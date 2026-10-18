@@ -2373,7 +2373,13 @@ garante os arquivos íntegros acima.
   - Conjunto próprio (`MOD_SETS="network"`): **nunca** entra em
     `apply --set system`, que roda no build — tuning não deve mexer na
     conectividade.
-- **Testes:** `tests/test-network-mod.sh` (**37 asserções**, árvore falsa,
+- **Aviso de placa que não casa (achado ao revisar):** um netplan **válido** que
+  não casa placa nenhuma é um sucesso do script e um **fracasso do objetivo** —
+  a máquina continua sem IP com sintoma idêntico. Acontece com Wi-Fi
+  (`wlp*`/`wlx*`) e nomes fora do padrão. A mod agora **avisa** e sugere
+  `--interface <placa-real>`; a detecção usa `NET_SYSFS` (padrão
+  `/sys/class/net`) para poder ser simulada no teste — 3 asserções novas.
+- **Testes:** `tests/test-network-mod.sh` (**41 asserções**, árvore falsa,
   sem root/rede/netplan/docker) cobre os 3 modos, o `.bak`, o cloud-init, a
   idempotência, o revert-com-restauração, 8 entradas inválidas (`rc 2` e nada
   escrito) e o `--dry-run`. `make network-test` no `validate`;
