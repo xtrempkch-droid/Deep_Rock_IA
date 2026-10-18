@@ -101,6 +101,8 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 
 | 🖥️ **PRIMEIRA validação em HARDWARE FÍSICO** — AMD A8-9600 (Excavator), Debian 13: ISO instalada sozinha, 1º boot `status=ok`, llama.cpp compilado do tarball **sem rede**, tuning persistente após reboot, **SSH funcionando (inclusive depois de reiniciar)** e a **primeira medição de `llama-bench`** do projeto (pp64 17,05 · tg32 10,40 t/s). `verify-iso` PASS=56, `smoke-test` 12/12 | 2026-10-18 | 2026-10-18 |
 
+| ⚡ **A ISO instala SEM internet** (air-gapped de verdade): 3 telas do d-i eliminadas (`use_mirror false`, `pkgsel` esvaziado sem repo) + `Codename` real no `Release` do repositório local (com `./` o `late-command` recusava o repo da mídia). **PROVADO numa VM em bridge isolada**: instalação + 1º boot `status=ok` + `Rede: não usada (fonte local)` | 2026-10-18 | 2026-10-18 |
+
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em
 > hardware físico é o principal item de "Em Progresso". A **exceção** é a linha
@@ -206,6 +208,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | Data       | Mudança                                                        |
 |------------|----------------------------------------------------------------|
 | 2026-10-16 | 🧬 **14 famílias** (Xeon Scalable v5–v9/Xeon 6 P + `amd-zen5`) e **AVX-512 como padrão** nas famílias que o têm (política `auto`, decisão do dono; `--no-avx512` para comparar com AVX2). |
+| 2026-10-18 | ⚡ **A ISO passou a instalar sem internet** (sessão #38): as 3 telas do d-i que paravam a instalação foram eliminadas e o `Release` do repositório local ganhou o codename real (com `./` o repo da mídia era descartado). Provado em VM isolada. |
 | 2026-10-18 | 🖥️ **Primeira validação em hardware físico** (sessão #37): A8-9600 + Debian 13, instalação automática, 1º boot sem rede (tarball local), tuning persistente, **SSH sobrevivendo ao reboot** e o **primeiro `llama-bench`** do projeto. As máquinas de referência seguem pendentes. |
 | 2026-10-18 | 🐧 **A ISO Debian é executada pela primeira vez** (sessão #35): moveu "ISO em base Debian" de Em Progresso para Concluído, com **10 travas mudas** corrigidas e `test-vm.sh` **OK** em VM. O que continua aberto na ISO: **UEFI**, **air-gapped no Debian** e **hardware físico**. |
 | 2026-10-13 | 🎉 **A ISO é gerada e bootada** (Ubuntu, VM com KVM, sessão #21): moveu "Em Progresso" → "Concluído". O que fica em aberto na ISO: caminho **Debian**, **UEFI** e **hardware físico**; e o resíduo air-gapped do UI do llama.cpp. |
