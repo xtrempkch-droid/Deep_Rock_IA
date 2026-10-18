@@ -241,6 +241,26 @@ o `late-command.sh` verifica/instala o `sshd` no alvo (e avisa em
 `ensure_ssh` em todo 1º boot. Guardas: `verify-iso.sh` (nos dois instaladores)
 e `ci-guards` 76 → **78**.
 
+**O outro lado do mesmo problema — o `apt`:** a ISO antiga gravava no alvo
+`/etc/apt/sources.list.d/ai-cpu-os-local.list` apontando para
+`file:///opt/apt-repo` **sem verificar se o repositório existia**. Quando a
+cópia falhava, **todo** `apt-get update` passava a falhar ("não possui um
+arquivo Release") e, como o apt aborta no erro, **nada** instalava — nem o
+`openssh-server` (o dono descreveu como "o sistema não acha o repositório").
+Duas correções:
+- **Na geração da ISO:** o `late-command.sh` só declara o repositório local
+  depois de (1) checar `Release` + `Packages`, (2) conferir que é da **mesma
+  release** do alvo e (3) **provar com `apt-get update` restrito àquela
+  fonte**. Se qualquer passo falhar, a fonte **não** é gravada (melhor sem
+  repositório local do que com o apt quebrado).
+- **Na máquina já instalada:** nova mod **`apt-sources`**
+  (`make apt-fix`, teste `make apt-test`, 17 asserções em árvore falsa).
+
+> ✅ **PROVADO EM VM NAS DUAS DISTROS:** **Debian 13.7** (`verify-iso` **PASS=52**)
+> e **Ubuntu 24.04.5** (`PASS=43`) — nos dois, instalação automática, 1º boot
+> aplicando o ai-cpu-os e **porta 22 aberta com login por SSH** feito
+> (`systemctl is-enabled ssh` = **enabled**, `.firstboot-status: status=ok`).
+>
 > ✅ **PROVADO EM VM (Debian 13.7, 2026-10-18):** ISO com a garantia de SSH →
 > instalação automática → 1º boot → **porta 22 aberta**, login por SSH feito e
 > `systemctl is-enabled ssh` = **enabled** (`test-vm.sh` OK nos dois

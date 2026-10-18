@@ -324,6 +324,14 @@ planta "o late-command deixar de garantir o SSH do alvo" iso/preseed/late-comman
 planta "o build.sh deixar de garantir o SSH no 1º boot" build.sh \
   sed_ 's|^[[:space:]]*ensure_ssh$|: ensure_ssh|' build.sh
 
+# --- Mod de reparo do apt: é o conserto de quem JÁ instalou ----------------
+planta "o mod apt-sources apagar fontes e não testar o resultado" mods/apt-sources/apply.sh \
+  sed_ "s|apt-get update|apt-get dist-upgrade|g" mods/apt-sources/apply.sh
+planta "o mod apt-sources deixar de limpar o 'cdrom:' do instalador" mods/apt-sources/apply.sh \
+  sed_ 's|cdrom:|midia:|g' mods/apt-sources/apply.sh
+planta "o mod apt-sources esquecer o backup antes de alterar" mods/apt-sources/apply.sh \
+  sed_ 's|ai-cpu-os.bak|bak|g' mods/apt-sources/apply.sh
+
 echo
 if [[ $FAIL -eq 0 ]]; then
   echo "ci-guards: PASS=${PASS} FAIL=0"

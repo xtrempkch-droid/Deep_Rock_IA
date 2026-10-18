@@ -170,6 +170,16 @@ jobs:
           set -euo pipefail
           make iso-disk-test
 
+      # As mods de REPARO existem para consertar uma maquina que ja esta no
+      # chao (rede sem IP / apt sem repositorio). Um erro nelas tem o pior modo
+      # de falha possivel, entao cada uma e provada numa ARVORE FALSA, sem root
+      # e sem tocar no sistema que roda o CI.
+      - name: "Mods de reparo (network + apt-sources; árvore falsa)"
+        run: |
+          set -euo pipefail
+          make network-test
+          make apt-test
+
       # Prova que os guardas do próprio job REALMENTE derrubam o job, plantando
       # cada violacao numa COPIA temporaria. Existe porque SEIS guardas estavam
       # na forma `! grep`, que o `set -e` ignora quando o comando e invertido
@@ -279,6 +289,7 @@ jobs:
             mods/governor/mod.conf mods/governor/apply.sh mods/governor/revert.sh
             mods/openblas-threads/mod.conf mods/openblas-threads/apply.sh mods/openblas-threads/revert.sh
             mods/network/mod.conf mods/network/apply.sh mods/network/revert.sh
+            mods/apt-sources/mod.conf mods/apt-sources/apply.sh mods/apt-sources/revert.sh
             roles/inference/install.sh roles/inference/sysctl.conf
             roles/inference/shell-ia.py roles/inference/ai-server.service
             roles/builder/install.sh roles/builder/docker-setup.sh
@@ -480,6 +491,26 @@ jobs:
           # Ancorado na DEFINIÇÃO do alvo: 'network-fix' também aparece no
           # .PHONY e num comentário, então um grep solto não prova nada.
           grep -qE '^network-fix:' Makefile
+          # --- mod `apt-sources`: o apt de quem JA instalou -----------------
+          # O caso real: a ISO antiga gravava 'file:///opt/apt-repo' no alvo e,
+          # quando o repositorio nao existia, TODO apt-get update falhava --
+          # nem openssh-server instalava. A mod diagnostica e conserta.
+          grep -q 'apt-test' Makefile
+          grep -q 'validate:.*apt-test' Makefile
+          grep -q 'make apt-test' .github/workflows/validate.yml
+          grep -qE '^MOD_ID="apt-sources"' mods/apt-sources/mod.conf
+          grep -qE '^MOD_SETS="apt"' mods/apt-sources/mod.conf
+          grep -q 'file://' mods/apt-sources/apply.sh
+          grep -q 'cdrom:' mods/apt-sources/apply.sh
+          grep -q 'archive.ubuntu.com' mods/apt-sources/apply.sh
+          grep -q 'deb.debian.org' mods/apt-sources/apply.sh
+          grep -q 'ai-cpu-os.bak' mods/apt-sources/apply.sh
+          # Um reparo que apaga fontes sem testar o resultado e' so' chute:
+          # o apply TEM de validar com `apt-get update` (ou dizer que pulou).
+          grep -q "apt-get update" mods/apt-sources/apply.sh
+          grep -q 'PULADO' mods/apt-sources/apply.sh
+          grep -q 'restaurado' mods/apt-sources/revert.sh
+          grep -qE '^apt-fix:' Makefile
           # O firstboot tem de SINCRONIZAR o disco antes de sair, e o teste de
           # VM tem de dar tempo ao qemu antes de encerrar. Sem isso, um
           # desligamento logo depois deixa arquivos com 0 byte — `llama-server`,

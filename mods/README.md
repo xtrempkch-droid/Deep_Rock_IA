@@ -18,6 +18,12 @@ Conjuntos prontos: `--set system` (tuning de base, usado pelo `build.sh`) e
 próprio (`--set network`): mudar a rede de um servidor é decisão do dono da
 máquina, nunca efeito colateral de um tuning.
 
+> 📦 **O `apt-get update` falha sempre depois de instalar?**
+> `sudo bash mods/apt-sources/apply.sh` (ou `make apt-fix`) diagnostica as
+> fontes, remove as que apontam para o nada (`file:///opt/apt-repo` de uma ISO
+> antiga, `cdrom:` do instalador) e valida com `apt-get update`. Teste:
+> `make apt-test` (17 asserções, árvore falsa, sem root).
+>
 > 🔧 **Está sem rede depois de instalar?** `sudo bash mods/network/apply.sh`
 > (ou `make network-fix`) aplica no sistema em execução o netplan que a ISO nova
 > traz. Ver [`docs/TROUBLESHOOTING.md`](../docs/TROUBLESHOOTING.md).

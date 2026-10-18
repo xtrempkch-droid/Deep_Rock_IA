@@ -78,12 +78,14 @@ MOD_GAIN="Evita oversubscription de threads; reduz jitter de latência."
 | `governor` | `scaling_governor=performance` via serviço systemd | medium | no | `system` | any |
 | `openblas-threads` | `OPENBLAS_NUM_THREADS=1` para não competir com o ggml | **low** | no | `portable` | inference |
 | `network` | grava o netplan persistente (`99-ai-cpu-os.yaml`), tira o netplan do instalador/cloud-init do caminho e desliga a rede do cloud-init — **conserta a máquina que subia sem IP** | medium | no | `network` | any |
+| `apt-sources` | diagnostica e conserta o `apt` de uma máquina **já instalada**: remove fontes que não existem (`file://` sem o diretório, `cdrom:` que a mídia deixou, `.sources` sem `URIs:`) com backup `.ai-cpu-os.bak`, grava a lista **oficial** da distro se nada sobrar e **valida com `apt-get update`** — **conserta a máquina em que TODO `apt-get update` falha** | medium | no | `apt` | any |
 
 Conjuntos: **`system`** = o que o `build.sh` aplica (tuning de base);
 **`portable`** = seguras em qualquer máquina, aplicáveis uma a uma;
 **`network`** = só a conectividade, **nunca** aplicado automaticamente (mudar a
 rede de um servidor é decisão do dono da máquina — e `apply --set system` roda
-no build).
+no build). **`apt`** = só as fontes de pacotes, com a mesma regra: reescrever o
+`sources.list` de alguém não pode ser efeito colateral de aplicar tuning.
 
 > Mods `high` (ex.: desativar C-states por completo, trocar o scheduler) **não**
 > entram em nenhum conjunto automático: são sempre um `apply <id>` deliberado.

@@ -199,17 +199,60 @@ fi
 ## repositório SEM rede, direto do disco — que é o que a ISO air-gapped precisa.
 APT_REPO_SRC="${SRC}/apt-repo"
 APT_REPO_DST="/opt/apt-repo"
+APT_REPO_LIST="/target/etc/apt/sources.list.d/ai-cpu-os-local.list"
+
+## REGRA DE OURO DESTE BLOCO: é MELHOR um alvo sem repositório local do que um
+## alvo com o apt QUEBRADO. Um `.list` apontando para um repositório
+## incompleto (sem `Release`/`Packages`, ou de outra release) faz TODO
+## `apt-get update` falhar com "does not have a Release file" — e, como o apt
+## aborta no erro, NADA mais instala: nem `openssh-server`, nem `git`, nada.
+## Medido numa instalação real (sessão #36): o usuário ficou com a máquina sem
+## SSH e sem conseguir instalar o SSH, porque o apt estava travado nesse erro.
+## Por isso aqui o repositório é VALIDADO e TESTADO antes de virar fonte.
 if [ -d "${APT_REPO_SRC}" ]; then
     log "carregando o repositório apt local para ${APT_REPO_DST}"
     mkdir -p "/target${APT_REPO_DST}"
-    if cp -a "${APT_REPO_SRC}/." "/target${APT_REPO_DST}/"; then
-        mkdir -p /target/etc/apt/sources.list.d
-        printf 'deb [trusted=yes] file://%s ./\n' "${APT_REPO_DST}" \
-            > /target/etc/apt/sources.list.d/ai-cpu-os-local.list
-        printf 'APT_REPO=%s\n' "${APT_REPO_DST}" >> "${DST}/.iso-config"
-        log "repositório local em ${APT_REPO_DST} (fonte gravada no alvo)"
-    else
+    if ! cp -a "${APT_REPO_SRC}/." "/target${APT_REPO_DST}/"; then
         log "AVISO: falha ao copiar o repositório apt local; resta a rede"
+    else
+        ## (1) O repositório está completo? `Release` + índice de pacotes.
+        # shellcheck disable=SC2086
+        if [ ! -f "/target${APT_REPO_DST}/Release" ] || \
+           ! ls "/target${APT_REPO_DST}"/Packages* >/dev/null 2>&1; then
+            log "AVISO: repositório local INCOMPLETO (sem Release ou Packages); NÃO será usado"
+            rm -f "${APT_REPO_LIST}"
+        else
+            ## (2) O repositório é da MESMA release do alvo? Um repo de outra
+            ## release é aceito pelo apt e depois gera conflito de dependências
+            ## (pior que não ter repo).
+            _repo_ok=1
+            if [ -f /target/etc/os-release ]; then
+                ## `sed` em vez de `.` (source): o shellcheck não segue o arquivo
+                ## (SC1091) e não precisamos de mais nada além do codename.
+                _cn="$(sed -n 's/^VERSION_CODENAME=\(.*\)$/\1/p' /target/etc/os-release 2>/dev/null | tr -d '"' | head -1)"
+                if [ -n "${_cn}" ] && ! grep -qi "${_cn}" "/target${APT_REPO_DST}/Release"; then
+                    _repo_ok=0
+                    log "AVISO: repositório local é de OUTRA release (alvo=${_cn}); NÃO será usado"
+                fi
+            fi
+            if [ "${_repo_ok}" -eq 1 ]; then
+                mkdir -p /target/etc/apt/sources.list.d
+                printf 'deb [trusted=yes] file://%s ./\n' "${APT_REPO_DST}" > "${APT_REPO_LIST}"
+                ## (3) Teste REAL: o próprio apt, restrito a este sources. É a
+                ## única prova que vale — arquivo presente não garante repo
+                ## legível (assinatura, índice corrompido, permissão).
+                if in_target apt-get update \
+                        -o Dir::Etc::sourcelist="sources.list.d/$(basename "${APT_REPO_LIST}")" \
+                        -o Dir::Etc::sourceparts="-" \
+                        -o APT::Get::List-Cleanup="0" >/dev/null 2>&1; then
+                    printf 'APT_REPO=%s\n' "${APT_REPO_DST}" >> "${DST}/.iso-config"
+                    log "repositório local em ${APT_REPO_DST} (validado pelo apt e gravado no alvo)"
+                else
+                    rm -f "${APT_REPO_LIST}"
+                    log "AVISO: o apt do alvo REJEITOU o repositório local; fonte removida (resta a rede)"
+                fi
+            fi
+        fi
     fi
 else
     log "sem repositório apt local nesta ISO (--iso-repo none)"

@@ -519,6 +519,41 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
 > dizem exatamente onde parou. Foi assim que os três itens acima apareceram
 > (sessão #35) — nenhum deles é visível pelo console serial.
 
+### `sudo apt-get update` falha SEMPRE: "não possui um arquivo Release"
+
+- **Sintoma:** a máquina instalada não acha o repositório — como se não houvesse
+  link. Todo `apt-get update` termina em erro, e por isso **nada** se instala
+  (nem `openssh-server`).
+- **Diagnóstico (1 comando):** veja QUEM é a fonte que falha —
+  ```bash
+  grep -rn . /etc/apt/sources.list /etc/apt/sources.list.d/
+  apt-get update 2>&1 | grep -E '^(Err|E:)' | head
+  ```
+- **Causa A (a mais comum, e é bug nosso):** a ISO **antiga** gravava
+  ```text
+  /etc/apt/sources.list.d/ai-cpu-os-local.list
+      deb [trusted=yes] file:///opt/apt-repo ./
+  ```
+  **sem verificar se `/opt/apt-repo` existia no alvo.** Quando a cópia do
+  repositório falhava, o apt passava a falhar em **toda** atualização. Teste:
+  `ls /opt/apt-repo/Release` — se não existir, é este o caso.
+- **Causa B:** `deb cdrom:[…]` no `sources.list` — o `debian-installer` grava
+  a mídia como fonte e, depois da instalação, ela não existe mais.
+- **Causa C:** não é o `sources` e sim **rede**: `Temporary failure resolving` /
+  `Network is unreachable` = falta default route ou DNS (ver a seção da rede).
+- **Solução (a partir da sessão #36):** a mod dedicada conserta sozinha —
+  ```bash
+  sudo bash mods/apt-sources/apply.sh        # ou: make apt-fix
+  sudo bash mods/apt-sources/apply.sh --dry-run   # só o diagnóstico
+  ```
+  Ela remove as fontes que apontam para o nada (com backup
+  `.ai-cpu-os.bak`), grava a lista **oficial** da distro se nada sofrer, e
+  **valida com `apt-get update`**. Para desfazer: `mods/apt-sources/revert.sh`.
+- **Correção na ORIGEM (para não acontecer de novo):** o `late-command.sh` só
+  declara o repositório local depois de checar `Release`+`Packages`, conferir a
+  **release** e **provar com `apt-get update`**. Se falhar, a fonte **não** é
+  gravada: melhor um alvo sem repositório local do que com o apt quebrado.
+
 ### A máquina instalada responde a `ping` mas **não aceita SSH** (nem nada)
 
 - **Sintoma:** a instalação terminou, a máquina está na rede (aparece no

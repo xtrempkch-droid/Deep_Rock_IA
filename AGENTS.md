@@ -201,8 +201,10 @@ ai-cpu-os/
 │   ├── hugepages/           # THP + huge pages estáticas    (conjunto system)
 │   ├── governor/            # scaling_governor=performance (conjunto system)
 │   ├── openblas-threads/    # OPENBLAS_NUM_THREADS=1       (conjunto portable)
-│   └── network/             # netplan persistente (DHCP/static) — reparo do
-│                            # alvo que subiu sem IP      (conjunto network)
+│   ├── network/             # netplan persistente (DHCP/static) — reparo do
+│   │                        # alvo que subiu sem IP      (conjunto network)
+│   └── apt-sources/         # fontes do apt quebradas — reparo do alvo em que
+│                            # TODO apt-get update falha      (conjunto apt)
 └── tests/
     ├── smoke-test.sh       # Testes rápidos pós-build
     ├── test-families.sh    # Casamento CPU → família (corpus; sem hardware)
@@ -244,6 +246,8 @@ ai-cpu-os/
 | **Saber se um guarda do CI reprova de verdade** | **`tests/test-ci-guards.sh`** |
 | **Testar a política de AVX-512 de uma família (ligar/desligar)** | **`tests/test-avx512-policy.sh`**, **`make avx512-test`**, `docs/FAMILIES.md` § 5 |
 | **Testar a trava de instância única do gerador de ISO (sem gerar ISO)** | **`tests/test-iso-lock.sh`**, **`make iso-lock-test`** |
+| **Consertar a máquina JÁ instalada que está sem rede** | **`mods/network/`**, **`make network-fix`**, **`make network-test`** |
+| **Consertar a máquina JÁ instalada em que TODO `apt-get update` falha** | **`mods/apt-sources/`**, **`make apt-fix`**, **`make apt-test`** |
 | **Usar uma GPU (opcional, explícito)** | **`docs/GPU.md`**, `bash llama-build.sh --gpu-check` |
 | **Aprender o projeto do zero (passo a passo explicado)** | **`docs/TUTORIAL.md`**        |
 | Como o CI compila/valida o sistema     | `.github/workflows/`, `docs/CI.md`, `Makefile` |

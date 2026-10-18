@@ -2447,6 +2447,44 @@ garante os arquivos íntegros acima.
 - **Lição registrada (TROUBLESHOOTING):** "responde a ping mas não aceita SSH"
   → **varra as portas** antes de culpar firewall: `RST` em tudo = sem
   listener; e cabo direto **não tem DHCP**.
+- **O DONO APONTOU O OUTRO LADO DO MESMO PROBLEMA:** "`sudo apt-get update`
+  sempre dá erro; o sistema não acha o repositório, como se não houvesse link".
+  Investigação por medição:
+  - O `apt` **realmente aceita** o repositório que vai na ISO (testei o
+    `apt-repo` extraído da ISO num `Dir::Etc` temporário: `Release` + `Packages`
+    + pacotes, OK). Logo, a ISO está certa **quando o repositório é copiado**.
+  - O defeito está no `late-command.sh` **da época**: ele gravava
+    `deb [trusted=yes] file:///opt/apt-repo ./` no alvo **sem verificar se o
+    `/opt/apt-repo` existia** (só olhava o rc do `cp`). Sem o diretório, TODO
+    `apt-get update` falha com "não possui um arquivo Release" e — como o apt
+    aborta no erro — **nada** instala, incluindo o `openssh-server`. Os dois
+    sintomas (sem SSH, apt quebrado) são o **mesmo** evento: instalação sem
+    rede + fonte local fantasma.
+  - A rede do alvo **funciona** (os contadores de `FORWARD`/`MASQUERADE`
+    mostram tráfego passando), então o problema não era rota: era sources.
+- **Correções:**
+  - `late-command.sh`: o repositório local só vira fonte depois de (1)
+    `Release`+`Packages` presentes, (2) **mesma release** do alvo (comparação
+    pelo `VERSION_CODENAME`) e (3) **`apt-get update` restrito àquela fonte**
+    como prova. Falhou qualquer passo → **não grava** (melhor sem repo local do
+    que com o apt quebrado). Três guardas novos no CI.
+  - **Nova mod `mods/apt-sources/`** (`make apt-fix`, `make apt-test`,
+    **17 asserções** em árvore falsa, sem root e sem rede) — o reparo da
+    máquina **já instalada**: remove fontes que apontam para o nada
+    (`file://` inexistente, `cdrom:`, `.sources` sem `URIs:`) com backup
+    `.ai-cpu-os.bak`, grava a lista **oficial** da distro quando nada sobra e
+    valida com `apt-get update` (ou avisa que pulou, sem chroot). `revert.sh`
+    devolve tudo.
+  - Superfícies atualizadas (Regra 15): `required` do CI, árvore do
+    `AGENTS.md` § 4, tabela do `docs/MODS.md`, `mods/README.md`, `Makefile`
+    (`apt-test` no `validate`) e um passo de CI que roda as **duas** mods de
+    reparo. `ci-guards` 78 → **81**.
+- **PROVA NAS DUAS DISTROS (2026-10-18):** ISO **Ubuntu 24.04.5** gerada
+  (`verify-iso` **PASS=43**) e **Debian 13.7** (**PASS=52**); nos dois casos
+  `test-vm.sh` **OK** nos dois marcadores e, ao subir o disco instalado com a
+  porta encaminhada, **a 22 abriu** com login por SSH e
+  `systemctl is-enabled ssh` = `enabled`. É a prova que faltava para a distro
+  do dono.
 - **Commits:** *(ver `git log`)*.
 
 ### Sessão #35 — 2026-10-18 · 🐧 A ISO Debian: 10 travas, todas mudas

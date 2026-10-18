@@ -46,7 +46,7 @@ SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
         iso-select-test iso-repo-test iso-verify-test ci-guards-test \
         iso-lock-test \
         pendrives pendrive pendrive-test iso-check iso-check-test \
-        ui ui-test network-fix network-test \
+        ui ui-test network-fix network-test apt-fix apt-test \
         docker docker-check ci clean
 
 help: ## Lista os alvos disponíveis
@@ -87,7 +87,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test network-test pendrive-test iso-check-test ui-test iso-dry-run-both ## Lint + docs + famílias + AVX-512 + testes de ISO + rede + UI + guardas + dry-run
+validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test network-test apt-test pendrive-test iso-check-test ui-test iso-dry-run-both ## Lint + docs + famílias + AVX-512 + testes de ISO + rede + UI + guardas + dry-run
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -191,6 +191,15 @@ ui: ## Abre a interface web local (criar/conferir a ISO pelo navegador)
 
 network-test: ## Prova a mod `network` numa árvore falsa (sem root, sem rede)
 	@bash tests/test-network-mod.sh
+
+apt-test: ## Prova a mod `apt-sources` numa árvore falsa (sem root, sem rede)
+	@bash tests/test-apt-sources-mod.sh
+
+apt-fix: ## Conserta o apt DESTA máquina (fontes que não existem); APT_DRY=1 simula
+	@set -euo pipefail; args=(); \
+	if [ -n "$(APT_DRY)" ]; then args+=(--dry-run); fi; \
+	echo "sudo bash mods/apt-sources/apply.sh $${args[*]}"; \
+	sudo bash mods/apt-sources/apply.sh $${args[@]+"$${args[@]}"}
 
 network-fix: ## Conserta a rede DESTA máquina (DHCP); use NET_MODE/NET_IP/NET_GW
 	@set -euo pipefail; args=(--mode "$(NET_MODE)"); \
