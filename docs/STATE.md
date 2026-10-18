@@ -255,6 +255,17 @@ Duas correções:
   repositório local do que com o apt quebrado).
 - **Na máquina já instalada:** nova mod **`apt-sources`**
   (`make apt-fix`, teste `make apt-test`, 17 asserções em árvore falsa).
+- **No caminho `--iso-repo auto` (o que torna a ISO auto-suficiente):** dois
+  bugs que faziam o repositório local ser **descartado em silêncio**:
+  (a) com `--iso <arquivo>` a versão da base vinha do **default** (24.04) e não
+  do nome do arquivo → gerar a ISO da sua própria release dava "Release
+  incompatível"; (b) o codename saía de uma **tabela fixa** que não conhecia a
+  26.04 → o build seguia em "não confiro a release" (e podia embutir `.deb`
+  errados). Agora a versão vem do **nome do arquivo** e o codename é lido do
+  **`.disk/info` da própria ISO**, com a tabela como reserva. `make
+  iso-release-test` (10 asserções, ISOs falsas, sem rede) prova os dois
+  sentidos: release que casa → monta o repo; release diferente → avisa e
+  **não** monta.
 
 > ✅ **PROVADO EM VM NAS DUAS DISTROS:** **Debian 13.7** (`verify-iso` **PASS=52**)
 > e **Ubuntu 24.04.5** (`PASS=43`) — nos dois, instalação automática, 1º boot

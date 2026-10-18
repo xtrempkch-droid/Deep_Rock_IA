@@ -1203,12 +1203,53 @@ ubuntu_codename_for_version() {
     24.10) echo oracular ;;
     25.04) echo plucky ;;
     25.10) echo questing ;;
+    26.04) echo resolute ;;
     *)     echo "" ;;
   esac
 }
 
+# Codename da BASE lido do PRÓPRIO arquivo da ISO (`.disk/info`), com a tabela
+# acima como reserva. POR QUE NÃO SÓ A TABELA (bug medido na sessão #36): a
+# tabela envelhece. Numa ISO 26.04 ela devolvia "", o build caía em "não sei o
+# codename → não confiro a release" e — pior — SEGUIA montando o repositório
+# local sem conferir nada: .deb de outra release entrariam na mídia. Lendo do
+# arquivo, o guarda funciona para QUALQUER release, inclusive as futuras.
+# Formato da linha: Ubuntu-Server 24.04.5 LTS "Noble Numbat" - Release amd64
+iso_base_codename() {
+  local tmp="" info="" cn=""
+  [[ -n "$ISO_PATH" && -f "$ISO_PATH" ]] || { ubuntu_codename_for_version "$(iso_release_version)"; return 0; }
+  if command -v xorriso >/dev/null 2>&1; then
+    tmp="$(mktemp -d "${WORK_DIR:-/tmp}/.disk-info.XXXXXX" 2>/dev/null || true)"
+    if [[ -n "$tmp" ]] && xorriso -osirrox on -indev "$ISO_PATH" \
+         -extract /.disk/info "${tmp}/info" >/dev/null 2>&1; then
+      info="$(head -1 "${tmp}/info" 2>/dev/null || true)"
+      # pega o primeiro termo entre aspas e usa minúsculo: "Noble Numbat" -> noble
+      cn="$(printf '%s' "$info" | sed -nE 's/.*"([A-Za-z]+)[^"]*".*/\1/p' | tr 'A-Z' 'a-z')"
+    fi
+    [[ -n "$tmp" ]] && rm -rf "$tmp"
+  fi
+  if [[ -n "$cn" ]]; then
+    printf '%s' "$cn"
+  else
+    ubuntu_codename_for_version "$(iso_release_version)"
+  fi
+}
+
 # Release da ISO base (do --iso-url, ou do padrão). '' = não sei dizer.
 iso_release_version() {
+  # A versão da BASE é o que importa (os .deb têm de casar com ela).
+  # BUG CORRIGIDO (sessão #36): com `--iso <arquivo>`, o ISO_URL é vazio e a
+  # função caía no DEFAULT (24.04) — então quem montava a ISO de 26.04 a partir
+  # de um arquivo local via "Release incompatível" e o `--iso-repo auto`
+  # descartava o repositório local SEM AVISO ÚTIL, deixando a instalação
+  # dependente de rede. O nome do arquivo carrega a versão; é de lá que ela sai.
+  if [[ -n "$INPUT_ISO" ]]; then
+    # ubuntu-26.04.1-live-server-amd64.iso -> 26.04
+    # (um nome fora do padrão devolve vazio: quem chama trata como "não sei")
+    printf '%s' "$(basename "$INPUT_ISO")" \
+      | sed -nE 's#^ubuntu-([0-9]+\.[0-9]+)(\.[0-9]+)?-.*#\1#p'
+    return 0
+  fi
   printf '%s' "${ISO_URL:-$UBUNTU_CD_BASE_DEFAULT}" \
     | sed -nE 's#.*releases\.ubuntu\.com/([0-9]+\.[0-9]+).*#\1#p'
 }
@@ -1477,10 +1518,10 @@ acquire_repo() {
 
   # Um repositório montado com os .deb de OUTRA release produz versões que não
   # casam com a base da ISO — e o modo de falha é uma instalação quebrada.
-  if [[ "$ISO_REPO" == "auto" && $ISO_REPO_ALLOW_MISMATCH -eq 0 ]]; then
+  if [[ "$ISO_REPO" == "auto" && $ISO_REPO_ALLOW_MISMATCH -eq 0 && "$DISTRO" == "ubuntu" ]]; then
     local ver want have
     ver="$(iso_release_version)"
-    want="$(ubuntu_codename_for_version "$ver")"
+    want="$(iso_base_codename)"
     have="$(. /etc/os-release 2>/dev/null && printf '%s' "${VERSION_CODENAME:-}")"
     if [[ -z "$want" ]]; then
       log_warn "Não sei o codename do Ubuntu ${ver:-<?>}; não vou conferir a release."

@@ -43,7 +43,7 @@ SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
 .PHONY: help lint bashn shellcheck python yaml docs validate dry-run apply \
         build mods mods-check mods-test families families-test avx512-test gpu-check \
         iso iso-dry-run iso-dry-run-both iso-lint iso-yaml iso-verify iso-vm \
-        iso-select-test iso-repo-test iso-verify-test ci-guards-test \
+        iso-select-test iso-repo-test iso-verify-test iso-release-test ci-guards-test \
         iso-lock-test \
         pendrives pendrive pendrive-test iso-check iso-check-test \
         ui ui-test network-fix network-test apt-fix apt-test \
@@ -87,7 +87,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test network-test apt-test pendrive-test iso-check-test ui-test iso-dry-run-both ## Lint + docs + famílias + AVX-512 + testes de ISO + rede + UI + guardas + dry-run
+validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test iso-release-test network-test apt-test pendrive-test iso-check-test ui-test iso-dry-run-both ## Lint + docs + famílias + AVX-512 + testes de ISO + rede + UI + guardas + dry-run
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -191,6 +191,9 @@ ui: ## Abre a interface web local (criar/conferir a ISO pelo navegador)
 
 network-test: ## Prova a mod `network` numa árvore falsa (sem root, sem rede)
 	@bash tests/test-network-mod.sh
+
+iso-release-test: ## Prova a conferência de release do --iso-repo auto (ISOs falsas)
+	@bash tests/test-iso-release.sh
 
 apt-test: ## Prova a mod `apt-sources` numa árvore falsa (sem root, sem rede)
 	@bash tests/test-apt-sources-mod.sh

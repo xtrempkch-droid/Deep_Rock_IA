@@ -170,6 +170,14 @@ jobs:
           set -euo pipefail
           make iso-disk-test
 
+      # `--iso-repo auto` e o que torna a ISO auto-suficiente (leva os .deb,
+      # inclusive openssh-server). Isso so' vale se a conferencia de RELEASE
+      # funcionar: com --iso o codename/versao tem de sair do ARQUIVO.
+      - name: "ISO (release do --iso-repo auto, com ISOs falsas)"
+        run: |
+          set -euo pipefail
+          make iso-release-test
+
       # As mods de REPARO existem para consertar uma maquina que ja esta no
       # chao (rede sem IP / apt sem repositorio). Um erro nelas tem o pior modo
       # de falha possivel, entao cada uma e provada numa ARVORE FALSA, sem root
@@ -511,6 +519,21 @@ jobs:
           grep -q 'PULADO' mods/apt-sources/apply.sh
           grep -q 'restaurado' mods/apt-sources/revert.sh
           grep -qE '^apt-fix:' Makefile
+          # --- --iso-repo auto: a RELEASE tem de ser conferida de verdade -----
+          # `--iso-repo auto` e o que embute openssh-server/sudo na midia (a
+          # instalacao deixa de depender de rede). Mas .deb de outra release
+          # quebram a instalacao -- entao a conferencia precisa funcionar:
+          #  * a versao sai do ARQUIVO (--iso), nao de um default fixo;
+          #  * o codename sai da propria ISO, nao de uma tabela que envelhece.
+          grep -q 'basename "\$INPUT_ISO"' iso/build-iso.sh
+          grep -q 's#^ubuntu-' iso/build-iso.sh
+          grep -q '^iso_base_codename()' iso/build-iso.sh
+          grep -q 'iso_base_codename)' iso/build-iso.sh
+          grep -q '\.disk/info' iso/build-iso.sh
+          grep -qE 'ISO_REPO_ALLOW_MISMATCH -eq 0 && "\$DISTRO" == "ubuntu"' iso/build-iso.sh
+          grep -q 'iso-release-test' Makefile
+          grep -q 'validate:.*iso-release-test' Makefile
+          grep -q 'make iso-release-test' .github/workflows/validate.yml
           # O firstboot tem de SINCRONIZAR o disco antes de sair, e o teste de
           # VM tem de dar tempo ao qemu antes de encerrar. Sem isso, um
           # desligamento logo depois deixa arquivos com 0 byte — `llama-server`,

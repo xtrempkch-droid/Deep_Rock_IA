@@ -332,6 +332,12 @@ planta "o mod apt-sources deixar de limpar o 'cdrom:' do instalador" mods/apt-so
 planta "o mod apt-sources esquecer o backup antes de alterar" mods/apt-sources/apply.sh \
   sed_ 's|ai-cpu-os.bak|bak|g' mods/apt-sources/apply.sh
 
+# --- --iso-repo auto: a conferência de release -----------------------------
+planta "a versão da base voltar a ignorar o arquivo (--iso)" iso/build-iso.sh \
+  sed_ 's|s#^ubuntu-|s#^no-ubuntu-|' iso/build-iso.sh
+planta "o codename voltar a sair só da tabela fixa" iso/build-iso.sh \
+  sed_ 's|    want="\$(iso_base_codename)"|    want="\$(ubuntu_codename_for_version "$ver")"|' iso/build-iso.sh
+
 echo
 if [[ $FAIL -eq 0 ]]; then
   echo "ci-guards: PASS=${PASS} FAIL=0"

@@ -2479,6 +2479,23 @@ garante os arquivos íntegros acima.
     `AGENTS.md` § 4, tabela do `docs/MODS.md`, `mods/README.md`, `Makefile`
     (`apt-test` no `validate`) e um passo de CI que roda as **duas** mods de
     reparo. `ci-guards` 78 → **81**.
+- **Terceiro achado, na véspera do build do dono:** ao conferir o comando
+  recomendado (`--iso <arquivo local>` + `--iso-repo auto`) com `--dry-run`,
+  o build respondeu **"Release incompatível: a ISO é Ubuntu 24.04 (noble) e
+  esta máquina é 'resolute'"** — para um arquivo **26.04**. Dois defeitos:
+  (a) `iso_release_version()` só olhava `$ISO_URL`; com `--iso` ficava o
+  **default 24.04**, então quem gerava a ISO da própria release **perdia o
+  repositório local** (e a ISO passava a depender de rede — exatamente o que
+  produziu os sintomas originais); (b) o codename vinha de uma **tabela fixa**
+  sem 26.04 → `want` vazio → o build imprimia "não sei o codename, não vou
+  conferir a release" e **seguia montando o repo sem conferir nada** (buraco
+  para `.deb` de outra release). Correção: versão do **nome do arquivo**;
+  codename lido do **`.disk/info`** da ISO (reserva na tabela, agora com
+  26.04=resolute); a conferência só roda quando `DISTRO=ubuntu` (antes, numa
+  máquina Debian ela comparava `noble` com `trixie` e descartava o repo).
+  Prova: `make iso-release-test` (10 asserções, ISOs falsas) — 26.04 em host
+  26.04 → "Release confere: resolute" + "baixaria o fecho … openssh-server";
+  22.04 em host 26.04 → aviso + repo descartado. `ci-guards` 81 → **83**.
 - **PROVA NAS DUAS DISTROS (2026-10-18):** ISO **Ubuntu 24.04.5** gerada
   (`verify-iso` **PASS=43**) e **Debian 13.7** (**PASS=52**); nos dois casos
   `test-vm.sh` **OK** nos dois marcadores e, ao subir o disco instalado com a

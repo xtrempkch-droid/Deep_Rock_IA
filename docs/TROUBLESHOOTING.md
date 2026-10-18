@@ -519,6 +519,33 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
 > dizem exatamente onde parou. Foi assim que os três itens acima apareceram
 > (sessão #35) — nenhum deles é visível pelo console serial.
 
+### O build avisa "Release incompatível" e a ISO sai SEM repositório local
+
+- **Sintoma:** ao gerar a ISO com `--iso-repo auto`, o log diz
+  *"Release incompatível: a ISO é Ubuntu X e esta máquina é Y"* e
+  *"Seguindo SEM repositório local"*. A ISO é gerada, mas **instalar nela
+  depende de rede** — e sem rede a instalação deixa de instalar o
+  `openssh-server` e os pacotes.
+- **É proteção, não defeito:** `.deb` de outra release não casam com a base da
+  ISO e produzem uma instalação quebrada (pior que não ter repositório).
+- **Causas e saídas:**
+  1. Você está gerando a ISO de uma release **diferente** da sua máquina.
+     Saídas: gerar numa máquina da mesma release (ou container/VM), ou usar uma
+     ISO base da **sua** release (`--iso /caminho/ubuntu-<sua-versao>-....iso`,
+     baixada de `releases.ubuntu.com/<sua-versao>/`).
+  2. Você passou `--iso <arquivo>` e o build **não reconhecia** a versão do
+     arquivo (bug corrigido na sessão #36: ele usava o default 24.04). Se você
+     vir esse aviso com o nome do arquivo já na versão certa, atualize o projeto.
+- **Como conferir que está OK:** o log tem de dizer `Release confere: <codename>`
+  e depois `[dry-run] baixaria o fecho de dependências de: … openssh-server …`.
+- **Verificação barata antes de queimar 3 GB de build:**
+  ```bash
+  bash iso/build-iso.sh --distro ubuntu --iso /caminho/base.iso --disk auto \
+      --iso-repo auto --iso-source none --iso-model none --dry-run --yes \
+    | grep -E 'Release (confere|incompatível)|baixaria o fecho'
+  ```
+- ⚠️ `--iso-repo-allow-mismatch` existe para **teste**, nunca para produção.
+
 ### `sudo apt-get update` falha SEMPRE: "não possui um arquivo Release"
 
 - **Sintoma:** a máquina instalada não acha o repositório — como se não houvesse
