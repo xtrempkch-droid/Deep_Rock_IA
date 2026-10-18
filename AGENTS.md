@@ -427,7 +427,23 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-17 (sessão #33)
+- **Data:** 2026-10-18 (sessão #35)
+- **O que mudou:** **A ISO Debian passou a funcionar — instalada e bootada em
+  VM.** O caminho `--distro debian` (preseed + isolinux) **nunca havia sido
+  executado**; agora ele instala sozinho, **reinicia sozinho** e o 1º boot
+  aplica o ai-cpu-os (`status=ok`, família detectada, llama.cpp compilado no
+  alvo). Foram **10 travas, todas mudas** — nenhuma dá mensagem de erro, o
+  sintoma é sempre "a VM fica parada": preseed tem de ir **dentro do initrd**
+  (`/preseed.cfg` na raiz, via `inject_preseed_initrd`); `prompt 0` no
+  isolinux; `localechooser/languagelist` além de `language=` na cmdline;
+  `grub-installer/bootdev`; hash crypt **nunca** entre aspas duplas (`"$6$…"`
+  expande `$6` e o late-command morre com `exit 2`); remoção do
+  `deb cdrom:` que o próprio instalador grava; `sudo` (não vem no Debian);
+  marcador do 1º boot no `/dev/ttyS0` (no alvo, `/dev/console` é o **último**
+  `console=` → tty1); e `timeout` em cada sonda de rede do 1º boot.
+  `verify-iso.sh` **PASS=51**, `ci-guards` 63 → **76**. Detalhe:
+  `docs/STATE.md` § 3.4, Bloco M.0b de `docs/VALIDATION.md` e `JOURNAL.md` § 4.
+- **Data anterior:** 2026-10-17 (sessão #33)
 - **O que mudou:** **A rede do sistema instalado passou a ser preparada na ISO
   — e foi PROVADA EM VM.** O alvo agora pega IP sozinho e aceita SSH. Uma
   instalação real subia **sem DHCP** — a placa ficava DOWN até alguém

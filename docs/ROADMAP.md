@@ -96,6 +96,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | **`docs/IMPLANTAR-EM-OUTRO-PC.md`** — roteiro para instalar/validar em **outra máquina** (checklist do destino, os 3 modos de falha, o que medir, o que trazer de volta, e o registro honesto do que **não** está provado) | 2026-10-16 | 2026-10-16 |
 | `build-iso.sh`: `--keep-templates` (mantém a árvore do autoteste e imprime `TEMPLATES_DIR=…`, o que permite **testar semântica** — não só sintaxe — do `autoinstall.yaml`) + remoção de chamadas `expand_apt_local_block` **duplicadas** | 2026-10-16 | 2026-10-16 |
 | 🌐 **Rede do sistema instalado na ISO** (`--network auto\|dhcp\|static\|none` + `--network-ip/gateway/dns/interface`): o **mesmo** netplan vai no `autoinstall.yaml` e em `/preseed/ai-cpu-os-netplan.yaml`, e o `late-command.sh` o instala em `/etc/netplan/99-ai-cpu-os.yaml`, move o netplan do instalador/cloud-init e desliga a rede do cloud-init. No Debian alimenta o `netcfg` da preseed. Corrige o alvo que subia **SEM DHCP** — **provado em VM** (alvo pegou IP sozinho e aceitou SSH). + **3 bugs reais** achados ao executar: arquivos de **0 byte** no 1º boot (unit vazio = `masked`), `--no-mmap` removido do llama.cpp e o `shell-ia.py` devolvendo a linha do protocolo. Guardas: `ci-guards` 43 → **46**, `webui` 38 → **46** | 2026-10-17 | 2026-10-17 |
+| 🐧 **A ISO DEBIAN FUNCIONA** (`--distro debian`, preseed + isolinux) — **instalada e bootada em VM pela primeira vez**: instala sozinha, **reinicia sozinha** e o 1º boot aplica o ai-cpu-os (`status=ok`, família `intel-haswell`, llama.cpp compilado no alvo). **10 travas, todas mudas** (netplan exigido no verificador; `prompt 1` no isolinux; preseed fora do initrd; `localechooser/languagelist`; `grub-installer/bootdev`; hash crypt em aspas duplas; `deb cdrom:` no alvo; `sudo` ausente; marcador fora do serial; espera por rede sem teto). `verify-iso` **PASS=51**, `ci-guards` 63 → **76** | 2026-10-18 | 2026-10-18 |
 | 🔧 **Mod `network` — reparo da máquina JÁ instalada** (`mods/network/`): grava o netplan persistente no sistema em execução, move o do instalador/cloud-init para `.bak`, desliga a rede do cloud-init e valida com `netplan generate` antes de aplicar; `revert.sh` restaura os backups. Resolve o caso "já instalei com a ISO antiga e a placa sobe DOWN" sem reinstalar — `make network-test` (41), `make network-fix`, `ci-guards` 54 → **63** | 2026-10-18 | 2026-10-18 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
@@ -117,7 +118,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | Executar o protocolo `docs/VALIDATION.md` (blocos A–L) | 2026-10-07 | Roteiro preenchível pronto; **resultados pendentes** |
 | ~~🎯 Construir e bootar a ISO de instalação numa VM~~ (Bloco M, Ubuntu) | 2026-10-07 | ✅ **FEITO na sessão #21** (2026-10-13): ISO gerada + `verify-iso` PASS=41 + `test-vm.sh` exit 0 (instalou + 1º boot aplicou). Ver `STATE.md` § 3.3 |
 | ~~ISO em base Ubuntu Server~~ (`--distro ubuntu` + autoinstall/Subiquity) | 2026-10-12 | ✅ **Executada contra uma ISO real (sessão #21).** |
-| 🔴 **ISO em base Debian** (`--distro debian` + preseed/`apt-setup/local0`) | 2026-10-12 | **Nunca executada** — é o que falta do caminho ISO |
+| ~~ISO em base Debian~~ (`--distro debian` + preseed) | 2026-10-12 | ✅ **EXECUTADA na sessão #35 (2026-10-18)**: instala, reinicia e o 1º boot aplica (VM qemu/KVM). Falta o modo **air-gapped** nessa distro |
 | 🔴 **ISO em HARDWARE FÍSICO** (Xeon e Ryzen) | 2026-10-13 | O caminho funciona em VM; falta no hardware alvo (Blocos A–O) |
 | 🟡 **Rede do alvo pós-instalação** (Bloco M.5-b) | 2026-10-17 | ✅ **PROVADO EM VM (sessão #33):** o alvo pegou IP por DHCP sozinho (`DHCPv4 address 10.0.2.15/24 … acquired`), o netplan ficou intacto, o cloud-init desligado e o **SSH funcionou**. Falta o modo `static`, o reboot de persistência e o hardware físico |
 | **Flags do llama.cpp mudam entre versões** | 2026-10-17 | Bug real (sessão #33): `--no-mmap` foi removido do upstream e o `ai-server` entrava em loop. A unit usa `${LLAMA_EXTRA_ARGS}` e o `install.sh` detecta a sintaxe no binário |
@@ -129,8 +130,9 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 ## ⏳ Planejado
 
 ### Prioridade Alta
-- [ ] **🎯 Gerar e bootar o caminho DEBIAN** (`--distro debian`: preseed +
-      `apt-setup/local0` + `mtools`/`isolinux`) — o Ubuntu já foi provado (#21).
+- [x] **🎯 Gerar e bootar o caminho DEBIAN** (`--distro debian`: preseed +
+      `apt-setup/local0` + `mtools`/`isolinux`) — ✅ **#35** (instalou, reiniciou
+      e o 1º boot aplicou; ver `STATE.md` § 3.4).
 - [x] **🎯 Gerar a ISO de verdade (Ubuntu)** e rodar o `verify-iso.sh` — ✅ #21.
 - [x] **🎯 Bootar a ISO em VM** (`iso/test-vm.sh`) — ✅ #21 (instalou + 1º boot).
 - [x] **Validar o caminho `--serial-console`** num boot real — ✅ #21 (marcadores
@@ -202,6 +204,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | Data       | Mudança                                                        |
 |------------|----------------------------------------------------------------|
 | 2026-10-16 | 🧬 **14 famílias** (Xeon Scalable v5–v9/Xeon 6 P + `amd-zen5`) e **AVX-512 como padrão** nas famílias que o têm (política `auto`, decisão do dono; `--no-avx512` para comparar com AVX2). |
+| 2026-10-18 | 🐧 **A ISO Debian é executada pela primeira vez** (sessão #35): moveu "ISO em base Debian" de Em Progresso para Concluído, com **10 travas mudas** corrigidas e `test-vm.sh` **OK** em VM. O que continua aberto na ISO: **UEFI**, **air-gapped no Debian** e **hardware físico**. |
 | 2026-10-13 | 🎉 **A ISO é gerada e bootada** (Ubuntu, VM com KVM, sessão #21): moveu "Em Progresso" → "Concluído". O que fica em aberto na ISO: caminho **Debian**, **UEFI** e **hardware físico**; e o resíduo air-gapped do UI do llama.cpp. |
 | 2026-10-07 | Criação inicial do roadmap junto com o repositório `0.1.0-alpha`. |
 | 2026-10-07 | Adicionado `docs/TUTORIAL.md` + diretriz de tutorial por marco/versão. |
