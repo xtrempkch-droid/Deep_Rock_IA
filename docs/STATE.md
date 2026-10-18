@@ -222,6 +222,30 @@ sessão #35 e em `docs/TROUBLESHOOTING.md`):
 
 ---
 
+### 3.5 🔌 Acesso remoto: a máquina instalada não tinha SSH (2026-10-18)
+
+Diagnóstico numa instalação **Ubuntu** real (sessão #36), a pedido do dono
+("tente acessar via ssh no dispositivo enp5s0"):
+
+| Passo | Medição |
+|-------|---------|
+| Rede | **Não havia DHCP** no cabo (host em IP fixo `192.168.0.2/24`); subi `dnsmasq` e o alvo apareceu sozinho |
+| Identificação | `192.168.0.113`, MAC `e0:d5:5e:20:ae:b2`, hostname **`ai-cpu-os`** (= sistema instalado) |
+| Serviços | `nmap -Pn -p-` → **65535 portas `closed`** (RST), **nenhum listener** |
+| OS | `ping` TTL 64 → Linux; `ping` 0,29 ms |
+
+**Causa raiz (bug do projeto):** a ISO pede o SSH ao instalador e **ele falha
+em silêncio sem rede** — o alvo nasce **sem nenhum acesso remoto**. Correção:
+o `late-command.sh` verifica/instala o `sshd` no alvo (e avisa em
+`/etc/motd` + `/root/LEIA-SSH.md` se não conseguir) e o `build.sh` tem o
+`ensure_ssh` em todo 1º boot. Guardas: `verify-iso.sh` (nos dois instaladores)
+e `ci-guards` 76 → **78**.
+
+> ⚠️ **Não provado:** que o `late-command` instale o SSH com sucesso num alvo
+> **sem rede** (é impossível por definição — nesse caso ele só avisa); o
+> caminho "com rede" foi provado em VM em testes anteriores. A máquina desta
+> sessão **continua sem SSH** (só o console resolve) e não foi reinstalada.
+
 ## 4. Problemas conhecidos no momento
 
 1. **Risco em hardware físico não medido.** O caminho ISO foi provado em VM; o
@@ -263,7 +287,15 @@ sessão #35 e em `docs/TROUBLESHOOTING.md`):
 12. **O boot UEFI da ISO é best-effort.** O patch do `grub.cfg` dentro da
     `efi.img` exige `mtools` e nunca foi testado. O caminho BIOS (isolinux)
     é o principal. Ver `docs/ISO.md` § 6.
-13. **O `md5sum.txt` regenerado nunca foi validado** por um instalador real
+13. **Instalação SEM rede nasce sem SSH (corrigido na #36, mas só para as
+    próximas ISOs).** O `ssh: install-server` (Ubuntu) e o `pkgsel` (Debian)
+    **falham em silêncio** sem rede: o alvo sobe, pega IP e não tem **nenhum**
+    listener (medido: 65535 portas em `RST`). Agora o `late-command.sh`
+    verifica/instala o SSH e o `build.sh` (`ensure_ssh`) faz o mesmo no 1º
+    boot; se nada der certo, o alvo recebe aviso no `/etc/motd` e em
+    `/root/LEIA-SSH.md`. **Uma máquina já instalada assim só se conserta pelo
+    console** (`apt-get install -y openssh-server`). Ver § 3.5.
+14. **O `md5sum.txt` regenerado nunca foi validado** por um instalador real
     (o debian-installer usa esse arquivo para checar a integridade da mídia).
 
 ---
@@ -309,6 +341,19 @@ sessão #35. `verify-iso.sh` na ISO real: **PASS=51 FAIL=0**; `ci-guards`
 63 → **76**; a favor de não repetir: a instalação Debian **não** se anuncia
 quando falha, então **sempre** rode `bash iso/test-vm.sh` depois de mexer no
 `iso/preseed/`.
+
+**🔴 Recém-aberto e mais urgente (sessão #36, 2026-10-18) — acesso remoto.**
+Uma instalação **Ubuntu** real subiu **sem nenhum serviço escutando** (65535
+portas TCP em `RST`): o `ssh: install-server` falha em silêncio quando não há
+rede na instalação. **Corrigido** para as próximas ISOs (§ 3.5), mas a máquina
+já instalada **só se conserta no console**:
+```bash
+apt-get update && apt-get install -y openssh-server
+systemctl enable --now ssh
+ip -4 addr show
+```
+Depois disso, validar o caminho novo numa VM (`--distro ubuntu`, com rede) para
+provar que o `late-command` conserta sozinho quando o SSH não veio.
 
 **▶️ Próximo passo (o mesmo de antes, agora sem a dívida do Debian):** levar a
 ISO ao **hardware físico** (Xeon E5-2680 v4 e Ryzen 5 3500X) e preencher os
@@ -565,6 +610,7 @@ Ao terminar qualquer tarefa:
 
 | Data       | Mudança                                                    |
 |------------|------------------------------------------------------------|
+| 2026-10-18 | 🔌 **A máquina instalada não aceitava SSH (sessão #36).** Diagnóstico por rede: não havia DHCP no cabo (host em IP fixo) → subi `dnsmasq`; o alvo apareceu como `192.168.0.113`/`ai-cpu-os` e a varredura mostrou **65535 portas TCP fechadas** — **sem `sshd`**. Causa raiz: o `ssh: install-server`/`pkgsel` **falham em silêncio sem rede**. Correção: `late-command.sh` verifica/instala o SSH e avisa no `/etc/motd` + `/root/LEIA-SSH.md`; `build.sh` ganhou `ensure_ssh`; o build avisa quando a ISO sai sem repositório local. `ci-guards` 76 → **78**. § 3.5 + TROUBLESHOOTING. |
 | 2026-10-17 | 🌐 **Rede do sistema instalado na ISO (sessão #33).** Uma instalação real subia **sem DHCP** — o Subiquity não grava rede persistente no alvo quando o autoinstall não tem `network:`. Novo `--network auto\|dhcp\|static\|none` (+ `--network-ip`, `--network-gateway`, `--network-dns`, `--network-interface`); o **mesmo** netplan vai para o `autoinstall.yaml` e para `/preseed/ai-cpu-os-netplan.yaml`, e o `late-command.sh` o instala em `/etc/netplan/99-ai-cpu-os.yaml`, move o netplan do instalador/cloud-init e desliga a rede do cloud-init. No Debian as flags alimentam o `netcfg` da preseed (e o hostname da preseed passou a usar `@@HOSTNAME@@`). O verificador confere os três elos; a UI ganhou o seletor de rede. ✅ **PROVADO EM VM** (alvo pegou IP por DHCP sozinho e aceitou SSH). + **3 bugs reais** achados ao executar: arquivos de **0 byte** no 1º boot (unit vazio = `masked`), `--no-mmap` removido do llama.cpp e o `shell-ia.py` devolvendo a linha do protocolo. `ci-guards` 43 → **46**, `webui` 38 → **46**. |
 | 2026-10-16 | 🧷 **`validate` #57 vermelho: o teste da trava dependia do `exec` do bash (sessão #32).** O `tests/test-iso-lock.sh` matava o detentor da trava contando que o `bash -c '…; sleep 30'` **trocasse de identidade** pelo último comando; essa otimização **não é garantida** (um `BASH_ENV` com `trap` já a desliga) e então o `sleep`, como filho, herda o fd 9: a trava sobrevivia ao `kill` e a asserção final falhava com o gerador **correto** (sintoma no CI: `exit code 2`, passo de 6 s = 5 s de laço de espera estourando). Detentor reescrito (`sleep 300 9>&- &` + `wait` + `flock -w 20`), pré-voo que exige a trava livre e diz **quem** a segura, e todo `FALHOU` vira **anotação** `::error::`. Asserções 10 → **13**; `make validate` verde e `validate` **#58** (`0041c0e`) **verde** no CI (passo 17 em 0 s). Ver `JOURNAL.md` sessão #32. | O `main` local estava 7 commits atrás e com trabalho não commitado (preservado em `backup/local-sessao26-pre-sync`). A correção do #28 (`matrix.exec != 'false'` no `if:`) **nunca pulava o passo**: no GitHub, booleano × string vira número (`false`→0, `'false'`→NaN) e o `!=` dá sempre true — daí o `exit 132` (SIGILL) em icelake-sp/sapphirerapids-sp/emeraldrapids-sp/graniterapids-sp **no próprio commit da correção**. Agora o valor vai por `env:` e a decisão é no `bash`; guarda no `project-rules` + violação plantada. Recuperados do trabalho local de 14/10: `flock` de instância única + `download_to()` (confere o `.part`, `--speed-time`) no `build-iso.sh` (`make iso-lock-test`, 10 asserções) e `make avx512-test` (37 → **61** asserções, 14 famílias). `ci-guards` 35 → **40**. Ver `JOURNAL.md` sessão #29. |
 | 2026-10-16 | 🧬 **14 famílias + AVX-512 por padrão.** Adicionadas as famílias de servidor `intel-cascadelake-sp` (v6), `intel-icelake-sp` (v7), `intel-sapphirerapids-sp` (v8), `intel-emeraldrapids-sp` (v9), `intel-graniterapids-sp` (Xeon 6 P) e `amd-zen5` (Ryzen 9000/Ryzen AI 300/EPYC Turin). **Decisão do dono:** nas famílias cujas CPUs têm AVX-512, a política virou `auto` — o AVX-512 é o padrão quando a CPU reporta a flag (verificação em runtime mantida; hardcode segue proibido). Novo `--no-avx512` (desliga e troca o `-march` pelo fallback sem AVX-512, via `FAMILY_MARCH_HAS_AVX512`). Corpus: 85 CPUs reais. Ver `JOURNAL.md` sessão #26. |

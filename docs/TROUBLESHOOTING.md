@@ -519,6 +519,47 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
 > dizem exatamente onde parou. Foi assim que os três itens acima apareceram
 > (sessão #35) — nenhum deles é visível pelo console serial.
 
+### A máquina instalada responde a `ping` mas **não aceita SSH** (nem nada)
+
+- **Sintoma:** a instalação terminou, a máquina está na rede (aparece no
+  `arp`/DHCP e responde `ping`), mas `ssh: Connection refused` — e **nenhum**
+  outro serviço responde.
+- **Como diagnosticar em 1 minuto (sem chutar):** varra as portas. `RST` em
+  tudo = a máquina está viva e **não há listener**; `timeout` em tudo =
+  firewall. Exemplo real (sessão #36):
+  ```bash
+  sudo nmap -Pn -p- --min-rate 3000 192.168.0.113
+  # → Ports: Ignored State: closed (65535)   ← nenhum serviço escutando
+  ```
+- **Causa:** `sshd` **não foi instalado**. A ISO pede o SSH ao instalador
+  (`ssh: install-server: true` no Ubuntu, `openssh-server` no `pkgsel` do
+  Debian), mas **os dois falham em silêncio quando não há rede durante a
+  instalação** — e aí a máquina nasce sem **nenhum** acesso remoto. Numa
+  máquina sem teclado e sem tela, ela está perdida: é o pior modo de falha do
+  projeto.
+- **Como saber se a instalação teve rede:** se `packages:` também falhou, não
+  há `git`/`build-essential` no alvo; e o `firstboot` deixa
+  `.firstboot-status` com `status=failed`.
+- **Solução (a partir da sessão #36):** o `late-command.sh` **verifica** o
+  `sshd` no alvo, tenta instalar e, se não conseguir, escreve um aviso no
+  `/etc/motd` e em `/root/LEIA-SSH.md` (quem chega no console descobre o que
+  fazer em 5 s). O `build.sh` faz a mesma verificação **no primeiro boot**
+  (`ensure_ssh`). O `verify-iso.sh` e o CI cobram as duas coisas.
+- **Solução para uma máquina já instalada assim** (precisa de console):
+  ```bash
+  apt-get update && apt-get install -y openssh-server
+  systemctl enable --now ssh
+  ip -4 addr show          # descubra o IP
+  ```
+- **Prevenção:** gerar a ISO com `--iso-repo auto` leva os `.deb` na mídia, e
+  aí a instalação **não depende de rede** nem para o SSH. O build agora avisa
+  explicitamente quando a ISO sai sem repositório local.
+- **Detalhe de rede que engana:** um cabo direto entre duas máquinas **não tem
+  servidor DHCP**. Sem DHCP a máquina instalada fica sem IP (mesmo com a placa
+  UP) e "não aparece na rede". Suba um DHCP no lado que investiga
+  (`dnsmasq --interface=… --dhcp-range=…`) e observe o lease — foi assim que a
+  máquina foi encontrada em `192.168.0.113`.
+
 ### O `test-vm.sh` estoura o timeout no **primeiro boot** (parece travado)
 
 - **Sintoma:** a instalação termina e o sistema instalado sobe, mas o console

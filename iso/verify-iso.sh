@@ -1011,9 +1011,26 @@ else
   fi
 fi
 
+# --- SSH: vale para OS DOIS instaladores (o late-command é compartilhado) -----
+# Sem `sshd` o alvo instalado fica INACESSÍVEL: ele sobe, pega IP e não tem
+# nenhum serviço escutando — e sem teclado/tela não há como entrar para
+# consertar. O `ssh: install-server` (Ubuntu) e o `openssh-server` do `pkgsel`
+# (Debian) falham EM SILÊNCIO quando não há rede na instalação (medido numa
+# instalação real, sessão #36: 65535 portas TCP em RST). Por isso o
+# late-command tem de VERIFICAR e, se preciso, instalar o SSH.
+SSH_GUARD="$(fetch "/preseed/late-command.sh" 2>/dev/null || true)"
+if [[ -z "$SSH_GUARD" ]]; then
+  skip "sem /preseed/late-command.sh para conferir a garantia de SSH"
+elif grep -qF 'openssh-server' "$SSH_GUARD" && grep -qF 'LEIA-SSH.md' "$SSH_GUARD"; then
+  pass "late-command.sh GARANTE o SSH no alvo (instala e avisa se não conseguir)"
+else
+  fail "late-command.sh não garante o SSH (alvo pode nascer sem nenhum acesso remoto)"
+fi
+
 # ---------------------------------------------------------------------------
 # 7. Metadados da mídia (só no modo --iso)
 # ---------------------------------------------------------------------------
+
 section "Metadados da mídia"
 if [[ "$MODE" == "iso" ]]; then
   # A etiqueta do xorriso é "Volume Id" (I maiúsculo). Com `/Volume id/`

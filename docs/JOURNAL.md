@@ -2394,6 +2394,57 @@ garante os arquivos íntegros acima.
   (basta rodar na máquina de teste).
 - **Commits:** *(ver `git log`)*.
 
+### Sessão #36 — 2026-10-18 · 🔌 "A máquina instalada não aceita SSH" (e a causa era o próprio projeto)
+
+- **Objetivo:** "instalei a versão ubuntu e preciso que você tente acessar via
+  ssh no dispositivo enp5s0".
+- **O que se encontrou (por medição, não por leitura):**
+  - **Não havia DHCP nenhum** no cabo. O `enp5s0` do host de trabalho está em
+    **IP fixo** (`192.168.0.2/24`, sem gateway) e um cabo direto não tem
+    servidor DHCP. Sem DHCP a máquina instalada não tem endereço e "não
+    aparece na rede" — o primeiro sintoma engana.
+  - Subi um `dnsmasq` só DHCP nessa interface e a máquina apareceu sozinha:
+    `192.168.0.113`, MAC `e0:d5:5e:20:ae:b2`, **hostname `ai-cpu-os`** (ou seja:
+    é o **sistema instalado**, não o instalador).
+  - `nmap -Pn -p-` → **65535 portas em `closed`**, nenhum listener. TTL 64
+    (Linux). Ping responde em 0,29 ms.
+  - Conclusão: **a máquina não tem `sshd`**. Não é firewall (firewall daria
+    `filtered`/timeout; `closed` = RST do kernel).
+- **Causa raiz (é um bug do projeto, não do usuário):** a ISO pede o SSH ao
+  instalador — `ssh: install-server: true` no Ubuntu, `openssh-server` no
+  `pkgsel` do Debian — e **os dois falham em silêncio quando não há rede
+  durante a instalação**. O resultado é o pior modo de falha possível: a
+  máquina **instala, sobe, pega IP e não tem nenhum acesso remoto**; sem
+  teclado/tela ela é um tijolo. E nada avisava.
+- **Correções (a promessa passa a ser cumprida, não presumida):**
+  - `iso/preseed/late-command.sh`: **verifica** o `sshd` no alvo e, se faltar,
+    instala ali mesmo (a mídia ainda está montada; se houver rede, o espelho
+    responde). Se ainda assim falhar, escreve um aviso no `/etc/motd` e em
+    `/root/LEIA-SSH.md` — quem chega no console descobre o que fazer em 5 s.
+    A detecção usa `[ -x /target/usr/sbin/sshd ]` (não depende de chroot).
+  - `build.sh`: novo `ensure_ssh` (roda em **todo** primeiro boot): verifica,
+    instala, habilita e — se não der — deixa o mesmo aviso. Nunca derruba o
+    build (Regra 13-a).
+  - `iso/build-iso.sh`: quando a ISO sai **sem repositório apt**, o aviso agora
+    diz a consequência explícita ("alvo sem rede sobe SEM SSH") e recomenda
+    `--iso-repo auto`.
+  - `iso/verify-iso.sh` + CI: guarda nos **dois** instaladores (o
+    late-command é compartilhado) — `ci-guards` 76 → **78**, com violação
+    plantada para cada um.
+- **Rede de laboratório montada para o diagnóstico (fica de pé):**
+  `dnsmasq` em `enp5s0` (faixa `192.168.0.100-200`, gateway/DNS `192.168.0.2`)
+  + `ip_forward` + `MASQUERADE` na interface de saída, para o alvo ter
+  internet. Um **flap de link** (`ip link set … down/up`) faz o cliente
+  renovar o lease e receber as opções novas — foi assim que o alvo passou a
+  ter gateway/DNS sem tocar nele.
+- **Estado no fim da sessão:** a máquina segue **sem SSH** (só o console
+  resolve); o monitor de porta 22 ficou rodando. A correção é para as
+  **próximas** instalações.
+- **Lição registrada (TROUBLESHOOTING):** "responde a ping mas não aceita SSH"
+  → **varra as portas** antes de culpar firewall: `RST` em tudo = sem
+  listener; e cabo direto **não tem DHCP**.
+- **Commits:** *(ver `git log`)*.
+
 ### Sessão #35 — 2026-10-18 · 🐧 A ISO Debian: 10 travas, todas mudas
 
 - **Objetivo:** "a criação de ISO Debian está apresentando falhas, corrija". O

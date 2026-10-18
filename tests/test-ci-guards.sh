@@ -316,6 +316,14 @@ planta "o firstboot deixar de espelhar no console serial" iso/preseed/firstboot.
 planta "o EXTRA_PACKAGES perder o sudo (Debian não o traz)" iso/build-iso.sh \
   sed_ 's|^EXTRA_PACKAGES="sudo |EXTRA_PACKAGES="|' iso/build-iso.sh
 
+# --- Acesso remoto: sem sshd a máquina instalada é um tijolo ---------------
+# Medido numa instalação real (sessão #36): o alvo subiu, pegou IP e não tinha
+# NENHUM listener (65535 portas em RST). Sem teclado/tela, não há conserto.
+planta "o late-command deixar de garantir o SSH do alvo" iso/preseed/late-command.sh \
+  sed_ 's|openssh-server|openssh-cliente|g' iso/preseed/late-command.sh
+planta "o build.sh deixar de garantir o SSH no 1º boot" build.sh \
+  sed_ 's|^[[:space:]]*ensure_ssh$|: ensure_ssh|' build.sh
+
 echo
 if [[ $FAIL -eq 0 ]]; then
   echo "ci-guards: PASS=${PASS} FAIL=0"

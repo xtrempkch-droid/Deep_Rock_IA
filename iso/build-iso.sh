@@ -2917,6 +2917,12 @@ main() {
     fi
   else
     log_warn "ISO SEM repositório apt: instalar pacotes no alvo exigirá rede."
+    # O aviso é específico de propósito: sem rede na instalação o `pkgsel`
+    # (Debian) e o `ssh: install-server` (Ubuntu) falham EM SILÊNCIO, e o alvo
+    # nasce SEM servidor SSH — sem teclado/tela, inacessível. O late-command
+    # tenta consertar no fim da instalação, mas só consegue se houver rede.
+    log_warn "  ↳ Consequência: um alvo SEM rede na instalação sobe SEM SSH (só console)."
+    log_warn "  ↳ Para uma mídia que se basta: --iso-repo auto (leva os .deb na ISO)."
   fi
   if [[ -n "$GENERATED_PASSWORD" ]]; then
     log_warn "SENHA GERADA: ${GENERATED_PASSWORD} — anote agora, não é recuperável daqui."

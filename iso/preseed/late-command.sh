@@ -381,6 +381,75 @@ if [ -n "${APT_REPO_PATH}" ]; then
 fi
 
 ## ---------------------------------------------------------------------------
+## 4-c2. Servidor SSH: GARANTIR que ele exista no alvo
+## ---------------------------------------------------------------------------
+## POR QUE (medido numa instalação real, sessão #36): a ISO pede
+## `ssh: install-server: true` (Ubuntu) e `openssh-server` no `pkgsel`/
+## `packages` (Debian), mas **os dois falham em silêncio quando não há rede
+## durante a instalação**. O resultado é o pior tipo de máquina: ela instala,
+## sobe, pega IP (ou não) e **não tem NENHUM serviço escutando** — nem SSH. Sem
+## tela e sem teclado, não há como entrar nela para consertar. Verificado com
+## uma varredura de portas na máquina instalada: 65535 portas em RST, nenhum
+## listener.
+##
+## Por isso o SSH deixa de ser "esperança" e passa a ser verificado AQUI, no
+## fim da instalação, quando ainda dá para consertar (a mídia ainda está
+## montada e, se houver rede, o espelho oficial responde). Se mesmo assim
+## falhar, o alvo recebe um aviso no `/etc/motd` e no `/root/LEIA-SSH.md` —
+## quem chegar no console descobre o que fazer em 5 segundos.
+_ssh_ok=0
+## `[ -x /target/usr/sbin/sshd ]` é o teste que NÃO depende de chroot: tanto o
+## `in-target` do d-i quanto o `curtin in-target` podem não existir no PATH em
+## alguns pontos da instalação, e um teste que falha por falta do utilitário
+## daria falso negativo (e instalaríamos o pacote de novo, sem mal).
+if in_target true >/dev/null 2>&1 && in_target sh -c 'command -v sshd >/dev/null 2>&1'; then
+    _ssh_ok=1
+elif [ -x /target/usr/sbin/sshd ]; then
+    _ssh_ok=1
+    log "servidor SSH já presente no alvo"
+else
+    log "AVISO: o alvo NÃO tem servidor SSH; tentando instalar agora"
+    if in_target apt-get install -y openssh-server >/dev/null 2>&1; then
+        _ssh_ok=1
+        log "openssh-server instalado no alvo (tarde, mas antes do 1º boot)"
+    else
+        log "ERRO: não foi possível instalar o openssh-server (sem rede e sem repositório local?)"
+    fi
+fi
+
+if [ "${_ssh_ok}" -eq 1 ]; then
+    # Habilita no boot: sem isto, o serviço pode existir e não subir.
+    in_target systemctl enable ssh >/dev/null 2>&1 \
+        || in_target systemctl enable sshd >/dev/null 2>&1 \
+        || log "AVISO: não consegui habilitar o ssh no boot (verifique com systemctl)"
+    log "SSH habilitado no alvo (login remoto disponível após o boot)"
+else
+    # Aviso impossível de não ver para quem chegar no console.
+    {
+        echo ''
+        echo '=============================================================='
+        echo ' ATENÇÃO: esta máquina foi instalada SEM servidor SSH.'
+        echo ' Para liberar o acesso remoto, rode como root:'
+        echo '     apt-get update && apt-get install -y openssh-server'
+        echo '     systemctl enable --now ssh'
+        echo '=============================================================='
+    } >> /target/etc/motd 2>/dev/null || true
+    {
+        echo '# Esta máquina foi instalada SEM servidor SSH'
+        echo ''
+        echo 'A instalação não conseguiu instalar o pacote openssh-server'
+        echo '(provavelmente não havia rede nem repositório local na mídia).'
+        echo ''
+        echo 'Para habilitar o acesso remoto:'
+        echo '    apt-get update && apt-get install -y openssh-server'
+        echo '    systemctl enable --now ssh'
+        echo '    ip -4 addr show          # descubra o IP'
+    } > /target/root/LEIA-SSH.md 2>/dev/null || true
+    printf '[ai-cpu-os/iso-late] AVISO: alvo SEM SSH (veja /root/LEIA-SSH.md no alvo)\n' \
+        > /dev/console 2>/dev/null || true
+fi
+
+## ---------------------------------------------------------------------------
 ## 4-d. Console serial (opcional) — torna o primeiro boot observável sem tela.
 ## ---------------------------------------------------------------------------
 ## Sem isto, um teste headless (iso/test-vm.sh) não vê nada do sistema

@@ -559,6 +559,15 @@ jobs:
             echo "::error file=iso/preseed/firstboot.sh::nao espelhe o build inteiro no ttyS0 (trava o console)"
             exit 1
           fi
+          #  (g4) sem `sshd` o alvo instalado fica INACESSIVEL (varredura de
+          #       portas numa maquina real: 65535 em RST, nenhum listener).
+          #       O pedido ao instalador falha em silencio sem rede; o
+          #       late-command tem de VERIFICAR e consertar.
+          grep -q 'openssh-server' iso/preseed/late-command.sh
+          grep -q 'LEIA-SSH.md' iso/preseed/late-command.sh
+          grep -q 'GARANTE o SSH' iso/verify-iso.sh
+          grep -q '^ensure_ssh()' build.sh
+          grep -qE '^[[:space:]]+ensure_ssh$' build.sh
           #  (h) `sudo` NAO vem na instalacao padrao do Debian: sem ele o
           #      usuario da ISO (grupo sudo) nao administra nada, e com o root
           #      bloqueado o sistema fica sem acesso administrativo.

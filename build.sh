@@ -377,6 +377,56 @@ run_verification() {
   log_info "transparent_hugepage=${thp}"
 }
 
+# ---------------------------------------------------------------------------
+# Acesso remoto: garanta que o servidor SSH exista
+# ---------------------------------------------------------------------------
+# POR QUE (medido numa instalação real, sessão #36): a ISO pede o SSH ao
+# instalador (`ssh: install-server` / `pkgsel`), mas ISSO FALHA EM SILÊNCIO
+# quando não há rede durante a instalação. O resultado é a pior máquina
+# possível: ela sobe, pega IP, e não tem NENHUM serviço escutando — sem SSH não
+# há como entrar nela para consertar (numa máquina sem teclado/tela, é um
+# tijolo). Aqui a promessa é cumprida de fato: se o `sshd` não estiver lá,
+# instalamos; se não der, gritamos nos três canais que sobram (log, motd e
+# /root/LEIA-SSH.md). Nunca falha o build: degradação com aviso (Regra 13-a).
+ensure_ssh() {
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log_info "[dry-run] Verificaria (e instalaria, se preciso) o servidor SSH."
+    return 0
+  fi
+
+  if command -v sshd >/dev/null 2>&1 || [[ -x /usr/sbin/sshd ]]; then
+    log_ok "Servidor SSH presente."
+  else
+    log_warn "Servidor SSH AUSENTE: instalando openssh-server."
+    if apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq openssh-server >/dev/null 2>&1; then
+      log_ok "openssh-server instalado."
+    else
+      log_error "Não foi possível instalar o openssh-server (sem rede?)."
+    fi
+  fi
+
+  if command -v sshd >/dev/null 2>&1 || [[ -x /usr/sbin/sshd ]]; then
+    systemctl enable ssh >/dev/null 2>&1 || systemctl enable sshd >/dev/null 2>&1 || true
+    systemctl start ssh >/dev/null 2>&1 || systemctl start sshd >/dev/null 2>&1 || true
+    if systemctl is-active ssh >/dev/null 2>&1 || systemctl is-active sshd >/dev/null 2>&1; then
+      log_ok "SSH ativo e habilitado no boot."
+      rm -f /root/LEIA-SSH.md 2>/dev/null || true
+    else
+      log_warn "sshd instalado mas o serviço não subiu; confira: systemctl status ssh"
+    fi
+  else
+    {
+      echo 'ATENÇÃO: esta máquina está SEM servidor SSH.'
+      echo ''
+      echo 'Para liberar o acesso remoto:'
+      echo '    apt-get update && apt-get install -y openssh-server'
+      echo '    systemctl enable --now ssh'
+      echo '    ip -4 addr show'
+    } > /root/LEIA-SSH.md 2>/dev/null || true
+    printf '\nATENÇÃO: máquina SEM SSH. Veja /root/LEIA-SSH.md\n' >> /etc/motd 2>/dev/null || true
+  fi
+}
+
 run_tests() {
   if [[ $SKIP_TESTS -eq 1 ]]; then
     log_warn "Smoke-test pulado (--skip-tests)."
@@ -435,6 +485,7 @@ main() {
   run_system_mods
   run_role_install
   run_verification
+  ensure_ssh
   run_tests
 
   log_ok "Concluído (papel '${ROLE}', família '${FAMILY}')."
