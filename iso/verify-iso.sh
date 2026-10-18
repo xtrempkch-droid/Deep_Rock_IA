@@ -74,6 +74,8 @@ Opções:
   --role NAME    Papel esperado (auto = não conferir).
   --family NAME  Família esperada (auto = não conferir).
   --out DIR      Guarda os arquivos extraídos para inspeção.
+  --tmp DIR      Onde extrair os arquivos (padrão: o 1º com espaço entre
+                 $TMPDIR, /tmp, o diretório da ISO e o atual).
   --quiet        Só o resumo final.
 EOF
 }
@@ -81,6 +83,7 @@ EOF
 # ---------------------------------------------------------------------------
 # Argumentos
 # ---------------------------------------------------------------------------
+TMP_OVERRIDE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --iso)    [[ $# -ge 2 ]] || { log_error "--iso exige valor"; exit 2; }; MODE="iso"; INPUT="$2"; shift 2 ;;
@@ -90,6 +93,7 @@ while [[ $# -gt 0 ]]; do
     --role)   [[ $# -ge 2 ]] || { log_error "--role exige valor"; exit 2; }; EXPECT_ROLE="$2"; shift 2 ;;
     --family) [[ $# -ge 2 ]] || { log_error "--family exige valor"; exit 2; }; EXPECT_FAMILY="$2"; shift 2 ;;
     --out)    [[ $# -ge 2 ]] || { log_error "--out exige valor"; exit 2; }; OUT_DIR="$2"; shift 2 ;;
+    --tmp)    [[ $# -ge 2 ]] || { log_error "--tmp exige valor"; exit 2; }; TMP_OVERRIDE="$2"; shift 2 ;;
     --quiet)  QUIET=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) log_error "Argumento desconhecido: $1"; usage; exit 2 ;;
@@ -121,7 +125,38 @@ fi
 # ---------------------------------------------------------------------------
 # Área de trabalho com os arquivos que vamos inspecionar
 # ---------------------------------------------------------------------------
-WORK="$(mktemp -d)"
+# ---------------------------------------------------------------------------
+# Onde fica a área de trabalho: NÃO cegamente no /tmp.
+# ---------------------------------------------------------------------------
+# POR QUE (bug real, sessão #36): `mktemp -d` usa /tmp, que em muitas máquinas
+# é **tmpfs** (RAM). Como o verificador extrai arquivos da ISO, e uma ISO pode
+# trazer um modelo de vários GB, o /tmp enchia **no meio da verificação** — e a
+# partir do primeiro ENOSPC toda extração seguinte falhava, produzindo uma
+# cascata de falsos "AUSENTE"/"FAIL" que culpava a ISO por um problema de
+# espaço. Medido aqui: /tmp de 7,5 GB (tmpfs) vs. 779 GB livres no /.
+#
+# Regra: se `--tmp` foi dado, respeita. Senão tenta, em ordem:
+#   $TMPDIR → /tmp → diretório da ISO → diretório do projeto
+# e escolhe o primeiro com espaço suficiente para o que vamos extrair
+# (heurística: 2 GB; os arquivos grandes agora são lidos só no primeiro bloco).
+WORK=""
+if [[ -n "$TMP_OVERRIDE" ]]; then
+  mkdir -p "$TMP_OVERRIDE" 2>/dev/null || true
+  WORK="$(mktemp -d -p "$TMP_OVERRIDE" 2>/dev/null || true)"
+fi
+if [[ -z "$WORK" ]]; then
+  for _cand in "${TMPDIR:-}" /tmp "$(dirname "$INPUT" 2>/dev/null || true)" "$PWD"; do
+    [[ -n "$_cand" && -d "$_cand" && -w "$_cand" ]] || continue
+    _avail="$(df -Pk "$_cand" 2>/dev/null | awk 'NR==2{print $4}' || echo 0)"
+    [[ -n "$_avail" ]] || _avail=0
+    # 2 GB em blocos de 1 KiB
+    if (( _avail > 2097152 )); then
+      WORK="$(mktemp -d -p "$_cand" 2>/dev/null || true)"
+      [[ -n "$WORK" ]] && break
+    fi
+  done
+fi
+[[ -n "$WORK" ]] || { log_error "Sem diretório temporário com espaço livre (use --tmp DIR)."; exit 2; }
 readonly WORK
 cleanup() {
   if [[ -n "$OUT_DIR" ]]; then
@@ -146,6 +181,62 @@ fetch() {
     xorriso -osirrox on -indev "$INPUT" -extract "$abs" "$dest" >/dev/null 2>&1 || return 1
   fi
   printf '%s' "$dest"
+}
+
+# Lê apenas o INÍCIO de um arquivo da ISO, sem extrair o arquivo inteiro.
+#
+# POR QUE (bug real, sessão #36): para conferir o "magic" GGUF de um modelo de
+# 1,1 GB, o verificador fazia `fetch` — que extrai o ARQUIVO TODO para o
+# diretório de trabalho (mktemp em /tmp, que nesta máquina é tmpfs de 7,5 GB).
+# O modelo enchia o /tmp e, a partir daí, TODA extração seguinte falhava. O
+# resultado era uma cascata de falsos FAIL — inclusive "rede auto sem o
+# netplan", que existe na ISO e está correto. Ou seja: o verificador reprovava
+# uma ISO boa por falta de espaço, com uma mensagem que culpava outra coisa.
+#
+# Aqui resolvemos na origem: pegamos o LBA do arquivo (metadado, custo zero) e
+# lemos UM bloco de 2048 bytes com `dd` direto na imagem. Nada é extraído.
+fetch_head() {
+  local abs="$1" dest lba
+  dest="${WORK}$(printf '%s' "$abs" | tr '/' '_').head"
+  if [[ "$MODE" == "dir" ]]; then
+    # No modo --dir, quem chama já passa um caminho do SISTEMA DE ARQUIVOS
+    # (a lista de modelos vem de um `find` na árvore), não um caminho da ISO.
+    local f="$abs"
+    [[ -f "$f" ]] || f="${INPUT}${abs}"
+    [[ -f "$f" ]] || return 1
+    head -c 2048 "$f" > "$dest" 2>/dev/null || return 1
+    printf '%s' "$dest"
+    return 0
+  fi
+  # Formato real: "File data lba:  0 ,  1633166 ,  545567 , 1117320768 , '/x'"
+  # O LBA de início é o campo DEPOIS da primeira vírgula (o primeiro número é
+  # sempre 0 — usar ele lia o começo da ISO e o "magic" saía lixo).
+  lba="$(xorriso -indev "$INPUT" -find "$abs" -exec report_lba 2>/dev/null \
+         | sed -nE 's/.*[Dd]ata [Ll][Bb][Aa]:[^,]*,[[:space:]]*([0-9]+).*/\1/p' | head -1)"
+  if [[ -n "$lba" ]]; then
+    if dd if="$INPUT" of="$dest" bs=2048 skip="$lba" count=1 status=none 2>/dev/null; then
+      printf '%s' "$dest"
+      return 0
+    fi
+  fi
+  # Reserva: extração normal (funciona quando há espaço; se não houver, falha
+  # e quem chamou trata como "não consegui conferir", nunca como ISO inválida).
+  fetch "$abs"
+}
+
+# Tamanho, em bytes, de um arquivo da ISO — também por metadado.
+fetch_size() {
+  local abs="$1" n
+  if [[ "$MODE" == "dir" ]]; then
+    local f="$abs"
+    [[ -f "$f" ]] || f="${INPUT}${abs}"
+    stat -c %s "$f" 2>/dev/null || echo 0
+    return 0
+  fi
+  # Formato: "-rw-rw-r-- 1 1000 1000 1117320768 Oct 18 13:19 '/path'" -> $5
+  n="$(xorriso -indev "$INPUT" -find "$abs" -exec lsdl 2>/dev/null | awk 'NR==1{print $5}' | tr -dc '0-9')"
+  [[ -n "$n" ]] || n=0
+  printf '%s' "$n"
 }
 
 # fetch sem ruído, para quando só queremos saber se existe.
@@ -290,15 +381,19 @@ if [[ -z "$MODEL_LIST" ]]; then
 else
   while IFS= read -r m; do
     [[ -n "$m" ]] || continue
-    if [[ "$MODE" == "dir" ]]; then
-      src="$m"
-    else
-      src="$(fetch "$m" 2>/dev/null || true)"
-    fi
-    [[ -n "$src" && -f "$src" ]] || { fail "não consegui extrair o modelo ${m}"; continue; }
-    magic="$(head -c 4 "$src" 2>/dev/null || true)"
-    size_mb=$(( $(stat -c %s "$src" 2>/dev/null || echo 0) / 1024 / 1024 ))
-    if [[ "$magic" != "GGUF" ]]; then
+    # Só o PRIMEIRO BLOCO e o tamanho (metadado). Extrair o modelo inteiro
+    # (1,1 GB) para o diretório de trabalho estourava o /tmp (tmpfs) e fazia
+    # TODAS as checagens seguintes falharem — inclusive a do netplan, que estava
+    # certa. Ver `fetch_head`/`fetch_size`.
+    src_head="$(fetch_head "$m" 2>/dev/null || true)"
+    nbytes="$(fetch_size "$m" 2>/dev/null || echo 0)"
+    magic="$(head -c 4 "$src_head" 2>/dev/null || true)"
+    size_mb=$(( nbytes / 1024 / 1024 ))
+    if [[ -z "$src_head" && "$nbytes" == "0" ]]; then
+      # Não deu para ler nem o metadado: isso é limitação do ambiente (espaço,
+      # permissão), NÃO prova que a ISO está errada. SKIP honesto.
+      skip "não consegui ler o modelo ${m} da mídia (sem espaço/permissão no diretório temporário?)"
+    elif [[ "$magic" != "GGUF" ]]; then
       fail "modelo ${m}: magic '${magic}' em vez de 'GGUF' (arquivo inválido na mídia)"
     elif (( size_mb < 10 )); then
       fail "modelo ${m}: ${size_mb} MB — pequeno demais para ser um modelo útil"

@@ -519,6 +519,33 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
 > dizem exatamente onde parou. Foi assim que os três itens acima apareceram
 > (sessão #35) — nenhum deles é visível pelo console serial.
 
+### A ISO foi gerada mas a verificação diz "AUSENTE" em arquivos que existem
+
+- **Sintoma:** `[ERROR] A ISO gerada NÃO passou na verificação` com uma lista
+  enorme de `[FAIL] ... AUSENTE`, às vezes incluindo coisas que você sabe que
+  estão lá (ex.: *"rede auto sem o netplan"*, quando o netplan está na ISO).
+- **Causa (medida, sessão #36):** o verificador extraía o **modelo inteiro**
+  (1,1 GB com `--iso-model auto`) só para conferir o `magic` GGUF. Como o
+  diretório temporário era `mktemp -d` → **`/tmp`**, que em muitas máquinas é
+  **tmpfs** (RAM), o espaço acabava **no meio** da verificação. Do primeiro
+  erro de espaço em diante, **toda** extração falhava — e cada falha virava um
+  `[FAIL] AUSENTE` que culpava a ISO por um problema de disco.
+  Confira você mesmo: `df -h /tmp` (se for `tmpfs` com poucos GB, é isso).
+- **Correção:**
+  - o modelo agora é conferido lendo **só o primeiro bloco** (LBA do arquivo +
+    `dd bs=2048 count=1`), e o tamanho vem do **metadado** do ISO9660 — nada é
+    extraído;
+  - o diretório de trabalho passou a ser escolhido pelo **espaço livre**
+    (`$TMPDIR` → `/tmp` → diretório da ISO → atual), e há a flag `--tmp DIR`;
+  - sem conseguir ler, o verificador diz **`[SKIP]`** (limitação do ambiente)
+    em vez de `[FAIL]` (que acusa a ISO).
+- **Teste:** `make iso-space-test` — usa um modelo **esparso de 2 GB** e prova
+  que ele não é copiado, que um `magic` errado continua sendo reprovado e que
+  `--tmp` inválido degrada em vez de explodir.
+- **Se você já tem uma ISO assim:** ela provavelmente está **boa**. Rode
+  `bash iso/verify-iso.sh --iso SUA.iso --distro ubuntu --tmp /var/tmp` e veja
+  se o resultado muda.
+
 ### O build avisa "Release incompatível" e a ISO sai SEM repositório local
 
 - **Sintoma:** ao gerar a ISO com `--iso-repo auto`, o log diz

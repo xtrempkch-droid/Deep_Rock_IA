@@ -178,6 +178,14 @@ jobs:
           set -euo pipefail
           make iso-release-test
 
+      # O verificador extrai arquivos da ISO; um modelo de 1 GB enchia o /tmp
+      # (tmpfs) e a verificacao passava a reprovar uma ISO CORRETA. Este teste
+      # usa um modelo ESPARSO de 2 GB e prova que ele nao e copiado inteiro.
+      - name: "ISO (verificador × espaço em disco: modelo de 2 GB)"
+        run: |
+          set -euo pipefail
+          make iso-space-test
+
       # As mods de REPARO existem para consertar uma maquina que ja esta no
       # chao (rede sem IP / apt sem repositorio). Um erro nelas tem o pior modo
       # de falha possivel, entao cada uma e provada numa ARVORE FALSA, sem root
@@ -534,6 +542,25 @@ jobs:
           grep -q 'iso-release-test' Makefile
           grep -q 'validate:.*iso-release-test' Makefile
           grep -q 'make iso-release-test' .github/workflows/validate.yml
+          # --- O verificador nao pode quebrar por FALTA DE ESPACO -----------
+          # Ele extraia o modelo INTEIRO (1,1 GB) para conferir o magic GGUF,
+          # e mktemp -d usa /tmp (tmpfs em muitas maquinas). O /tmp enchia no
+          # meio da verificacao e TODA extracao seguinte falhava -- cascata de
+          # falsos FAIL culpando a ISO (inclusive "rede auto sem o netplan").
+          test -f tests/test-verify-iso-space.sh
+          grep -q 'df -Pk' iso/verify-iso.sh
+          grep -q '^fetch_head()' iso/verify-iso.sh
+          grep -q 'report_lba' iso/verify-iso.sh
+          # o caminho de leitura por LBA tem de estar ATIVO (um `if false`
+          # aqui volta a extrair o arquivo inteiro e enche o /tmp)
+          grep -qF 'if [[ -n "$lba" ]]; then' iso/verify-iso.sh
+          # O LBA de inicio e o campo DEPOIS da primeira virgula; pegar o
+          # primeiro numero le o comeco da ISO e o magic sai lixo.
+          grep -qF 'data lba:' iso/verify-iso.sh
+          grep -q -- '--tmp' iso/verify-iso.sh
+          grep -q 'iso-space-test' Makefile
+          grep -q 'validate:.*iso-space-test' Makefile
+          grep -q 'make iso-space-test' .github/workflows/validate.yml
           # O firstboot tem de SINCRONIZAR o disco antes de sair, e o teste de
           # VM tem de dar tempo ao qemu antes de encerrar. Sem isso, um
           # desligamento logo depois deixa arquivos com 0 byte — `llama-server`,

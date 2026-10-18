@@ -338,6 +338,12 @@ planta "a versão da base voltar a ignorar o arquivo (--iso)" iso/build-iso.sh \
 planta "o codename voltar a sair só da tabela fixa" iso/build-iso.sh \
   sed_ 's|    want="\$(iso_base_codename)"|    want="\$(ubuntu_codename_for_version "$ver")"|' iso/build-iso.sh
 
+# --- O verificador não pode quebrar por falta de espaço -------------------
+planta "o verificador voltar a extrair o modelo INTEIRO" iso/verify-iso.sh \
+  sed_ 's|^  if \[\[ -n "\$lba" \]\]; then|  if false; then|' iso/verify-iso.sh
+planta "o verificador voltar a usar /tmp às cegas" iso/verify-iso.sh \
+  sed_ 's|df -Pk|true|g' iso/verify-iso.sh
+
 echo
 if [[ $FAIL -eq 0 ]]; then
   echo "ci-guards: PASS=${PASS} FAIL=0"

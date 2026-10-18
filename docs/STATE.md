@@ -266,6 +266,18 @@ Duas correções:
   iso-release-test` (10 asserções, ISOs falsas, sem rede) prova os dois
   sentidos: release que casa → monta o repo; release diferente → avisa e
   **não** monta.
+- **E um quarto, achado ao RODAR o build de ponta a ponta:** o verificador
+  **reprovava uma ISO correta** porque extraía o **modelo inteiro** (1,1 GB)
+  só para ler 4 bytes de `magic` GGUF, e o diretório de trabalho era
+  `mktemp -d` → `/tmp`, que nesta máquina é **tmpfs de 7,5 GB**. O espaço
+  acabava no meio da verificação e, do primeiro erro em diante, **toda**
+  extração falhava: cascata de falsos `[FAIL] AUSENTE` — inclusive *"rede auto
+  sem o netplan"*, com o netplan **presente** na ISO (extraí e conferi). Agora
+  o modelo é conferido lendo **só o primeiro bloco** (LBA + `dd bs=2048
+  count=1`) e o tamanho vem do metadado; o diretório de trabalho é escolhido
+  pelo **espaço livre** (`--tmp DIR` disponível); e sem conseguir ler o
+  verificador diz `[SKIP]` em vez de acusar a ISO. Prova:
+  `make iso-space-test` (**6 asserções**, modelo **esparso de 2 GB**).
 
 > ✅ **PROVADO EM VM NAS DUAS DISTROS:** **Debian 13.7** (`verify-iso` **PASS=52**)
 > e **Ubuntu 24.04.5** (`PASS=43`) — nos dois, instalação automática, 1º boot

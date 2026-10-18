@@ -2496,6 +2496,24 @@ garante os arquivos íntegros acima.
   Prova: `make iso-release-test` (10 asserções, ISOs falsas) — 26.04 em host
   26.04 → "Release confere: resolute" + "baixaria o fecho … openssh-server";
   22.04 em host 26.04 → aviso + repo descartado. `ci-guards` 81 → **83**.
+- **Quarto achado, ao RODAR o build recomendado de ponta a ponta** (não em
+  dry-run): a ISO de 26.04 foi gerada com sucesso — `Release confere:
+  resolute`, **459 pacotes** no repositório (com `openssh-server`, `sudo`,
+  `git`) — e então o **próprio verificador reprovou a ISO**: 2 problemas, um
+  deles *"rede auto sem /preseed/ai-cpu-os-netplan.yaml"*. Mas o arquivo
+  **estava na ISO** (extraí e conferi). Causa real: o verificador extraía o
+  **modelo inteiro** (1,1 GB) para ler 4 bytes de `magic`; o diretório de
+  trabalho é `mktemp -d` → **/tmp**, que aqui é **tmpfs de 7,5 GB**. O tmpfs
+  enchia e, do primeiro ENOSPC em diante, **toda** extração falhava →
+  cascata de falsos `AUSENTE`. Correção: `fetch_head()` (LBA via `report_lba`
+  + `dd bs=2048 count=1`) e `fetch_size()` (metadado `lsdl`); diretório de
+  trabalho escolhido pelo **espaço livre** (`$TMPDIR` → `/tmp` → dir da ISO →
+  atual, mais `--tmp DIR`); e `[SKIP]` honesto quando não dá para ler — nunca
+  acusar a ISO por falta de espaço. Detalhe que quase passou: o LBA de início
+  é o campo **depois da primeira vírgula** de `File data lba:  0 ,  1633166 ,`;
+  pegar o primeiro número lia o começo da ISO e o magic saía `eb63 9090`.
+  **Prova:** `make iso-space-test` (6 asserções, modelo esparso de 2 GB) e a
+  ISO real voltou a **PASS=50 FAIL=0**. `ci-guards` 83 → **85**.
 - **PROVA NAS DUAS DISTROS (2026-10-18):** ISO **Ubuntu 24.04.5** gerada
   (`verify-iso` **PASS=43**) e **Debian 13.7** (**PASS=52**); nos dois casos
   `test-vm.sh` **OK** nos dois marcadores e, ao subir o disco instalado com a
