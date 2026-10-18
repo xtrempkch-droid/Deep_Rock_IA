@@ -604,6 +604,46 @@ instaladores — ver § 3.
 
 ---
 
+### 4.5.1 Como a variante Debian funciona (a cadeia de boot do preseed)
+
+O Debian **não** tem autoinstall: quem responde as perguntas é o
+`debian-installer` (d-i) lendo um **preseed**. Cada elo da cadeia abaixo — e
+cada linha da tabela — já travou a instalação de verdade (sessão #35; ver
+`TROUBLESHOOTING.md`):
+
+```text
+isolinux.cfg / grub.cfg     prompt 0 + preseed/file=/preseed.cfg + idioma na cmdline
+        │
+        ▼
+initrd.gz  ←  /preseed.cfg na RAIZ (inject_preseed_initrd anexa um 2º cpio)
+        │      é o S30initrd-preseed que lê: `if [ -e /preseed.cfg ]`
+        ▼
+d-i aplica o preseed  →  localechooser, netcfg, partman, pkgsel…
+        │                 (idioma/teclado vêm da cmdline via env2debconf,
+        │                  porque o localechooser roda ANTES da mídia montar)
+        ▼
+d-i preseed/late_command  →  sh /preseed/late-command.sh  (copia o projeto)
+```
+
+| Elo | O que o `build-iso.sh` faz | Por que |
+|---|---|---|
+| Boot | `prompt 0`, `timeout 100`, `default ai-cpu-os-auto` | com `prompt 1` o isolinux mostra `boot:` e **espera tecla** (o `timeout` não vale) — a VM fica parada e o serial sai **vazio** |
+| Console | `serial 0 115200` + `console 0` quando `--serial-console` | sem isso não existe menu nenhum para um teste headless |
+| Cmdline | `auto=true priority=critical preseed/file=/preseed.cfg language=… country=… locale=… keymap=…` | `localechooser`/`kbd-chooser` rodam **antes** de a mídia ser montada; `env2debconf` mapeia esses nomes via `/etc/preseed_aliases` |
+| initrd | `inject_preseed_initrd()` anexa um `cpio` (newc) com `/preseed.cfg`, `/preseed/ai-cpu-os.cfg` e `/preseed/late-command.sh` | o d-i só lê `/preseed.cfg` **na raiz do initramfs**; `preseed/file=/cdrom/…` seria aplicado quando o udeb `file-preseed` instala — tarde demais |
+| Preseed | `d-i localechooser/languagelist select @@LANG@@` **além** de `d-i debian-installer/language` | a pergunta exibida é a **lista** (`localechooser/languagelist`), e ela só é pulada se o idioma estiver nas **escolhas** da lista — em console serial a lista é nível 0 e só tem `en` |
+| Boot loader | `d-i grub-installer/bootdev string <DISCO>` (ou `default` sem disco fixado) | é pergunta **crítica** feita no **fim** da instalação: sem resposta o instalador espera para sempre com o sistema já copiado |
+| late_command | `sh /preseed/late-command.sh` (o script autodetecta `/cdrom`, `/media/cdrom`, `/hd-media`, `/media/usb`) | o ponto de montagem muda entre BIOS/UEFI e entre netinst/ISO completa |
+| Valores literais | todos os marcadores do `late-command.sh` em **aspas simples** | aspas duplas expandem o `$` de um hash crypt (`$6$…`); sob `set -u` o script morre com `exit 2` antes de copiar qualquer arquivo — e o `sh -n` **não** detecta |
+| Fim da instalação | o `late-command.sh` faz `sync` + `umount /target` + **`reboot -f`** no fim, *e* substitui `finish-install.d/20final-message` por um no-op | a nota final do d-i pode devolver "back": o `finish-install` interpreta como `exit 10` e **aborta** a sequência — a máquina para no menu em vez de reiniciar. O patch sozinho **não basta** (o `20final-message` vem do udeb `finish-install`, desempacotado **depois** do hook `07preseed`); quem reinicia de fato é o `reboot -f`, e o patch é o cinto de segurança |
+| `apt` do alvo | remove `deb … cdrom:` do `sources.list` do alvo e roda `apt-get update` uma vez | o instalador grava a mídia como fonte; depois ela não existe e **todo** `apt-get update` falha (o 1º boot abortava com `rc=100`) |
+| Pacotes | `EXTRA_PACKAGES` inclui **`sudo`** | o Debian **não** traz `sudo` numa instalação padrão: sem ele, e com o root bloqueado, o usuário da ISO não administra nada |
+
+> **O `md5sum.txt` do Debian é regenerado** depois do patch (o d-i confere a
+> mídia); no Ubuntu ele é removido.
+
+---
+
 ### 4.6 Validar a ISO (as duas ferramentas do projeto)
 
 O projeto traz duas ferramentas — e elas cobrem coisas **diferentes**:

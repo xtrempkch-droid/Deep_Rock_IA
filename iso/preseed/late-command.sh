@@ -37,28 +37,53 @@ set -eu
 
 log() { echo "[ai-cpu-os/iso-late] $*"; }
 
-SRC="/cdrom"
+## Se algo falhar, o console serial precisa DIZER isso. Sem o trap, um erro
+## aqui só aparecia no log do instalador (tty4) e o sintoma visível era o
+## genérico "Failed to run preseeded command … exit code 2" (sessão #35).
+rc=0   # só para o shellcheck: o trap abaixo é quem atribui, em tempo de saída
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then
+        printf "[ai-cpu-os/iso-late] ERRO: falhou com exit %s (veja o log do instalador em tty4)\n" "$rc" > /dev/console 2>/dev/null || true
+      fi' EXIT
+
+## Onde está o projeto? No Ubuntu a mídia está em /cdrom; no Debian o
+## cdrom-detect monta em /media/cdrom (e /cdrom só passa a existir como
+## symlink depois). Um teste em VM (sessão #35) mostrou que depender de um
+## caminho fixo é frágil — então procuramos nos candidatos conhecidos.
+SRC=""
+for _cand in /cdrom /media/cdrom /hd-media /media/usb; do
+    if [ -d "${_cand}/ai-cpu-os" ]; then
+        SRC="${_cand}"
+        break
+    fi
+done
+[ -n "${SRC}" ] || SRC="/cdrom"   # mantém a mensagem de erro apontando o lugar esperado
 DST="/target/opt/ai-cpu-os"
 UNIT="/etc/systemd/system/ai-cpu-os-firstboot.service"
 
 ## Nome do modelo embutido na mídia (vazio = a ISO foi gerada com --iso-model none).
 ## O arquivo correspondente é lido de ${SRC}/models/ e copiado para o alvo AQUI,
 ## na instalação, para o primeiro boot não precisar de rede para nada disso.
-ISO_MODEL_NAME="@@ISO_MODEL@@"
+## ATENÇÃO ao tipo de aspas: estes valores são LITERAIS vindos do build. Aspas
+## duplas fariam o shell EXPANDIR o que estiver dentro — e um hash crypt sempre
+## tem `$`. Foi exatamente assim que a ISO Debian parou de instalar sozinha:
+## `ROOT_PASSWORD_HASH="$6$sal$hash"` virava a expansão de `$6` e, sob `set -u`,
+## o script morria com exit 2 antes de copiar qualquer arquivo (sessão #35).
+ISO_MODEL_NAME='@@ISO_MODEL@@'
 MODEL_DST_DIR="/opt/models"
 
 ## Nome do tarball da fonte do llama.cpp embutido na midia (vazio = sem fonte).
 ## O arquivo e copiado para o alvo e o 1o boot usa `--source` com ele: assim o
 ## passo mais demorado do 1o boot (compilar o llama.cpp) roda SEM rede, e o que
 ## sera compilado fica pinado no que veio na midia.
-ISO_SOURCE_NAME="@@LLAMA_SRC_NAME@@"
+ISO_SOURCE_NAME='@@LLAMA_SRC_NAME@@'
 SOURCE_DST="/opt/llama-src.tar.gz"
 
 ## Senha do ROOT (hash crypt) — vazia = root continua BLOQUEADO (padrão).
 ## O autoinstall/Subiquity nao tem campo de root, entao o caminho dos DOIS
 ## instaladores e aqui: `chpasswd -e` espera um hash crypt (nunca texto puro)
 ## e o aplica dentro do alvo via in_target/curtin.
-ROOT_PASSWORD_HASH="@@ROOT_PASSWORD_HASH@@"
+## Aspas SIMPLES (ver a nota acima): o `$` do hash tem de chegar ao chpasswd.
+ROOT_PASSWORD_HASH='@@ROOT_PASSWORD_HASH@@'
 
 ## ---------------------------------------------------------------------------
 ## Executar um comando DENTRO do sistema instalado.
@@ -107,7 +132,7 @@ if [ -n "${ISO_SOURCE_NAME}" ]; then
 fi
 
 printf 'ROLE=%s\nFAMILY=%s\nFIRSTBOOT_REBOOT=%s\nDISTRO=%s\nISO_BUILD=%s\nMODEL_FILE=%s\nLLAMA_SRC=%s\n' \
-    "@@ROLE@@" "@@FAMILY@@" "@@FIRSTBOOT_REBOOT@@" "@@DISTRO@@" "@@ISO_BUILD@@" "${MODEL_FILE}" "${LLAMA_SRC}" \
+    '@@ROLE@@' '@@FAMILY@@' '@@FIRSTBOOT_REBOOT@@' '@@DISTRO@@' '@@ISO_BUILD@@' "${MODEL_FILE}" "${LLAMA_SRC}" \
     > "${DST}/.iso-config"
 
 ## ---------------------------------------------------------------------------
@@ -200,11 +225,11 @@ fi
 ## real. A ISO agora traz o netplan PRONTO em /preseed/ai-cpu-os-netplan.yaml
 ## (gerado pelo build-iso.sh a partir de --network) e nós o copiamos para o
 ## alvo. É o MESMO YAML que o instalador usou: uma fonte de verdade só.
-NETWORK_MODE="@@NETWORK_MODE@@"
-DISTRO_NAME="@@DISTRO@@"
-NET_IP="@@NET_IP@@"
-NET_GATEWAY="@@NET_GATEWAY@@"
-NET_DNS="@@NET_DNS@@"
+NETWORK_MODE='@@NETWORK_MODE@@'
+DISTRO_NAME='@@DISTRO@@'
+NET_IP='@@NET_IP@@'
+NET_GATEWAY='@@NET_GATEWAY@@'
+NET_DNS='@@NET_DNS@@'
 
 if [ "${NETWORK_MODE}" = "none" ]; then
     log "rede: --network none (nenhuma configuracao gravada; a placa pode subir DOWN)"
@@ -291,14 +316,46 @@ cat >> /target/etc/issue <<'ISSUE'
 ISSUE
 
 ## ---------------------------------------------------------------------------
-## 4-c. Remover fontes de apt apontando para a MÍDIA do sistema instalado
+## 4-c. Limpar as fontes de apt do alvo que apontam para a MÍDIA
 ## ---------------------------------------------------------------------------
-## A instalação usa o repositório local da mídia (/cdrom/apt-repo) para não
-## precisar de rede. Esse caminho deixa de existir depois da instalação — se a
-## fonte ficasse no alvo, todo `apt update` reclamaria de um repositório
-## inalcançável. Removemos APENAS o que aponta para a mídia: o espelho oficial
-## (que é o `primary`) permanece intacto.
-APT_REPO_PATH="@@APT_REPO_PATH@@"
+## São dois casos distintos, e os dois quebram `apt-get update` no alvo:
+##
+##  (a) `cdrom:[Debian …]` — esta é gravada pelo próprio instalador
+##      (`apt-cdrom-setup`) e NÃO tem nada a ver com --iso-repo. Depois da
+##      instalação a mídia não existe mais, e todo `apt-get update` falha com
+##      "o repositório cdrom://… não tem um arquivo Release". Era isso que
+##      derrubava o PRIMEIRO BOOT no papel `inference` (rc=100 antes de instalar
+##      qualquer dependência) — medido numa VM de verdade, sessão #35.
+##  (b) `file:///cdrom/…` (o repositório local de --iso-repo), tratado abaixo.
+##
+## O espelho oficial (`deb.debian.org`/`archive.ubuntu.com`) NUNCA é tocado: é
+## o `primary` e é o que faz o sistema continuar atualizável.
+log "removendo fontes de apt do tipo 'cdrom:' do alvo (a mídia não existe mais)"
+for _f in /target/etc/apt/sources.list /target/etc/apt/sources.list.d/*.list; do
+    [ -f "${_f}" ] || continue
+    if grep -qE '^[[:space:]]*deb(-src)?[[:space:]]+cdrom:' "${_f}" 2>/dev/null; then
+        cp -a "${_f}" "${_f}.bak" 2>/dev/null || true
+        grep -vE '^[[:space:]]*deb(-src)?[[:space:]]+cdrom:' "${_f}.bak" > "${_f}" 2>/dev/null || true
+        log "removido 'cdrom:' de ${_f}"
+    fi
+done
+for _f in /target/etc/apt/sources.list.d/*.sources; do
+    [ -f "${_f}" ] || continue
+    if grep -qE '^[[:space:]]*URIs:[[:space:]].*cdrom:' "${_f}" 2>/dev/null; then
+        rm -f "${_f}"
+        log "removido ${_f} (URI cdrom:)"
+    fi
+done
+
+## Reexecuta o update UMA vez, já sem as fontes da mídia. Falhar aqui não
+## invalida a instalação: o primeiro boot roda `apt-get update` de novo.
+if in_target apt-get update >/dev/null 2>&1; then
+    log "apt update do alvo OK após a limpeza"
+else
+    log "AVISO: apt update no alvo falhou (sem rede agora é esperado); rode depois"
+fi
+
+APT_REPO_PATH='@@APT_REPO_PATH@@'
 if [ -n "${APT_REPO_PATH}" ]; then
     log "removendo fontes de apt que apontam para a mídia (${APT_REPO_PATH})"
     for f in /target/etc/apt/sources.list /target/etc/apt/sources.list.d/*.list /target/etc/apt/sources.list.d/*.sources; do
@@ -321,11 +378,6 @@ if [ -n "${APT_REPO_PATH}" ]; then
             esac
         fi
     done
-    if in_target apt-get update >/dev/null 2>&1; then
-        log "apt update do alvo OK após a limpeza"
-    else
-        log "AVISO: apt update no alvo falhou (sem rede agora é esperado); rode depois"
-    fi
 fi
 
 ## ---------------------------------------------------------------------------
@@ -333,7 +385,7 @@ fi
 ## ---------------------------------------------------------------------------
 ## Sem isto, um teste headless (iso/test-vm.sh) não vê nada do sistema
 ## instalado: a saída vai para a tela virtual, que ninguém está olhando.
-SERIAL_CONSOLE="@@SERIAL_CONSOLE@@"
+SERIAL_CONSOLE='@@SERIAL_CONSOLE@@'
 if [ "${SERIAL_CONSOLE}" = "yes" ]; then
     log "habilitando console serial no sistema instalado (console=ttyS0,115200)"
     if [ -f /target/etc/default/grub ]; then
@@ -355,6 +407,34 @@ if [ "${SERIAL_CONSOLE}" = "yes" ]; then
     else
         log "AVISO: /target/etc/default/grub ausente; console serial não configurado"
     fi
+fi
+
+## ---------------------------------------------------------------------------
+## 4-e. Reboot determinístico no fim da instalação (só no d-i/Debian)
+## ---------------------------------------------------------------------------
+## O d-i termina com `finish-install.d/20final-message`, que PERGUNTA a nota
+## "Installation complete" e trata um `db_go` que devolva "back" como `exit 10`.
+## O `finish-install` do d-i interpreta 10 como "backed up": ele ABORTA a
+## sequência, volta ao MENU PRINCIPAL e a máquina fica parada — não reinicia
+## (medido numa VM de verdade em console serial, sessão #35; de quebra, os
+## hooks seguintes, inclusive o 99reboot e o 94save-logs, nunca rodam).
+##
+## Como este script roda no hook 07preseed (antes do 20), podemos substituir o
+## hook por um no-op: nada é perguntado e o 99reboot padrão reinicia a máquina
+## como uma instalação automática precisa. Em Ubuntu não existe esse diretório
+## (o fim é do curtin), então o bloco é ignorado lá.
+FINISH_DIR="/usr/lib/finish-install.d"
+if [ -d "${FINISH_DIR}" ] && [ -f "${FINISH_DIR}/20final-message" ]; then
+    cat > "${FINISH_DIR}/20final-message" <<'FINALHOOK'
+#!/bin/sh
+# ai-cpu-os: substitui o 20final-message do debian-installer.
+# A nota final do d-i pode devolver "back" (exit 10), o que faz o
+# finish-install abortar e a instalação parar no menu em vez de reiniciar.
+# Não perguntamos nada: o 99reboot padrão reinicia a máquina.
+exit 0
+FINALHOOK
+    chmod 0755 "${FINISH_DIR}/20final-message"
+    log "hook final do d-i substituído (reinicia em vez de parar no menu)"
 fi
 
 ## ---------------------------------------------------------------------------
@@ -407,3 +487,27 @@ log "pós-instalação concluído; o ai-cpu-os será aplicado no primeiro boot"
 ## repetimos o marcador em /dev/console (que é o ttyS0 quando a ISO é gerada
 ## com --serial-console). Sem isto o teste headless ficava mudo na instalação.
 printf '[ai-cpu-os/iso-late] pós-instalação concluído\n' > /dev/console 2>/dev/null || true
+
+## ---------------------------------------------------------------------------
+## 3-d. Reinício determinístico no d-i (Debian)
+## ---------------------------------------------------------------------------
+## Por que reiniciar AQUI e não deixar o `finish-install` reiniciar: no Debian o
+## hook `/usr/lib/finish-install.d/20final-message` mostra uma tela final e, num
+## console serial, o `db_go` devolve "back"; o `finish-install` interpreta isso
+## como "backed up", ABORTA a sequência (nem `95umount` nem `99reboot` rodam) e
+## a máquina para no MENU PRINCIPAL do instalador com a instalação já pronta.
+## Observado em VM duas vezes (sessão #35) — inclusive com o hook substituído
+## (bloco 4-e), porque o `20final-message` só é desempacotado depois deste ponto.
+## Reiniciar daqui é o único ponto do fluxo que depende só de nós mesmos; o
+## patch do bloco 4-e fica como cinto de segurança caso o reboot falhe.
+if [ "${AI_CURTIN:-0}" != "1" ]; then
+    log "instalação concluída: reiniciando o sistema instalado (d-i)"
+    printf '[ai-cpu-os/iso-late] reiniciando\n' > /dev/console 2>/dev/null || true
+    sync || true
+    umount /target 2>/dev/null || true
+    umount /cdrom 2>/dev/null || true
+    umount /media/cdrom 2>/dev/null || true
+    sync || true
+    reboot -f 2>/dev/null || /sbin/reboot -f 2>/dev/null \
+        || /lib/debian-installer/exit 20 2>/dev/null || true
+fi

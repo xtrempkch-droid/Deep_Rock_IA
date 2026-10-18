@@ -498,6 +498,64 @@ jobs:
             echo "::error file=roles/inference/ai-server.service::--no-mmap fixo (use LLAMA_EXTRA_ARGS + deteccao)"
             exit 1
           fi
+          # ISO DEBIAN: a instalacao automatica tem de comecar SOZINHA. Cada
+          # elo abaixo foi descoberto bootando a ISO Debian pela primeira vez
+          # (sessao #35) e o modo de falha e sempre o mesmo: a VM fica parada,
+          # o disco nao e tocado e o serial nao mostra erro.
+          #  (a) `prompt 1` mostra "boot:" e ESPERA UMA TECLA (o timeout nao
+          #      vale nesse modo) -> o instalador nunca inicia;
+          grep -qF 's/^[[:space:]]*prompt[[:space:]].*/prompt 0/' iso/build-iso.sh
+          #  (b) o d-i le o preseed do INITRD (`S30initrd-preseed` faz
+          #      `if [ -e /preseed.cfg ]`), nao do /cdrom montado depois ->
+          #      o preseed tem de ser injetado no initramfs;
+          grep -q '^inject_preseed_initrd()' iso/build-iso.sh
+          grep -qE '^[[:space:]]+inject_preseed_initrd$' iso/build-iso.sh
+          grep -q 'preseed/file=/preseed.cfg' iso/build-iso.sh
+          #  (c) o localechooser roda ANTES de a midia ser montada, entao
+          #      idioma/teclado tem de ir na cmdline (env2debconf);
+          grep -q '^debian_locale_args()' iso/build-iso.sh
+          if [[ "$(grep -cF '$(debian_locale_args)' iso/build-iso.sh)" -lt 3 ]]; then
+            echo "::error file=iso/build-iso.sh::as 3 entradas Debian precisam de debian_locale_args"
+            exit 1
+          fi
+          #  (d) a pergunta REAL e `localechooser/languagelist`, e ela so e
+          #      pulada se o idioma estiver nas ESCOLHAS da lista — em console
+          #      serial a lista e nivel 0 (so 'en'), entao responder so
+          #      `debian-installer/language` NAO basta e a instalacao trava.
+          grep -qE '^d-i[[:space:]]+localechooser/languagelist[[:space:]]+select' iso/preseed/ai-cpu-os.cfg
+          grep -q '@@LANG@@' iso/preseed/ai-cpu-os.cfg
+          grep -q 'localechooser/languagelist' iso/verify-iso.sh
+          #  (e) `grub-installer/bootdev` e pergunta CRITICA e vem DEPOIS de o
+          #      sistema inteiro estar copiado: sem resposta o d-i para em
+          #      "[!!] Configurando grub-pc" esperando o dispositivo.
+          grep -q '@@GRUB_BOOTDEV@@' iso/preseed/ai-cpu-os.cfg
+          grep -q '^grub_bootdev_line()' iso/build-iso.sh
+          grep -q 'grub-installer/bootdev' iso/verify-iso.sh
+          #  (f) o instalador grava `deb cdrom:[Debian ...]` no sources.list do
+          #      alvo; depois da instalacao a midia nao existe e TODO
+          #      `apt-get update` falha — o 1o boot do papel inference morria
+          #      com rc=100 antes de instalar qualquer dependencia.
+          grep -qF 'deb(-src)?[[:space:]]+cdrom:' iso/preseed/late-command.sh
+          grep -q 'cdrom:' iso/verify-iso.sh
+          #  (g) o `20final-message` do d-i PERGUNTA a nota final e trata um
+          #      "back" como exit 10: o finish-install aborta e a instalacao
+          #      PARA NO MENU em vez de reiniciar (console serial = sempre).
+          grep -q '20final-message' iso/preseed/late-command.sh
+          grep -q '20final-message' iso/verify-iso.sh
+          #  (g2) o patch do 20final-message e so cinto de seguranca (o udeb e
+          #       desempacotado depois do hook 07preseed). Quem reinicia de
+          #       fato e o `reboot -f` no fim do late-command; sem ele a VM
+          #       fica parada no menu principal com a instalacao pronta.
+          grep -qE '^[[:space:]]*reboot -f' iso/preseed/late-command.sh
+          grep -q 'reinicia explicitamente' iso/verify-iso.sh
+          #  (h) `sudo` NAO vem na instalacao padrao do Debian: sem ele o
+          #      usuario da ISO (grupo sudo) nao administra nada, e com o root
+          #      bloqueado o sistema fica sem acesso administrativo.
+          if ! grep -qE '^EXTRA_PACKAGES="[^"]*\bsudo\b' iso/build-iso.sh; then
+            echo "::error file=iso/build-iso.sh::EXTRA_PACKAGES precisa incluir 'sudo' (Debian nao o traz)"
+            exit 1
+          fi
+          grep -q 'pkgsel/include' iso/verify-iso.sh
           grep -q 'LLAMA_EXTRA_ARGS' roles/inference/ai-server.service
           grep -qE '^[[:space:]]*detect_extra_args\(\)' roles/inference/install.sh
           grep -q -- '--load-mode' roles/inference/install.sh

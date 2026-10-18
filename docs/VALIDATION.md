@@ -725,8 +725,36 @@ sudo systemctl disable --now ai-server
 > curtin; marcadores; SIGPIPE; aspas do `-find`). Detalhes: `JOURNAL.md` § 4
 > (sessão #21) e `STATE.md` § 3.3.
 
-### M.1 Preparar a máquina de build (Debian/Ubuntu com xorriso)
+### M.0b ✅ RESULTADO EXECUTADO — sessão #35 (2026-10-18), caminho Debian
 
+> **O caminho Debian/preseed foi executado pela primeira vez.** Base
+> `debian-13.7.0-amd64-netinst.iso`, VM qemu/KVM (4 vCPU, 6 GB, `-cpu host`),
+> console serial. Gerado com `--distro debian --iso-model none --iso-source
+> none --iso-repo none --serial-console` (ISO leve: sem modelo/fonte/repo).
+
+| Passo | Resultado |
+|-------|-----------|
+| `make iso-lint` / autoteste de templates | ✅ |
+| Build da ISO (`--distro debian`) | ✅ **exit 0** |
+| `verify-iso.sh` sobre a ISO real | ✅ **PASS=50 FAIL=0** |
+| `test-vm.sh` (boot + instalação + 1º boot) | ✅ **exit 0** |
+| Instalação automática (sem perguntas) | ✅ |
+| Reinício automático | ✅ `[ai-cpu-os/iso-late] reiniciando` |
+| 1º boot aplicou o ai-cpu-os | ✅ `aplicação concluída com sucesso` |
+| Família detectada no alvo | ✅ `intel-haswell` |
+| llama.cpp compilado no alvo | ✅ `/opt/llama.cpp/build/bin/` |
+| `apt` do alvo sem `cdrom:` | ✅ (`deb http://deb.debian.org/debian trixie …`) |
+| Acesso administrativo (`sudo`) | ✅ instalado; root bloqueado por padrão |
+| Caminho **offline** (modelo/fonte/repo na mídia) | ❌ **NÃO exercitado no Debian** |
+
+> 🔴 **O que NÃO foi feito neste bloco:** o modo **air-gapped** no Debian, o
+> **boot UEFI** (`--boot-mode uefi`), `--network static` no Debian, outra
+> release do Debian (só a 13.7) e o **hardware físico**.
+>
+> As **8 travas** (todas mudas: o sintoma é a VM parada, nunca um erro) estão
+> em `docs/STATE.md` § 3.4, `docs/TROUBLESHOOTING.md` e `JOURNAL.md` § 4.
+
+### M.1 Preparar a máquina de build (Debian/Ubuntu com xorriso)
 ```bash
 # Obrigatórias
 sudo apt install -y xorriso curl coreutils

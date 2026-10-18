@@ -281,6 +281,39 @@ planta "o install.sh deixar de detectar a sintaxe do binário" roles/inference/i
 planta "o shell-ia voltar a devolver a linha do protocolo" roles/inference/shell-ia.py \
   sed_ 's|^        return chat(messages)$|        return messages[-1].get("content", "")|' roles/inference/shell-ia.py
 
+# --- ISO Debian: a instalação automática tem de começar sozinha -------------
+# Cada item abaixo foi um travamento REAL numa VM (sessão #35), todos com o
+# mesmo sintoma: a máquina fica parada, o disco não é tocado e o serial não
+# mostra erro nenhum.
+planta "o isolinux voltar a esperar tecla (prompt 1)" iso/build-iso.sh \
+  sed_ 's|/prompt 0/|/prompt 1/|' iso/build-iso.sh
+planta "o preseed deixar de ser injetado no initrd" iso/build-iso.sh \
+  sed_ 's|^    inject_preseed_initrd$|    true|' iso/build-iso.sh
+planta "a cmdline deixar de passar preseed/file=" iso/build-iso.sh \
+  sed_ 's|preseed/file=/preseed.cfg|preseed/url=http://x/p.cfg|g' iso/build-iso.sh
+planta "as entradas Debian perderem o idioma da cmdline" iso/build-iso.sh \
+  sed_ 's|\$(debian_locale_args)||g' iso/build-iso.sh
+planta "a preseed deixar de responder localechooser/languagelist" iso/preseed/ai-cpu-os.cfg \
+  sed_ 's|^d-i localechooser/languagelist select @@LANG@@|# sem idioma|' iso/preseed/ai-cpu-os.cfg
+planta "o verificador deixar de conferir o idioma do instalador" iso/verify-iso.sh \
+  sed_ 's|localechooser/languagelist|lista-idiomas|g' iso/verify-iso.sh
+planta "a preseed deixar de responder o dispositivo do GRUB" iso/preseed/ai-cpu-os.cfg \
+  sed_ 's|^@@GRUB_BOOTDEV@@|# sem bootdev|' iso/preseed/ai-cpu-os.cfg
+planta "o verificador deixar de conferir o dispositivo do GRUB" iso/verify-iso.sh \
+  sed_ 's|grub-installer/bootdev|grub-installer/dispositivo|g' iso/verify-iso.sh
+
+# --- ISO Debian: o PRIMEIRO BOOT tem de aplicar o ai-cpu-os -----------------
+# Os três itens abaixo foram vistos num sistema REALMENTE instalado (SSH no
+# alvo, sessão #35): a instalação terminava, mas o 1º boot abortava.
+planta "o late-command deixar a fonte 'cdrom:' no apt do alvo" iso/preseed/late-command.sh \
+  sed_ 's|cdrom:|cdromx:|g' iso/preseed/late-command.sh
+planta "o late-command deixar de trocar o hook final do d-i" iso/preseed/late-command.sh \
+  sed_ 's|20final-message|nota-final|g' iso/preseed/late-command.sh
+planta "o late-command deixar de reiniciar o d-i (para no menu)" iso/preseed/late-command.sh \
+  sed_ 's|^\([[:space:]]*\)reboot -f|\1: reboot -f|' iso/preseed/late-command.sh
+planta "o EXTRA_PACKAGES perder o sudo (Debian não o traz)" iso/build-iso.sh \
+  sed_ 's|^EXTRA_PACKAGES="sudo |EXTRA_PACKAGES="|' iso/build-iso.sh
+
 echo
 if [[ $FAIL -eq 0 ]]; then
   echo "ci-guards: PASS=${PASS} FAIL=0"

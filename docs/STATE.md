@@ -70,7 +70,7 @@
 | `iso/check-iso.sh` (ISO baixada, sem xorriso) | ✅ | ✅ shellcheck | ✅ **20 asserções, fixtures byte a byte**; ❌ nunca rodou contra um artifact real do GitHub |
 | `iso/write-pendrive.sh` (grava o pendrive) | ✅ | ✅ shellcheck | ⚠️ 16 asserções gravando num **ARQUIVO**; ❌ **nenhum pendrive físico gravado** |
 | `webui/server.py` + `webui/index.html` (interface web) | ✅ | ⚠️ py_compile | ⚠️ **34 asserções pela API**; ❌ **nunca aberta num navegador** |
-| `iso/preseed/*` (preseed, 1º boot)    | ✅      | ⚠️ (templating)    | ✅ **bootado em VM (Ubuntu)**; Debian/preseed ❌ |
+| `iso/preseed/*` (preseed, 1º boot)    | ✅      | ⚠️ (templating)    | ✅ **instalado em VM (Ubuntu) e em VM (Debian 13, 2026-10-18)** — ver § 3.4 |
 | `docs/ISO.md`                         | ✅      | ⚠️ (revisão manual)| ❌                  |
 | `docs/JOURNAL.md` (continuidade)      | ✅      | ⚠️ (revisão manual)| ☐ **em uso contínuo** |
 
@@ -163,6 +163,51 @@ com `-cpu host` (Xeon Haswell-EP).
 > comportamento no Xeon/Ryzen reais (Blocos A–O do `VALIDATION.md`). E há um
 > resíduo air-gapped em investigação (§ 5.3).
 
+### 3.4 ✅ A variante Debian/preseed instalada em VM (2026-10-18)
+
+O caminho **Debian** (`--distro debian`, preseed + isolinux) nunca havia sido
+executado — só o Ubuntu tinha prova de VM. Uma sessão inteira foi consumida
+porque **todas** as falhas dele são **mudas**: nada aparece como mensagem de
+erro, o sintoma é sempre "a máquina fica parada" ou "o 1º boot não aplica".
+
+| Item | Resultado |
+|------|-----------|
+| Build (`--distro debian`) | ✅ **exit 0** |
+| `verify-iso.sh` (conteúdo) | ✅ **PASS=50 FAIL=0** |
+| `test-vm.sh` (boot + instalação + 1º boot) | ✅ **exit 0** (VM qemu/KVM, 4 vCPU, 6 GB) |
+| Instalação automática (sem uma única pergunta) | ✅ |
+| **Reinício automático** ao fim da instalação | ✅ `[ai-cpu-os/iso-late] reiniciando` |
+| 1º boot aplicou o ai-cpu-os | ✅ `aplicação concluída com sucesso` |
+| Família detectada no alvo | ✅ `intel-haswell` (a VM expõe a CPU do host) |
+| llama.cpp compilado **no alvo** | ✅ `/opt/llama.cpp/build/bin/` |
+| `apt` do alvo sem fonte `cdrom:` | ✅ `deb http://deb.debian.org/debian trixie main non-free-firmware` |
+| Acesso administrativo | ✅ `sudo` instalado (root segue bloqueado por padrão) |
+| Base usada | `debian-13.7.0-amd64-netinst.iso` |
+
+**8 travas, todas invisíveis fora da execução** (detalhe em `JOURNAL.md` § 4,
+sessão #35 e em `docs/TROUBLESHOOTING.md`):
+
+1. O `verify-iso.sh` reprovava a ISO Debian **correta** (exigia netplan).
+2. `prompt 1` no isolinux → o instalador espera uma tecla **antes** de tudo
+   (serial com **zero byte**).
+3. O preseed tem de estar **dentro do initrd** (o `S30initrd-preseed` lê
+   `/preseed.cfg` na raiz do initramfs).
+4. `localechooser/languagelist` — em console serial a lista só tem `en`, e
+   `language=pt` na cmdline **não** basta para pular a pergunta.
+5. `grub-installer/bootdev` é pergunta crítica feita **no fim**, com tudo já
+   instalado.
+6. Hash crypt em **aspas duplas** (`"$6$…"`) → `exit 2` **antes de copiar
+   arquivo nenhum** (o shell expande `$6`).
+7. `deb cdrom:[…]` gravado pelo próprio instalador no `sources.list` do alvo →
+   todo `apt-get update` falha e o papel `inference` aborta com **rc=100**.
+8. `sudo` não vem no Debian padrão → usuário sem admin e root bloqueado =
+   **sistema sem acesso administrativo**.
+
+> ⚠️ **O que isto NÃO prova (Debian):** o modo **air-gapped** (modelo, fonte do
+> llama.cpp e repositório apt na mídia — provado só no Ubuntu), o **boot UEFI**,
+> o Debian com `--network static`, outra release do Debian (só a 13.7 foi
+> testada) e o **hardware físico**. Também não prova desempenho.
+
 ---
 
 ## 4. Problemas conhecidos no momento
@@ -198,9 +243,11 @@ com `-cpu host` (Xeon Haswell-EP).
     outra CPU; o `llama-bench` de prova rodou lá, não no Xeon/Ryzen.
 11. **✅ A ISO foi CONSTRUÍDA E BOOTADA (2026-10-13).** Ver § 3.3. O maior
     risco em aberto **deixou de ser a geração** e passou a ser a validação em
-    **hardware físico** (Blocos A–O do `VALIDATION.md`). O caminho Ubuntu é o
-    validado; o **Debian/preseed continua não exercitado**. Resíduo air-gapped
-    em investigação (§ 5.3 do `JOURNAL.md`).
+    **hardware físico** (Blocos A–O do `VALIDATION.md`). Os **dois** caminhos
+    (Ubuntu/autoinstall e Debian/preseed) já foram instalados em VM — ver
+    § 3.3 e § 3.4. Resíduo air-gapped em investigação (§ 5.3 do `JOURNAL.md`),
+    e ele só foi exercitado no caminho **Ubuntu**: no Debian a mídia ainda não
+    levou modelo/fonte/repo.
 12. **O boot UEFI da ISO é best-effort.** O patch do `grub.cfg` dentro da
     `efi.img` exige `mtools` e nunca foi testado. O caminho BIOS (isolinux)
     é o principal. Ver `docs/ISO.md` § 6.
@@ -240,6 +287,28 @@ Tempo de build do llama.cpp: *(pendente em hardware real)*
 ## 6. Próxima ação imediata
 
 > **👉 ESTA É A SEÇÃO REFERENCIADA PELO `AGENTS.md`.**
+
+**✅ Recém-fechado (sessão #35, 2026-10-18) — a ISO Debian funciona.** O pedido
+"a criação de ISO Debian está apresentando falhas, corrija" foi fechado **por
+execução**: a ISO instala sozinha, **reinicia sozinha** e o 1º boot aplica o
+ai-cpu-os numa VM Debian 13. Foram **8 travas mudas** (nenhuma dava mensagem de
+erro) — resumo em § 3.4, detalhe em `docs/TROUBLESHOOTING.md` e `JOURNAL.md`
+sessão #35. `verify-iso.sh` na ISO real: **PASS=50 FAIL=0**; `ci-guards`
+63 → **75**; a favor de não repetir: a instalação Debian **não** se anuncia
+quando falha, então **sempre** rode `bash iso/test-vm.sh` depois de mexer no
+`iso/preseed/`.
+
+**▶️ Próximo passo (o mesmo de antes, agora sem a dívida do Debian):** levar a
+ISO ao **hardware físico** (Xeon E5-2680 v4 e Ryzen 5 3500X) e preencher os
+Blocos A–O de `docs/VALIDATION.md`. Antes disso, os dois itens de menor esforço
+e maior retorno:
+
+1. **Debian air-gapped** — gerar `--distro debian` com `--iso-model auto
+   --iso-source auto --iso-repo auto` e repetir o `test-vm.sh`. É o único
+   requisito do `docs/ISO.md` § 3.1 ainda **não exercitado no Debian** (no
+   Ubuntu ele está provado desde a sessão #21).
+2. **Boot UEFI** (`--boot-mode uefi`) — nunca bootado em nenhuma das duas
+   distros.
 
 **✅ Recém-fechado (sessão #32, 2026-10-16).** O `validate` **#57** estava
 vermelho no `main` e a causa **não** era o `--disk auto` do commit vizinho (o

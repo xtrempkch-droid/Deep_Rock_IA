@@ -129,8 +129,8 @@ readonly APT_REPO_MOUNT="/cdrom"
 #   * `roles/inference/install.sh`     → ccache libopenblas-dev libgomp1
 #                                        python3 python3-venv curl
 #                                        ca-certificates pciutils util-linux
-#   * `roles/builder` + EXTRA_PACKAGES → git gnupg jq openssh-server
-readonly DEFAULT_REPO_PACKAGES="build-essential cmake ccache pkg-config libopenblas-dev libgomp1 python3 python3-venv curl ca-certificates gnupg jq pciutils util-linux openssh-server git"
+#   * `roles/builder` + EXTRA_PACKAGES → git gnupg jq openssh-server sudo
+readonly DEFAULT_REPO_PACKAGES="build-essential cmake ccache pkg-config libopenblas-dev libgomp1 python3 python3-venv curl ca-certificates gnupg jq pciutils util-linux openssh-server git sudo"
 # Orçamento da mídia: 8 GB acordados. Só avisa — o usuário decide.
 readonly ISO_REPO_BUDGET_MB=6000
 
@@ -191,7 +191,7 @@ TIMEZONE="America/Sao_Paulo"
 MIRROR_HOST="deb.debian.org"
 MIRROR_DIR="/debian"
 GRUB_WITH_OTHER_OS="true"
-EXTRA_PACKAGES="git curl ca-certificates build-essential pkg-config libopenblas-dev gnupg jq pciutils util-linux openssh-server"
+EXTRA_PACKAGES="sudo git curl ca-certificates build-essential pkg-config libopenblas-dev gnupg jq pciutils util-linux openssh-server"
 WORK_DIR="${ISO_DIR}/work"
 KEEP_WORK=0
 DRY_RUN=0
@@ -924,6 +924,9 @@ extract_iso_debian() {
 
   rm -rf "$EXTRACT_DIR"
   mkdir -p "$EXTRACT_DIR"
+  # Backups de uma execução anterior são de OUTRA árvore (talvez de outra ISO
+  # base): restaurá-los sobre a extração nova corromperia a montagem.
+  rm -rf "${WORK_DIR}/orig"
 
   # Permite sobrescrever arquivos ao extrair (o xorriso é conservador por padrão).
   run "Extraindo a ISO" xorriso -osirrox on -overwrite on -indev "$ISO_PATH" -extract / "$EXTRACT_DIR"
@@ -1845,6 +1848,7 @@ subst_template() {
     -e "s|@@APT_PRIMARY_URI@@|${APT_PRIMARY_URI}|g" \
     -e "s|@@STORAGE_LAYOUT@@|${store_esc}|g" \
     -e "s|@@PARTMAN_DISK@@|${PARTMAN_DISK_LINE}|g" \
+    -e "s|@@GRUB_BOOTDEV@@|${GRUB_BOOTDEV_LINE}|g" \
     -e "s|@@NETWORK_MODE@@|${NETWORK_MODE}|g" \
     -e "s|@@NET_IFACE@@|${NET_IFACE}|g" \
     -e "s|@@NET_IP@@|${NET_IP}|g" \
@@ -1936,6 +1940,7 @@ inject_templates() {
   else
     PARTMAN_DISK_LINE="# --allow-any-disk: partman usará o primeiro disco disponível"
   fi
+  GRUB_BOOTDEV_LINE="$(grub_bootdev_line)"
 
   if [[ $DRY_RUN -eq 1 ]]; then
     log_info "[dry-run] gravaria ${dest}/{ai-cpu-os.cfg,late-command.sh,firstboot.sh,ai-cpu-os-firstboot.service}"
@@ -1955,6 +1960,120 @@ inject_templates() {
   log_ok "Preseed gravado em ${dest} (todos os marcadores substituídos)."
 }
 
+# Backup de um arquivo da árvore da ISO FORA da árvore.
+# Um `.orig` ao lado do original acabaria DENTRO da ISO gerada (o initrd do
+# Debian tem 24 MB) — e o xorriso copia a árvore inteira sem filtro.
+backup_file() {
+  local f="$1" rel
+  rel="${f#"${ISO_ROOT}"/}"
+  [[ -d "${WORK_DIR}/orig" ]] || mkdir -p "${WORK_DIR}/orig"
+  mkdir -p "${WORK_DIR}/orig/$(dirname "$rel")"
+  [[ -f "${WORK_DIR}/orig/${rel}" ]] || cp -a "$f" "${WORK_DIR}/orig/${rel}"
+}
+
+# ---------------------------------------------------------------------------
+# Debian: preseed (+ late-command) DENTRO do initrd
+# ---------------------------------------------------------------------------
+# POR QUE (medido numa VM de verdade, sessão #35): com
+# `preseed/file=/cdrom/preseed/ai-cpu-os.cfg` o debian-installer **não carrega
+# nada** — ele começa no menu interativo de idioma. O motivo é ordem de
+# inicialização: o `preseed` roda no initramfs, ANTES do `cdrom-detect` montar
+# a mídia (no Debian ela aparece em /media/cdrom, e `/cdrom` é um symlink
+# criado depois). O arquivo existe na ISO, mas ninguém o enxerga ainda. O
+# sintoma é o pior tipo: o instalador "funciona", só não é automático.
+#
+# A solução determinística é o preseed viajar no próprio initramfs: `/` do
+# instalador É o ramdisk, então o arquivo existe desde o primeiro instante, sem
+# depender de montagem, de driver de CD ou de ordem de inicialização. É a
+# técnica documentada pelo próprio Debian.
+#
+# E o NOME importa: `S30initrd-preseed` só faz
+#   if [ -e /preseed.cfg ]; then preseed_location file:///preseed.cfg; fi
+# Deixar o arquivo em `/preseed/ai-cpu-os.cfg` (primeira tentativa) não serve:
+# o d-i continuava perguntando o idioma. Tem de ser `/preseed.cfg` na raiz.
+# ("colocar o preseed dentro do initrd").
+#
+# O `late-command.sh` vai junto: assim ele também não depende de a mídia estar
+# montada, e ele mesmo localiza o projeto (ver os candidatos em SRC).
+inject_preseed_initrd() {
+  section "Debian: preseed dentro do initrd"
+
+  local initrd="${ISO_ROOT}/${INITRD_PATH#/}"
+  local preseed="${ISO_ROOT}/preseed/ai-cpu-os.cfg"
+  local late="${ISO_ROOT}/preseed/late-command.sh"
+
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log_info "[dry-run] embutiria preseed/ai-cpu-os.cfg e preseed/late-command.sh em ${INITRD_PATH}"
+    return 0
+  fi
+
+  if [[ ! -f "$initrd" ]]; then
+    log_error "initrd não encontrado em ${initrd}; o preseed não seria carregado."
+    return 1
+  fi
+  if [[ ! -f "$preseed" ]]; then
+    log_error "preseed não encontrado em ${preseed}."
+    return 1
+  fi
+  if ! command -v cpio >/dev/null 2>&1; then
+    log_error "cpio ausente: é necessário para embutir o preseed no initrd."
+    log_error "Instale com: apt-get install -y cpio"
+    return 1
+  fi
+
+  # O initrd do Debian é cpio comprimido com gzip. Anexar um SEGUNDO arquivo
+  # cpio é o mecanismo oficial do initramfs: o kernel desempacota todos em
+  # sequência, então `/preseed/…` passa a existir no ramdisk.
+  #
+  # O diretório temporário NÃO vai para /tmp: numa máquina comum /tmp é tmpfs
+  # (RAM), enche no meio de um build de ISO e o gzip morre com ENOSPC — o que
+  # aparecia como "formato inesperado?", uma mensagem que mentia sobre a causa.
+  # Usar o próprio work-dir garante espaço (a árvore da ISO já está lá).
+  local tmp; tmp="$(mktemp -d -p "${WORK_DIR:-/tmp}" .preseed-initrd.XXXXXX)"
+  local stg="${tmp}/stage"
+  mkdir -p "${stg}/preseed"
+  # `/preseed.cfg` NA RAIZ é o caminho que o próprio d-i procura sozinho:
+  # /usr/lib/debian-installer-startup.d/S30initrd-preseed faz
+  # `if [ -e /preseed.cfg ]; then preseed_location file:///preseed.cfg; fi`
+  # — e SÓ isso. O `preseed/file=` da cmdline não é lido nessa fase (foi por
+  # isso que a ISO continuou perguntando o idioma mesmo com o arquivo dentro
+  # do initrd, em /preseed/). A cópia em /preseed/ fica para o late-command.
+  cp -a "$preseed" "${stg}/preseed.cfg"
+  cp -a "$preseed" "${stg}/preseed/ai-cpu-os.cfg"
+  [[ -f "$late" ]] && cp -a "$late" "${stg}/preseed/late-command.sh"
+
+  local plain="${tmp}/initrd.cpio"
+  local gz_rc=0
+  gzip -dc "$initrd" > "$plain" 2>"${tmp}/gzip.err" || gz_rc=$?
+  if [[ $gz_rc -ne 0 ]]; then
+    local gz_msg; gz_msg="$(<"${tmp}/gzip.err")"; gz_msg="${gz_msg//$'\n'/ }"; gz_msg="${gz_msg:0:200}"
+    log_error "não consegui descomprimir ${initrd} (gzip rc=${gz_rc}): ${gz_msg:-sem mensagem}"
+    log_error "Espaço livre em ${WORK_DIR:-/tmp}: $(df -h "${WORK_DIR:-/tmp}" | awk 'NR==2{print $4}') — ENOSPC aqui significa temporário sem espaço."
+    rm -rf "$tmp"
+    return 1
+  fi
+
+  local extra="${tmp}/extra.cpio"
+  ( cd "$stg" && find . -print0 | cpio --null -o -H newc --quiet ) > "$extra" 2>/dev/null || {
+    log_error "falha ao criar o cpio com o preseed."
+    rm -rf "$tmp"
+    return 1
+  }
+
+  cat "$extra" >> "$plain"
+  backup_file "$initrd"
+  gzip -9 -c "$plain" > "${tmp}/initrd.new" || {
+    log_error "falha ao recomprimir o initrd com o preseed."
+    rm -rf "$tmp"
+    return 1
+  }
+  mv "${tmp}/initrd.new" "$initrd"
+  rm -rf "$tmp"
+
+  log_ok "Preseed embutido no initrd (/preseed.cfg — o caminho que o d-i carrega sozinho)."
+  log_info "Isso remove a dependência de a mídia estar montada na hora do preseed."
+}
+
 patch_isolinux() {
   section "Boot BIOS (Debian/isolinux)"
   local cfg="${ISO_ROOT}/isolinux/isolinux.cfg"
@@ -1962,7 +2081,7 @@ patch_isolinux() {
   if [[ $DRY_RUN -eq 1 ]]; then
     log_info "[dry-run] descobriria install.*/vmlinuz e initrd.gz"
     log_info "[dry-run] ajustaria default/timeout/prompt em isolinux.cfg e acrescentaria:"
-    log_info "         label ai-cpu-os-auto → preseed/file=/cdrom/preseed/ai-cpu-os.cfg"
+    log_info "         label ai-cpu-os-auto → preseed/file=/preseed.cfg (dentro do initrd)"
     return 0
   fi
 
@@ -1988,10 +2107,28 @@ patch_isolinux() {
   fi
   log_info "Kernel: ${KERNEL_PATH} · initrd: ${INITRD_PATH}"
 
-  cp -a "$cfg" "${cfg}.orig"
+  backup_file "$cfg"
+
+  # ---------------------------------------------------------------------------
+  # `prompt 0`, NÃO `prompt 1`. Medido numa VM de verdade (sessão #35): com
+  # `prompt 1` o isolinux mostra `boot:` e ESPERA UMA TECLA — o `timeout` não
+  # salva, e o instalador nunca inicia. O sintoma é cruel: a VM fica parada, o
+  # disco não é tocado (qcow2 continua com 193 KB) e o console serial fica com
+  # ZERO byte, sem nenhuma mensagem de erro em lugar nenhum.
+  # ---------------------------------------------------------------------------
   sed -i -E 's/^[[:space:]]*default[[:space:]].*/default ai-cpu-os-auto/' "$cfg"
   sed -i -E 's/^[[:space:]]*timeout[[:space:]].*/timeout 100/'            "$cfg"
-  sed -i -E 's/^[[:space:]]*prompt[[:space:]].*/prompt 1/'               "$cfg"
+  sed -i -E 's/^[[:space:]]*prompt[[:space:]].*/prompt 0/'               "$cfg"
+
+  # Console serial: sem `serial`/`console` o MENU do isolinux só existe na tela
+  # virtual — um teste headless não vê nada, nem para diagnosticar. O kernel já
+  # recebe `console=ttyS0` via kernel_args_extra; isto cuida do bootloader.
+  if [[ "$SERIAL_CONSOLE" == "yes" ]]; then
+    if ! grep -qE '^[[:space:]]*serial[[:space:]]' "$cfg"; then
+      sed -i '1i serial 0 115200' "$cfg"
+      sed -i '2i console 0' "$cfg"
+    fi
+  fi
 
   cat >> "$cfg" <<EOF
 
@@ -2001,7 +2138,7 @@ patch_isolinux() {
 label ai-cpu-os-auto
  menu label ^Instalar ai-cpu-os (automatico${DISK:+, APAGA ${DISK}})
  kernel ${KERNEL_PATH}
- append vga=788 initrd=${INITRD_PATH} auto=true priority=critical preseed/file=/cdrom/preseed/ai-cpu-os.cfg $(kernel_args_extra) --- quiet
+ append vga=788 initrd=${INITRD_PATH} auto=true priority=critical preseed/file=/preseed.cfg $(debian_locale_args) $(kernel_args_extra) --- quiet
 EOF
   log_ok "Boot BIOS configurado (default ai-cpu-os-auto, timeout 10s)."
 }
@@ -2028,7 +2165,7 @@ patch_efi_debian() {
       log_info "[dry-run] acrescentaria a menuentry 'ai-cpu-os-auto' em ${direct}"
       return 0
     fi
-    cp -a "${ISO_ROOT}/${direct}" "${ISO_ROOT}/${direct}.orig"
+    backup_file "${ISO_ROOT}/${direct}"
     # Acrescentamos no FIM para que `set default` tenha efeito (o arquivo é
     # interpretado sequencialmente pelo GRUB).
     cat >> "${ISO_ROOT}/${direct}" <<EOF
@@ -2037,7 +2174,7 @@ patch_efi_debian() {
 set timeout=10
 set default="ai-cpu-os-auto"
 menuentry "Instalar ai-cpu-os (automatico)" --id ai-cpu-os-auto {
-  linux  ${KERNEL_PATH} auto=true priority=critical preseed/file=/cdrom/preseed/ai-cpu-os.cfg --- quiet
+  linux  ${KERNEL_PATH} auto=true priority=critical preseed/file=/preseed.cfg $(debian_locale_args) $(kernel_args_extra) --- quiet
   initrd ${INITRD_PATH}
 }
 EOF
@@ -2089,7 +2226,7 @@ EOF
 set timeout=10
 set default="ai-cpu-os-auto"
 menuentry "Instalar ai-cpu-os (automatico)" --id ai-cpu-os-auto {
-  linux  ${KERNEL_PATH} auto=true priority=critical preseed/file=/cdrom/preseed/ai-cpu-os.cfg --- quiet
+  linux  ${KERNEL_PATH} auto=true priority=critical preseed/file=/preseed.cfg $(debian_locale_args) $(kernel_args_extra) --- quiet
   initrd ${INITRD_PATH}
 }
 EOF
@@ -2164,6 +2301,40 @@ kernel_args_extra() {
   if [[ "$SERIAL_CONSOLE" == "yes" ]]; then
     printf 'console=ttyS0,115200'
   fi
+}
+
+# ---------------------------------------------------------------------------
+# Debian: idioma/teclado pela CMDLINE do kernel
+# ---------------------------------------------------------------------------
+# POR QUE (medido numa VM de verdade, sessão #35): o preseed já traz
+# `debian-installer/language`, `country`, `locale` e
+# `keyboard-configuration/xkb-keymap`, e MESMO ASSIM o instalador abria em
+# "[!!] Select a language" e ficava plantado ali para sempre — o resto da
+# instalação (rede, usuários, relógio, discos) só continuava depois que alguém
+# escolhia o idioma na mão. Ou seja: a ISO não era automática.
+#
+# A causa está em `etc/preseed_aliases` (dentro do initrd):
+#
+#   language  debian-installer/language
+#   country   debian-installer/country
+#   locale    debian-installer/locale
+#   keymap    keyboard-configuration/xkb-keymap
+#
+# O `localechooser` é um dos PRIMEIROS componentes do menu principal e pergunta
+# o idioma antes de o preseed da mídia ser aplicado; o que ele respeita é o que
+# já está na base do debconf desde o initramfs — e quem coloca lá é o
+# `env2debconf` (S32env-preseed), que lê `/proc/cmdline`. Por isso os valores
+# têm de estar na cmdline, e não só no preseed.
+#
+# `--keymap` também vale aqui: teclado errado em instalador automático é
+# silencioso (ninguém digita nada) e só aparece depois, no sistema instalado.
+debian_locale_args() {
+  local out=""
+  [[ -n "$LANG_CODE" ]] && out+="language=${LANG_CODE}"
+  [[ -n "$COUNTRY"   ]] && out+=" country=${COUNTRY}"
+  [[ -n "$LOCALE"    ]] && out+=" locale=${LOCALE}"
+  [[ -n "$KEYMAP"    ]] && out+=" keymap=${KEYMAP}"
+  printf '%s' "${out# }"
 }
 
 # Acrescenta timeout/default + a menuentry automática ao fim de um grub.cfg.
@@ -2427,6 +2598,19 @@ verify_output() {
 # `@@STORAGE_LAYOUT@@` (o `@` é indicador reservado do YAML), então o yamllint
 # não consegue validá-lo diretamente — só o arquivo SUBSTITUÍDO é YAML de
 # verdade. Este autoteste é o que fecha essa lacuna.
+# O `grub-installer/bootdev` é pergunta CRÍTICA ("[!!] Configurando grub-pc"):
+# sem resposta o d-i ESPERA por um dispositivo depois de já ter instalado o
+# sistema inteiro — a instalação automática para no último passo (medido numa
+# VM de verdade, sessão #35). Com o disco fixado, respondemos o MESMO disco do
+# partman; sem disco fixado, `default` deixa o grub-installer escolher.
+grub_bootdev_line() {
+  if [[ -n "$DISK" ]]; then
+    printf 'd-i grub-installer/bootdev string %s' "$DISK"
+  else
+    printf 'd-i grub-installer/bootdev string default'
+  fi
+}
+
 check_templates() {
   section "Autoteste dos templates"
   local tmp rc=0
@@ -2439,6 +2623,7 @@ check_templates() {
   for variant in com-disco sem-disco; do
     if [[ "$variant" == "com-disco" ]]; then disk="/dev/nvme0n1"; else disk=""; fi
     DISK="$disk"
+    GRUB_BOOTDEV_LINE="$(grub_bootdev_line)"
 
     # Três modos de rede, porque cada um gera um YAML DIFERENTE (e o modo
     # `none` precisa fazer o bloco `network:` desaparecer por inteiro).
@@ -2525,6 +2710,17 @@ check_templates() {
         fi
       fi
 
+      # `grub-installer/bootdev` é pergunta CRÍTICA do d-i e vem DEPOIS de o
+      # sistema inteiro estar instalado: se o preseed não a responde, a
+      # instalação automática para em "[!!] Configurando grub-pc".
+      want_bootdev="${disk:-default}"
+      if grep -q "grub-installer/bootdev string ${want_bootdev}\$" "${dir}/ai-cpu-os.cfg"; then
+        log_ok "  grub-installer/bootdev = ${want_bootdev}"
+      else
+        log_error "  grub-installer/bootdev ausente/errado (esperado '${want_bootdev}')"
+        rc=1
+      fi
+
       if bash -n "${dir}/firstboot.sh" 2>/dev/null; then
         log_ok "  firstboot.sh: sintaxe bash OK"
       else
@@ -2536,6 +2732,26 @@ check_templates() {
         log_ok "  late-command.sh: sintaxe POSIX sh OK"
       else
         log_error "  late-command.sh: sintaxe POSIX sh inválida"
+        rc=1
+      fi
+
+      # O hash do root vai para o script como LITERAL, e todo hash crypt tem
+      # `$` (`$6$sal$resto`). Se o marcador ficar entre ASPAS DUPLAS no
+      # template, o shell expande `$6` ao ler o arquivo e — sob `set -u` — o
+      # late-command.sh morre com exit 2 ANTES de copiar qualquer coisa. Foi o
+      # que travou a ISO Debian em "[!!] Falha ao executar o comando do
+      # preseed" (sessão #35). A sintaxe (`sh -n`) NÃO pega isso: só avaliação
+      # de verdade pega, então aqui o valor é lido por um shell com `-u`.
+      local hash_line got_hash
+      hash_line="$(grep -m1 '^ROOT_PASSWORD_HASH=' "${dir}/late-command.sh" || true)"
+      got_hash="$(sh -u -c "${hash_line}; printf %s \"\$ROOT_PASSWORD_HASH\"" 2>/dev/null || true)"
+      if [[ "$got_hash" == "$ROOT_PASSWORD_HASH" ]]; then
+        log_ok "  late-command.sh: hash do root chega intacto ao shell (\$ preservado)"
+      else
+        log_error "  late-command.sh: o hash do root é CORROMPIDO pelo shell"
+        log_error "    esperado: ${ROOT_PASSWORD_HASH}"
+        log_error "    obtido:   ${got_hash:-<vazio/erro>}"
+        log_error "    (o marcador precisa de ASPAS SIMPLES no template)"
         rc=1
       fi
 
@@ -2596,6 +2812,7 @@ VOLUME_ID=""
 KERNEL_PATH=""
 INITRD_PATH=""
 PARTMAN_DISK_LINE=""
+GRUB_BOOTDEV_LINE=""
 
 main() {
   parse_args "$@"
@@ -2660,6 +2877,9 @@ main() {
     inject_templates
     patch_isolinux
     patch_efi_debian
+    # DEPOIS do patch de boot (que descobre INITRD_PATH) e antes do md5sum.txt,
+    # que precisa refletir o initrd modificado.
+    inject_preseed_initrd
     regenerate_md5sums
   fi
 

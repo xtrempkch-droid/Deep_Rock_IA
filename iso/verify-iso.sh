@@ -605,7 +605,13 @@ if [[ "$DISTRO" == "debian" && -n "$PRESEED_LOCAL" ]]; then
       fail "preseed não fixa o disco em ${EXPECT_DISK} (verifique --disk no build)"
     fi
   else
-    if grep -qE '^#.*--allow-any-disk' "$PRESEED_LOCAL"; then
+    # Sem --disk não há o que comparar; o que importa é o preseed não deixar a
+    # pergunta do particionamento em aberto SEM aviso. Fixar um disco é ótimo —
+    # este ramo é o de quem só quer saber se a instalação é determinística.
+    pre_disk="$(sed -nE 's/^d-i[[:space:]]+partman-auto\/disk[[:space:]]+string[[:space:]]+([^[:space:]]+).*/\1/p' "$PRESEED_LOCAL" | head -1)"
+    if [[ -n "$pre_disk" ]]; then
+      pass "preseed fixa o disco em ${pre_disk} (instalação determinística)"
+    elif grep -qE '^#.*--allow-any-disk' "$PRESEED_LOCAL"; then
       pass "preseed sem disco fixo (--allow-any-disk explícito)"
     else
       fail "preseed sem disco fixo e sem o comentário de --allow-any-disk"
@@ -619,7 +625,13 @@ section "Senha do root"
 # também habilita o login (root-login true). Aqui conferimos a COERÊNCIA entre
 # os dois — é o tipo de coisa que o build não pega sozinho.
 if [[ -n "$LATE_LOCAL" ]]; then
+  # A linha tem de usar ASPAS SIMPLES: o hash crypt contém `$` (`$6$sal$…`) e,
+  # entre aspas duplas, o shell expandiria `$6` ao ler o arquivo — sob `set -u`
+  # o late-command.sh morre com exit 2 antes de copiar qualquer coisa
+  # (sintoma: "Failed to run preseeded command … exit code 2", sessão #35).
   if grep -qE '^ROOT_PASSWORD_HASH="\$[0-9]+\$' "$LATE_LOCAL"; then
+    fail "hash de root em ASPAS DUPLAS: o shell expande \$6 e o late-command morre em exit 2"
+  elif grep -qE "^ROOT_PASSWORD_HASH='\\\$[0-9]+\\\$" "$LATE_LOCAL"; then
     pass "root habilitado: hash crypt no late-command"
     if grep -q 'chpasswd -e' "$LATE_LOCAL"; then
       pass "chpasswd -e define a senha do root (nunca texto puro)"
@@ -638,7 +650,7 @@ if [[ -n "$LATE_LOCAL" ]]; then
         fail "preseed sem root-password-crypted (ou o valor não é um hash crypt)"
       fi
     fi
-  elif grep -qE '^ROOT_PASSWORD_HASH=""' "$LATE_LOCAL"; then
+  elif grep -qE "^ROOT_PASSWORD_HASH=''$" "$LATE_LOCAL"; then
     pass "root bloqueado (padrão: sem --root-password-hash)"
     if [[ "$DISTRO" == "debian" && -n "$PRESEED_LOCAL" ]] \
        && grep -q 'passwd/root-login boolean true' "$PRESEED_LOCAL"; then
@@ -653,74 +665,133 @@ fi
 
 section "Rede do sistema instalado"
 # O Subiquity NÃO grava rede persistente no alvo quando o autoinstall não tem
-# `network:` — o sistema sobe com a placa DOWN (bug real, sessão #28). A ISO
+# `network:` — o sistema sobe com a placa DOWN (bug real, sessão #33). A ISO
 # agora carrega o netplan pronto em /preseed/ai-cpu-os-netplan.yaml e o
-# late-command o copia para /etc/netplan/99-ai-cpu-os.yaml. Conferimos a
-# COERÊNCIA entre o modo gravado, o YAML do instalador e o netplan do alvo.
+# late-command o copia para /etc/netplan/99-ai-cpu-os.yaml.
+#
+# ⚠️ DISTRO-AWARE, como o resto deste verificador: no **Debian** NÃO existe
+# netplan no caminho — o d-i responde `netcfg` na preseed e escreve
+# /etc/network/interfaces no alvo. Cobrar o netplan de uma ISO Debian reprovava
+# uma ISO CORRETA (foi o que derrubou o build `--distro debian`, sessão #34).
+# Cada distro é conferida pelo mecanismo que ela REALMENTE usa.
 if [[ -n "$LATE_LOCAL" ]]; then
-  if ! grep -qE '^NETWORK_MODE="' "$LATE_LOCAL"; then
+  if ! grep -qE "^NETWORK_MODE=['\"]" "$LATE_LOCAL"; then
     fail "late-command sem NETWORK_MODE (template antigo? o alvo pode subir sem rede)"
   else
-    NETMODE="$(grep -E '^NETWORK_MODE="' "$LATE_LOCAL" | head -1 | cut -d'"' -f2)"
+    NETMODE="$(sed -n "s/^NETWORK_MODE=['\"]\\([^'\"]*\\)['\"].*/\\1/p" "$LATE_LOCAL" | head -1)"
     NETPLAN_ISO="$(fetch "/preseed/ai-cpu-os-netplan.yaml" 2>/dev/null || true)"
-    case "$NETMODE" in
-      auto|dhcp)
-        pass "rede: modo ${NETMODE} (DHCP)"
-        if [[ -z "$NETPLAN_ISO" ]]; then
-          fail "rede ${NETMODE} sem /preseed/ai-cpu-os-netplan.yaml (o alvo subiria sem DHCP)"
-        elif grep -q 'dhcp4: true' "$NETPLAN_ISO"; then
-          pass "netplan do alvo tem dhcp4: true"
-        else
-          fail "netplan do alvo sem dhcp4: true (não pegaria IP por DHCP)"
-        fi
-        if [[ "$DISTRO" == "ubuntu" && -n "$AI_LOCAL" ]]; then
-          if grep -qE '^network:' "$AI_LOCAL" && grep -q 'dhcp4: true' "$AI_LOCAL"; then
-            pass "autoinstall: bloco network com dhcp4 (instalador e alvo iguais)"
-          else
-            fail "autoinstall sem o bloco network/dhcp4 (instalador ficaria sem rede)"
-          fi
-        elif [[ "$DISTRO" == "debian" && -n "$PRESEED_LOCAL" ]]; then
-          if grep -q 'netcfg/disable_autoconfig boolean false' "$PRESEED_LOCAL"; then
-            pass "preseed: DHCP explícito (disable_autoconfig false)"
-          else
-            fail "preseed sem netcfg/disable_autoconfig false (rede indefinida)"
-          fi
-        fi
-        ;;
-      static)
-        pass "rede: modo static"
-        if [[ -z "$NETPLAN_ISO" ]]; then
-          fail "rede static sem /preseed/ai-cpu-os-netplan.yaml"
-        elif grep -qE 'addresses: \[[0-9]' "$NETPLAN_ISO" && grep -q 'via: ' "$NETPLAN_ISO"; then
-          pass "netplan do alvo tem endereço fixo e rota default"
-        else
-          fail "netplan static sem addresses/via"
-        fi
-        if [[ "$DISTRO" == "debian" && -n "$PRESEED_LOCAL" ]]; then
-          if grep -q 'netcfg/get_ipaddress string ' "$PRESEED_LOCAL" \
-             && grep -q 'netcfg/get_gateway string ' "$PRESEED_LOCAL"; then
-            pass "preseed: IP fixo + gateway definidos"
-          else
-            fail "preseed static sem get_ipaddress/get_gateway"
-          fi
-        fi
-        ;;
-      none)
-        pass "rede: modo none (comportamento antigo, sem configuração persistente)"
-        if [[ -n "$AI_LOCAL" ]] && grep -qE '^network:' "$AI_LOCAL"; then
-          fail "modo none mas o autoinstall tem bloco network (incoerente)"
-        fi
-        ;;
-      *)
-        fail "NETWORK_MODE desconhecido no late-command: '${NETMODE}'"
-        ;;
-    esac
 
-    if [[ "$NETMODE" != "none" && "$DISTRO" == "ubuntu" ]]; then
-      if grep -q 'cloud.cfg.d/99-ai-cpu-os-disable-network.cfg' "$LATE_LOCAL"; then
-        pass "cloud-init com a rede desligada (não reescreve o netplan)"
+    if [[ "$DISTRO" == "ubuntu" ]]; then
+      # ---- Ubuntu: netplan na mídia + bloco network: no autoinstall ----
+      case "$NETMODE" in
+        auto|dhcp)
+          pass "rede: modo ${NETMODE} (DHCP)"
+          if [[ -z "$NETPLAN_ISO" ]]; then
+            fail "rede ${NETMODE} sem /preseed/ai-cpu-os-netplan.yaml (o alvo subiria sem DHCP)"
+          elif grep -q 'dhcp4: true' "$NETPLAN_ISO"; then
+            pass "netplan do alvo tem dhcp4: true"
+          else
+            fail "netplan do alvo sem dhcp4: true (não pegaria IP por DHCP)"
+          fi
+          if [[ -n "$AI_LOCAL" ]]; then
+            if grep -qE '^network:' "$AI_LOCAL" && grep -q 'dhcp4: true' "$AI_LOCAL"; then
+              pass "autoinstall: bloco network com dhcp4 (instalador e alvo iguais)"
+            else
+              fail "autoinstall sem o bloco network/dhcp4 (instalador ficaria sem rede)"
+            fi
+          fi
+          ;;
+        static)
+          pass "rede: modo static"
+          if [[ -z "$NETPLAN_ISO" ]]; then
+            fail "rede static sem /preseed/ai-cpu-os-netplan.yaml"
+          elif grep -qE 'addresses: \[[0-9]' "$NETPLAN_ISO" && grep -q 'via: ' "$NETPLAN_ISO"; then
+            pass "netplan do alvo tem endereço fixo e rota default"
+          else
+            fail "netplan static sem addresses/via"
+          fi
+          ;;
+        none)
+          pass "rede: modo none (comportamento antigo, sem configuração persistente)"
+          if [[ -n "$AI_LOCAL" ]] && grep -qE '^network:' "$AI_LOCAL"; then
+            fail "modo none mas o autoinstall tem bloco network (incoerente)"
+          fi
+          ;;
+        *)
+          fail "NETWORK_MODE desconhecido no late-command: '${NETMODE}'"
+          ;;
+      esac
+
+      if [[ "$NETMODE" != "none" ]]; then
+        if grep -q 'cloud.cfg.d/99-ai-cpu-os-disable-network.cfg' "$LATE_LOCAL"; then
+          pass "cloud-init com a rede desligada (não reescreve o netplan)"
+        else
+          fail "sem cloud-init network disable: ele pode sobrescrever o netplan"
+        fi
+      fi
+
+    else
+      # ---- Debian: preseed (netcfg) é o mecanismo; netplan não entra ----
+      if [[ -z "$PRESEED_LOCAL" ]]; then
+        fail "preseed ausente: não há como conferir a rede do Debian"
       else
-        fail "sem cloud-init network disable: ele pode sobrescrever o netplan"
+        case "$NETMODE" in
+          auto|dhcp)
+            pass "rede: modo ${NETMODE} (DHCP)"
+            if grep -q 'netcfg/disable_autoconfig boolean false' "$PRESEED_LOCAL"; then
+              pass "preseed: DHCP explícito (disable_autoconfig false)"
+            else
+              fail "preseed sem netcfg/disable_autoconfig false (rede indefinida)"
+            fi
+            if grep -q 'netcfg/dhcp_timeout' "$PRESEED_LOCAL"; then
+              pass "preseed: dhcp_timeout definido (não trava esperando DHCP)"
+            else
+              fail "preseed sem netcfg/dhcp_timeout (boot pode travar esperando DHCP)"
+            fi
+            ;;
+          static)
+            pass "rede: modo static"
+            if grep -q 'netcfg/disable_autoconfig boolean true' "$PRESEED_LOCAL"; then
+              pass "preseed: autoconfig desligado (usa os campos estáticos)"
+            else
+              fail "preseed static sem netcfg/disable_autoconfig true"
+            fi
+            if grep -q 'netcfg/get_ipaddress string ' "$PRESEED_LOCAL" \
+               && grep -q 'netcfg/get_gateway string ' "$PRESEED_LOCAL"; then
+              pass "preseed: IP fixo + gateway definidos"
+            else
+              fail "preseed static sem get_ipaddress/get_gateway"
+            fi
+            if grep -q 'netcfg/get_netmask string ' "$PRESEED_LOCAL"; then
+              pass "preseed: netmask definida (o d-i pede máscara, não /N)"
+            else
+              fail "preseed static sem get_netmask"
+            fi
+            if grep -q 'netcfg/get_nameservers string ' "$PRESEED_LOCAL"; then
+              pass "preseed: nameservers definidos"
+            else
+              fail "preseed static sem get_nameservers (DNS não resolveria)"
+            fi
+            ;;
+          none)
+            pass "rede: modo none (o d-i decide sozinho, como antes)"
+            ;;
+          *)
+            fail "NETWORK_MODE desconhecido no late-command: '${NETMODE}'"
+            ;;
+        esac
+
+        if grep -qE '^d-i netcfg/choose_interface select ' "$PRESEED_LOCAL"; then
+          pass "preseed: interface de rede escolhida explicitamente"
+        else
+          fail "preseed sem netcfg/choose_interface (o d-i pode perguntar)"
+        fi
+      fi
+
+      # O netplan na mídia seria inútil no Debian; se aparecer, é sinal de que
+      # alguém misturou os caminhos (e o late-command do Debian nem o lê).
+      if [[ -n "$NETPLAN_ISO" && "$NETMODE" != "none" ]]; then
+        pass "netplan na mídia (ignorado no Debian — a rede vem da preseed)"
       fi
     fi
   fi
@@ -809,6 +880,114 @@ else
     else
       fail "label sem preseed/file="
     fi
+    # `prompt 1` mostra "boot:" e ESPERA UMA TECLA — o `timeout` não vale nesse
+    # modo. A ISO ficava parada nessa tela e o instalador nunca começava (VM
+    # muda, disco intocado). Descoberto bootando a ISO Debian pela 1ª vez.
+    if grep -qE '^[[:space:]]*prompt[[:space:]]+0' "$ISO_LOCAL"; then
+      pass "isolinux.cfg com 'prompt 0' (boota sozinho, sem tecla)"
+    else
+      fail "isolinux.cfg sem 'prompt 0' (com 'prompt 1' o isolinux espera tecla e não instala)"
+    fi
+    # O `localechooser` é dos PRIMEIROS componentes do menu e roda ANTES de a
+    # mídia ser montada, então idioma/teclado têm de vir na cmdline
+    # (`env2debconf`, via /etc/preseed_aliases); o preseed ainda não foi lido.
+    for _k in language keymap; do
+      if grep -qE "^[[:space:]]*append[[:space:]].*[[:space:]]${_k}=[^[:space:]]+" "$ISO_LOCAL"; then
+        pass "cmdline leva ${_k}= (o localechooser roda antes do preseed)"
+      else
+        fail "cmdline sem ${_k}= (o instalador pergunta e a instalação para)"
+      fi
+    done
+  fi
+
+  # A pergunta que o instalador REALMENTE exibe é `localechooser/languagelist`
+  # (a lista), não `debian-installer/language`. Ela só é pulada quando o
+  # idioma está entre as ESCOLHAS da lista, e a lista depende do nível de
+  # exibição: em console serial o nível é 0 e só existe `en`. Sem responder a
+  # lista, a interface ficava em português e MESMO ASSIM a pergunta aparecia e
+  # travava tudo. Ver docs/TROUBLESHOOTING.md.
+  PRE_LOCAL="$(fetch "/preseed/ai-cpu-os.cfg" 2>/dev/null || true)"
+  if [[ -z "$PRE_LOCAL" ]]; then
+    skip "sem /preseed/ai-cpu-os.cfg para conferir idioma do instalador"
+  else
+    pre_lang="$(sed -nE 's/^d-i[[:space:]]+debian-installer\/language[[:space:]]+(string|select)[[:space:]]+(.*[^[:space:]])[[:space:]]*$/\2/p' "$PRE_LOCAL" | head -1)"
+    pre_list="$(sed -nE 's/^d-i[[:space:]]+localechooser\/languagelist[[:space:]]+(string|select)[[:space:]]+(.*[^[:space:]])[[:space:]]*$/\2/p' "$PRE_LOCAL" | head -1)"
+    if [[ -z "$pre_list" ]]; then
+      fail "preseed NÃO responde localechooser/languagelist (a lista de idiomas aparece e a instalação trava)"
+    elif [[ "$pre_list" != "$pre_lang" ]]; then
+      fail "localechooser/languagelist ('${pre_list}') difere de debian-installer/language ('${pre_lang}')"
+    else
+      pass "preseed responde localechooser/languagelist = '${pre_list}' (não pergunta o idioma)"
+    fi
+  fi
+
+  # `grub-installer/bootdev` é pergunta CRÍTICA e o d-i a faz DEPOIS de copiar
+  # o sistema inteiro: sem resposta, a instalação automática para em
+  # "[!!] Configurando grub-pc" esperando um dispositivo (medido em VM).
+  pre_bootdev="$(sed -nE 's/^d-i[[:space:]]+grub-installer\/bootdev[[:space:]]+(string|select)[[:space:]]+(.*[^[:space:]])[[:space:]]*$/\2/p' "$PRE_LOCAL" | head -1)"
+  if [[ -z "$pre_bootdev" ]]; then
+    fail "preseed NÃO responde grub-installer/bootdev (trava em 'Configurando grub-pc')"
+  else
+    pass "preseed responde grub-installer/bootdev = '${pre_bootdev}'"
+  fi
+
+  # `deb cdrom:` é gravado pelo PRÓPRIO instalador (`apt-cdrom-setup`) e não
+  # tem relação com --iso-repo. Depois da instalação a mídia não existe mais:
+  # `apt-get update` falha ("não tem um arquivo Release") e o primeiro boot do
+  # papel `inference` aborta com rc=100 antes de instalar qualquer coisa.
+  LATE_LOCAL="$(fetch "/preseed/late-command.sh" 2>/dev/null || true)"
+  if [[ -z "$LATE_LOCAL" ]]; then
+    skip "sem /preseed/late-command.sh para conferir a limpeza do apt"
+  else
+    if grep -qF "deb(-src)?[[:space:]]+cdrom:" "$LATE_LOCAL"; then
+      pass "late-command.sh remove fontes 'cdrom:' do alvo (o 1º boot não quebra no apt update)"
+    else
+      fail "late-command.sh NÃO remove a fonte 'cdrom:' do alvo (o 1º boot aborta no apt update)"
+    fi
+    # Sem substituir o `20final-message` do d-i, o `finish-install` interpreta
+    # o "back" da nota final como `exit 10` e ABORTA a instalação no menu
+    # principal, em vez de reiniciar (medido em console serial).
+    if grep -qF '20final-message' "$LATE_LOCAL"; then
+      pass "late-command.sh substitui o 20final-message do d-i (reinicia em vez de parar no menu)"
+    else
+      fail "late-command.sh NÃO substitui o 20final-message (a instalação para no menu do d-i)"
+    fi
+    # O patch acima é só cinto de segurança: o `20final-message` é desempacotado
+    # do udeb DEPOIS deste hook, então ele pode não estar lá a tempo. Quem
+    # garante o reinício é a chamada explícita no fim do late-command.
+    if grep -qE '^[[:space:]]*reboot -f' "$LATE_LOCAL"; then
+      pass "late-command.sh reinicia o d-i explicitamente (não depende do finish-install)"
+    else
+      fail "late-command.sh NÃO reinicia explicitamente (a VM fica parada no menu do d-i)"
+    fi
+  fi
+
+  # `sudo` não vem na instalação padrão do Debian: sem ele, o usuário da ISO
+  # (que é do grupo `sudo`) não administra nada, e com o root bloqueado o
+  # sistema fica SEM acesso administrativo.
+  if [[ -z "$PRE_LOCAL" ]]; then
+    skip "sem preseed para conferir o pacote sudo"
+  elif sed -nE 's|^d-i[[:space:]]+pkgsel/include[[:space:]]+string[[:space:]]+(.*)$|\1|p' "$PRE_LOCAL" | grep -qw 'sudo'; then
+    pass "preseed instala 'sudo' (o usuário da ISO consegue administrar)"
+  else
+    fail "preseed NÃO instala 'sudo' (Debian não o traz; o usuário fica sem admin)"
+  fi
+
+  # Sem o preseed dentro do initrd, o `S30initrd-preseed` não acha nada: ele lê
+  # literalmente `/preseed.cfg` NA RAIZ do initramfs (`preseed/file=` sozinho
+  # só é aplicado depois, quando o udeb file-preseed instala — tarde demais).
+  INITRD_LOCAL="$(fetch "/install.amd/initrd.gz" 2>/dev/null || true)"
+  if [[ -z "$INITRD_LOCAL" ]]; then
+    skip "sem /install.amd/initrd.gz para conferir o preseed embutido no initrd"
+  else
+    # Sem `grep -q` de propósito: com `pipefail`, sair cedo fecha o cano e o
+    # gzip morre por SIGPIPE (141), derrubando um check que na verdade passou.
+    n_pre="$(gzip -dc "$INITRD_LOCAL" 2>/dev/null | grep -acF 'preseed.cfg' || true)"
+    if [[ "${n_pre:-0}" -gt 0 ]]; then
+      pass "initrd tem /preseed.cfg na raiz (o S30initrd-preseed só lê a raiz)"
+    else
+      fail "initrd SEM /preseed.cfg na raiz (o preseed nunca é aplicado)"
+    fi
   fi
 fi
 
@@ -817,7 +996,9 @@ fi
 # ---------------------------------------------------------------------------
 section "Metadados da mídia"
 if [[ "$MODE" == "iso" ]]; then
-  voldid="$(xorriso -indev "$INPUT" -pvd_info 2>/dev/null | awk -F': *' '/Volume id/{print $2}' | tr -d ' \r' || true)"
+  # A etiqueta do xorriso é "Volume Id" (I maiúsculo). Com `/Volume id/`
+  # case-sensitive o check nunca casava e a seção virava SKIP silencioso.
+  voldid="$(xorriso -indev "$INPUT" -pvd_info 2>/dev/null | awk -F': *' '/Volume [Ii]d/{print $2}' | tr -d ' \r' || true)"
   if [[ -z "$voldid" ]]; then
     skip "não consegui ler o Volume ID"
   else

@@ -400,6 +400,151 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
 - **Lição:** o verificador tinha um viés de distro. Ao adicionar uma checagem,
   pergunte **em qual base** ela faz sentido — e cubra a outra.
 
+### A ISO Debian NÃO instala sozinha: para no `boot:` ou pede o idioma para sempre
+
+- **Sintoma:** a ISO Debian boota mas a instalação automática **nunca
+  acontece**. Dois quadros distintos, ambos *mudos* (nenhuma mensagem de erro):
+  1. a tela fica em `boot:` esperando uma tecla (e o `timeout` não resolve);
+  2. o instalador abre em `[!!] Select a language` e fica ali **para sempre** —
+     mesmo com a interface já traduzida para o idioma pedido.
+- **Causa raiz (cinco bugs independentes, todos precisam de correção):**
+  1. **`prompt 1` no `isolinux.cfg`.** Nesse modo o isolinux mostra o prompt e
+     **espera tecla**; o `timeout` só vale com `prompt 0`. O sintoma é cruel: a
+     VM fica parada, o disco **não é tocado** (o qcow2 continua com 193 KB) e o
+     console serial fica com **zero byte**.
+  2. **O preseed tem de estar no `initrd`, não no `/cdrom`.** O script
+     `S30initrd-preseed` do initramfs faz literalmente
+     `if [ -e /preseed.cfg ]; then preseed_location file:///preseed.cfg; fi` —
+     ele lê a **raiz do initramfs**. Um `preseed/file=/cdrom/...` só é aplicado
+     muito depois, quando o udeb `file-preseed` instala, e aí o
+     `localechooser` já perguntou tudo. `inject_preseed_initrd()` anexa um
+     segundo arquivo `cpio` (newc) ao `initrd.gz` com `/preseed.cfg`.
+  3. **`localechooser/languagelist` ≠ `debian-installer/language`.** A pergunta
+     que aparece na tela é a **lista** (`localechooser/languagelist`), e o
+     `localechooser` só a pula quando o idioma preseedado está entre as
+     **escolhas** da lista. A lista é montada por **nível de exibição**
+     (`language_display_level()`): em **console serial** o nível é **0**, e no
+     nível 0 só existe `en`. Com `language=pt` na cmdline o debconf já exibe
+     tudo em português — e **mesmo assim** `has_choice … pt` falha, o `seen`
+     não é propagado e a pergunta é feita.
+  4. **`grub-installer/bootdev` é pergunta crítica e não tinha resposta.** Ela é
+     feita **no fim** (depois de copiar o sistema inteiro): sem preseed, o
+     instalador espera para sempre com a instalação já pronta. Agora o
+     `build-iso.sh` gera `d-i grub-installer/bootdev string <DISCO>` (ou
+     `default` quando o disco não foi fixado).
+  5. **`ROOT_PASSWORD_HASH="$6$sal$hash"` entre aspas DUPLAS.** Um hash crypt
+     tem `$`, e aspas duplas fazem o shell **expandir** `$6`. Sob `set -u` o
+     `late-command.sh` morria com **exit 2 antes de copiar arquivo nenhum** — e a
+     única mensagem visível era `Failed to run preseeded command "sh
+     /preseed/late-command.sh" … exit code 2`, com `/opt` vazio no alvo. Todos
+     os marcadores literais do template passaram a usar **aspas simples**, e o
+     autoteste (`--check-templates`) agora **avalia** a linha gerada com
+     `sh -u -c` provando que o hash chega byte a byte (`sh -n` não pega isso).
+- **Solução:** (1) `prompt 0`; (2) `inject_preseed_initrd` + `preseed/file=/preseed.cfg`
+  nas três entradas Debian (isolinux + 2 do GRUB/UEFI); (3) `d-i localechooser/languagelist
+  select @@LANG@@` na preseed, **além** de `d-i debian-installer/language`, e
+  `language=`/`country=`/`locale=`/`keymap=` na cmdline (`debian_locale_args()`,
+  via `env2debconf`, porque o `localechooser` roda **antes** de a mídia ser
+  montada); (4) `@@GRUB_BOOTDEV@@` → `d-i grub-installer/bootdev string …`;
+  (5) aspas simples em todos os valores literais do `late-command.sh`.
+- **Como diagnosticar:** boote o kernel+initrd direto, sem a ISO:
+  ```bash
+  qemu-system-x86_64 -enable-kvm -cpu host -m 2048 \
+    -kernel vmlinuz -initrd initrd-dbg.gz -cdrom a.iso \
+    -append "auto=true priority=critical preseed/file=/preseed.cfg console=ttyS0,115200 --- quiet" \
+    -serial file:dbg.log -display none
+  ```
+  trocando `S30initrd-preseed` por uma versão que faça `echo … >/dev/console`
+  e imprima `db_get` de `debian-installer/language`, `localechooser/languagelist`
+  e o `seen` de cada um. Foi assim que a causa apareceu: os valores **estavam**
+  no db (`language=pt`, `seen=true`) e o `preseed_location` retornava **0** —
+  o problema não era o preseed, era a pergunta ser outra.
+- **Lição:** "preseed aplicado" não significa "pergunta respondida". Quando um
+  instalador insiste numa pergunta com o preseed correto, descubra **qual
+  template** ele está realmente exibindo (`db_get`/`grep` no fonte do
+  componente) antes de mexer no preseed.
+- **Lição 2:** um valor **literal** vindo do build (`@@MARCADOR@@`) nunca vai
+  entre aspas duplas num template de shell. `$6$…` de um hash crypt é o caso
+  mais cruel porque *parece* uma variável válida; `set -u` transforma isso em
+  morte silenciosa. E a checagem tem de ser por **execução** (`sh -u -c '…'`
+  comparando o valor), não por inspeção: `sh -n` passa com o bug dentro.
+- **Lição 3:** o `late-command.sh` ganhou um `trap` de `EXIT` que imprime no
+  `/dev/console` — sem ele, a falha só existia no log do instalador (tty4) e o
+  sintoma era um `exit code 2` sem causa.
+
+### A ISO Debian instala, mas o **primeiro boot** falha (ou não reinicia)
+
+- **Sintoma A:** a instalação termina, a máquina **não reinicia** e fica no
+  menu principal do `debian-installer` (a tela com `2 shell / 3 shell / 4 log`).
+  O log mostra `Menu item 'finish-install' succeeded but requested to be left
+  unconfigured` — e, do lado do d-i, isso é **`exit 10` = "backed up"**: a
+  sequência `finish-install.d` é **abortada** e todos os hooks seguintes
+  (`94save-logs`, `95umount`, **`99reboot`**) nunca rodam.
+- **Causa A:** `finish-install.d/20final-message` faz
+  `db_input critical finish-install/reboot_in_progress` e trata um `db_go` que
+  devolva "back" como `exit 10`. Em **console serial** isso acontece sempre —
+  preseedar `d-i finish-install/reboot_in_progress note` **não** foi suficiente.
+- **Solução A:** o `late-command.sh` (que roda no hook `07preseed`, portanto
+  **antes** do `20`) substitui o hook por um no-op **e**, no fim, faz o
+  reinício por conta própria (`sync`, `umount /target`, `reboot -f`); o
+  `iso/verify-iso.sh` confere as duas coisas. **Substituir o hook sozinho não
+  basta** — o `20final-message` pertence ao udeb `finish-install`, que é
+  desempacotado **depois** do `07preseed`, então no momento do patch o arquivo
+  ainda não existe. O `reboot -f` é o que reinicia de fato; o patch fica como
+  cinto de segurança.
+
+- **Sintoma B:** o sistema instalado sobe, mas o `ai-cpu-os-firstboot` falha
+  (`status=failed`, `rc=100`) e nada é aplicado.
+- **Causa B:** o próprio instalador grava `deb cdrom:[Debian …]` no
+  `sources.list` do alvo (`apt-cdrom-setup`). Depois da instalação a mídia não
+  existe mais e **todo** `apt-get update` falha com *"o repositório cdrom://…
+  não tem um arquivo Release"*. O papel `inference` roda `apt-get update` antes
+  de instalar qualquer dependência → rc=100.
+- **Solução B:** o `late-command.sh` remove **só** as linhas
+  `deb … cdrom:` (o espelho oficial continua intacto) e roda o `apt-get update`
+  uma vez para confirmar.
+
+- **Sintoma C:** o usuário da ISO **não consegue administrar** a máquina:
+  `sudo: comando não encontrado` (embora ele esteja no grupo `sudo`).
+- **Causa C:** `sudo` **não** faz parte de uma instalação padrão do Debian (é
+  diferente do Ubuntu). Com o root bloqueado (sem `--root-password-hash`) o
+  sistema ficava **sem nenhum acesso administrativo**.
+- **Solução C:** `sudo` entrou em `EXTRA_PACKAGES` (e em
+  `DEFAULT_REPO_PACKAGES`, para o repositório local da mídia cobri-lo).
+
+> **Como investigar isso rápido:** depois da instalação, dê boot no disco com
+> `-netdev user,hostfwd=tcp:127.0.0.1:2222-:22` e entre por SSH
+> (`ssh -p 2222 <usuário>@127.0.0.1`): `systemctl status ai-cpu-os-firstboot`,
+> `/opt/ai-cpu-os/.firstboot-status` e `/var/log/ai-cpu-os-firstboot.log`
+> dizem exatamente onde parou. Foi assim que os três itens acima apareceram
+> (sessão #35) — nenhum deles é visível pelo console serial.
+
+### O `test-vm.sh` estoura o timeout no **primeiro boot** (parece travado)
+
+- **Sintoma:** a instalação termina e o sistema instalado sobe, mas o console
+  serial fica **em silêncio** e o `test-vm.sh` falha com *"timeout esperando o
+  firstboot"*. O disco parece parado (`stat -c %b` no qcow2 não muda).
+- **Causa (medida):** **não está travado — está compilando o llama.cpp.** Com
+  **4 vCPU** o build completo leva **~40 min** (o log
+  `/var/log/ai-cpu-os-firstboot.log` mostra os `[ NN%] Building CXX…`); o
+  padrão do `test-vm.sh` é `--timeout-min 60`, apertado quando o host está
+  ocupado. O qcow2 não cresce porque o build reusa clusters já alocados.
+- **Como confirmar em 10 s** (sem esperar): boote o disco à mão com a porta
+  encaminhada e olhe o processo:
+  ```bash
+  qemu-system-x86_64 -enable-kvm -cpu host -m 6144 -smp 4 \
+    -drive file=alvo.qcow2,if=virtio,format=qcow2 -display none \
+    -serial file:serial.log -monitor none \
+    -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
+    -device virtio-net-pci,netdev=net0 &
+  ssh -p 2222 ai-cpu-os@127.0.0.1 'ps -eo pid,etimes,%cpu,args --sort=-%cpu | head -3'
+  # cc1plus a 99% = build em andamento; 0% e sem filho = travado de verdade
+  ```
+- **Solução:** `--timeout-min 120` (ou `--cpus 8`), e **`--keep`** — sem ele o
+  script **apaga o disco** ao abortar e você perde a evidência. Para encurtar o
+  1º boot, gere a ISO com `--iso-source` apontando para um `.tar.gz` do
+  llama.cpp (não clona do GitHub) ou use `--role builder` (não compila nada).
+
 ### `openssl não encontrado e --password-hash não foi informado`
 
 - **Sintoma:** o build aborta logo na seção *Dependências*, num ambiente limpo.

@@ -2394,6 +2394,113 @@ garante os arquivos íntegros acima.
   (basta rodar na máquina de teste).
 - **Commits:** *(ver `git log`)*.
 
+### Sessão #35 — 2026-10-18 · 🐧 A ISO Debian: 8 travas, todas mudas
+
+- **Objetivo:** "a criação de ISO Debian está apresentando falhas, corrija". O
+  caminho Debian (preseed + isolinux) **nunca havia sido bootado** — só o
+  Ubuntu tinha prova de VM. Nenhuma das falhas abaixo aparece como mensagem de
+  erro: o sintoma é sempre "a máquina fica parada" ou "o 1º boot não aplica".
+
+#### Parte 1 — a instalação não acontecia
+
+- **Bug 1 — o build abortava, e a culpa era do verificador.** O
+  `verify-iso.sh` exigia o netplan do alvo **também** no Debian, que é preseed:
+  a ISO era gerada e reprovada com 2 problemas. A seção "Rede do sistema
+  instalado" virou **distro-aware** (Ubuntu = netplan/autoinstall; Debian =
+  `netcfg/disable_autoconfig`, `dhcp_timeout`, `get_ipaddress`…).
+- **Bug 2 — `prompt 1` no isolinux.** O isolinux mostrava `boot:` e **esperava
+  uma tecla**; o `timeout` não vale nesse modo. Sintoma: VM parada, disco
+  intocado (qcow2 em 193 KB) e serial com **zero byte**. `prompt 0` resolveu.
+  De quebra, `--serial-console` agora põe `serial 0 115200` + `console 0` no
+  isolinux (sem isso o menu nem existe para um teste headless).
+- **Bug 3 — o preseed estava no lugar errado.** O `S30initrd-preseed` do
+  initramfs lê **`/preseed.cfg` na raiz do initrd**;
+  `preseed/file=/cdrom/...` só é aplicado quando o udeb `file-preseed` instala
+  — tarde demais. Nova `inject_preseed_initrd()`: anexa um segundo `cpio`
+  (newc) ao `initrd.gz` com `/preseed.cfg`, `/preseed/ai-cpu-os.cfg` e
+  `/preseed/late-command.sh` (o kernel desempacota os dois; um overlay
+  posterior sobrescreve). As 3 cmdlines passaram a usar
+  `preseed/file=/preseed.cfg`, e o `late-command.sh` autodetecta o ponto de
+  montagem (`/cdrom`, `/media/cdrom`, `/hd-media`, `/media/usb`).
+- **Bug 4 — `[!!] Select a language` para sempre (o mais difícil).** Com o
+  preseed no initrd e `language=pt country=BR locale=pt_BR.UTF-8 keymap=br` na
+  cmdline, a interface ficava **em português** e a pergunta aparecia **mesmo
+  assim**. Diagnóstico por execução, não por leitura: troquei o
+  `S30initrd-preseed` por uma versão que loga em `/dev/console` e bootei
+  `-kernel vmlinuz -initrd initrd-dbg.gz` direto. Resultado: `preseed_location
+  rc=0` e `language=[pt] seen=[true]` no db — **o preseed estava aplicado**.
+  Então li o fonte do componente (localechooser 2.112) e achei: a pergunta
+  exibida é `localechooser/languagelist`, e `do_preseed` só propaga o `seen`
+  quando `has_choice` encontra o idioma **nas escolhas da lista**; a lista vem
+  de `language_display_level()`, e em **console serial o nível é 0**, onde só
+  existe `en`. Correção: `d-i localechooser/languagelist select @@LANG@@`.
+- **Bug 5 — `[!!] Configurando grub-pc`.** `grub-installer/bootdev` é pergunta
+  crítica, feita **depois** de copiar o sistema inteiro; sem resposta o
+  instalador espera para sempre com tudo já instalado. Agora o build gera
+  `d-i grub-installer/bootdev string <DISCO>` (ou `default` sem disco fixado).
+- **Bug 6 — o mais cruel: `$` de um hash crypt entre aspas DUPLAS.**
+  `ROOT_PASSWORD_HASH="$6$sal$hash"` faz o shell expandir `$6`; sob `set -u` o
+  `late-command.sh` morria com **exit 2 antes de copiar arquivo nenhum**. A
+  única pista na VM era `Failed to run preseeded command … exit code 2`, com
+  `/opt` vazio no alvo. Todos os marcadores literais viraram **aspas simples**,
+  e o autoteste (`--check-templates`) passou a **avaliar** a linha gerada com
+  `sh -u -c` provando que o hash chega byte a byte (`sh -n` não pega isso).
+  O script também ganhou um `trap … EXIT` que imprime a falha no
+  `/dev/console` (antes ela só existia no tty4 do instalador).
+
+#### Parte 2 — a instalação terminava, mas o 1º boot não aplicava
+
+Depois de instalar de verdade e **entrar por SSH no alvo** (porta encaminhada,
+`systemctl status ai-cpu-os-firstboot` + `journalctl`), apareceram mais dois
+bugs — invisíveis pelo console serial, porque o `firstboot.sh` escreve no
+journal e no arquivo de log:
+
+- **Bug 7 — `deb cdrom:[Debian …]` no apt do alvo.** Quem grava essa fonte é o
+  **próprio instalador** (`apt-cdrom-setup`), não o `--iso-repo`. Depois da
+  instalação a mídia não existe e **todo** `apt-get update` falha ("não tem um
+  arquivo Release") → o papel `inference` aborta com **rc=100** antes de
+  instalar qualquer dependência. Agora o `late-command.sh` remove **só** as
+  linhas `deb … cdrom:` (o espelho oficial fica intacto) e roda o
+  `apt-get update` uma vez para confirmar.
+- **Bug 8 — `sudo` não existe no Debian.** O usuário da ISO está no grupo
+  `sudo`, mas o pacote **não** vem numa instalação padrão do Debian
+  (`sudo: comando não encontrado`) — e com o root bloqueado o sistema ficava
+  **sem nenhum acesso administrativo**. `sudo` entrou em `EXTRA_PACKAGES` e em
+  `DEFAULT_REPO_PACKAGES` (para o repositório local cobri-lo).
+- **Bônus — a máquina não reiniciava.** O `finish-install.d/20final-message` do
+  d-i pergunta a nota final e trata um `db_go` "back" como **`exit 10`**; o
+  `finish-install` interpreta 10 como "backed up", **aborta** a sequência (nem
+  `94save-logs` nem `99reboot` rodam) e a instalação para no menu. Preseedar
+  `finish-install/reboot_in_progress note` não bastou em console serial.
+  Primeira tentativa: o `late-command.sh` (hook `07preseed`, antes do `20`)
+  substitui o hook por um no-op. **Não bastou** — e a razão é fina: o
+  `20final-message` vem do udeb `finish-install`, que é desempacotado **depois**
+  do hook `07preseed`, então no momento em que o substituíamos o arquivo ainda
+  não existia (bastava ver que o log do d-i não tinha a linha do patch). Quem
+  resolve de verdade é o **`reboot -f` no fim do `late-command.sh`**, depois do
+  `sync` e do `umount /target` (o `95umount` do d-i não roda depois daqui). É o
+  único ponto do fluxo que depende só de nós; o patch do hook fica como cinto
+  de segurança caso o reboot falhe.
+
+#### Testes e guardas
+
+- `verify-iso.sh` ganhou 9 checagens Debian (`prompt 0`, `language=`/`keymap=`
+  na cmdline, `localechooser/languagelist`, `grub-installer/bootdev`,
+  `/preseed.cfg` **dentro** do initrd — com `grep -c`, nunca `grep -q |
+  pipefail`, que morre por SIGPIPE —, limpeza do `cdrom:`, troca do
+  `20final-message` e `sudo` no `pkgsel/include`). Na ISO final: **PASS=49
+  FAIL=0**.
+- Guardas novos no `validate.yml`, cada um provado por violação plantada:
+  `ci-guards` 63 → **74**.
+- Incremento de robustez do build: o temporário do `inject_preseed_initrd` saiu
+  do `/tmp` (tmpfs que enchia e fazia o gzip falhar com uma mensagem que
+  mentia: "formato inesperado?") e os backups (`.orig`) saíram de dentro da
+  árvore da ISO — eles iam **parar dentro da ISO gerada** (24 MB no initrd).
+- **Prova real (VM qemu/KVM, console serial):** ISO Debian gerada, instalada
+  sozinha, reiniciada e o 1º boot aplicou o ai-cpu-os. Ver `docs/STATE.md` § 3
+  e o Bloco M de `docs/VALIDATION.md`.
+- **Commits:** *(ver `git log`)*.
+
 ---
 
 ## 5. 🧵 Threads abertas (o que ficou no ar)
@@ -2432,7 +2539,7 @@ garante os arquivos íntegros acima.
 | ✅ **Obter a ISO numa máquina SEM `xorriso`** | **Existe (sessão #23):** artifact do CI sobe **sempre** (o limite de 2 GiB é da Release) e `make iso-check ISO=…` confere o arquivo baixado (tamanho, SHA256, `CD001`, Volume ID, boot). ⚠️ **Ainda não exercitado contra um artifact real** — a prova foi com fixtures byte a byte. |
 | ✅ **Pendrive bootável (o passo final)** | **Existe (sessão #22):** `iso/write-pendrive.sh` com 9 travas + `make pendrive-test` (16 asserções). ⚠️ **Nenhum pendrive FÍSICO foi gravado ainda** — as travas e o `dd`→`cmp` foram provados contra um **arquivo**. |
 | **Gerar a ISO (passo 3 do checklist)** | ✅ **FEITO na sessão #21** — build **exit 0**, `verify-iso.sh` **PASS=41/FAIL=0**. Ver `STATE.md` § 3.3. |
-| **Bootar em VM (passo 4 — o critério de conclusão)** | ✅ **FEITO na sessão #21** — `test-vm.sh` **exit 0** (instalou + 1º boot aplicou). Ainda falta **hardware físico** e o caminho **Debian**. |
+| **Bootar em VM (passo 4 — o critério de conclusão)** | ✅ **FEITO na sessão #21** (Ubuntu) e **na #35** (Debian) — `test-vm.sh` **exit 0** nos dois (instalou + reiniciou + 1º boot aplicou). Ainda falta **hardware físico**. |
 | ⚠️ **Limite de 2 GiB por arquivo de Release** | A ISO air-gapped (~5,2 GB) **não pode** ser anexada a uma Release. O CI pula o upload e avisa. Distribuição: pendrive/`scp`, runner self-hosted, ou outro host + SHA256 na Release. |
 | ✅ **Aceite do instalador para o repo local** | **RESOLVIDO (sessão #21) — era BUG.** A `sources` (Subiquity) **não funciona**: o curtin roda `apt-get update` num **chroot no alvo** (sem `/cdrom`) → `apt-config` exit 100. Agora o repo é **carregado para o alvo** (`/opt/apt-repo`) pelo late-command. (O `apt-setup/local0` do Debian segue **não testado**.) |
 | **PR #1 do Dependabot** | ✅ **mesclado** em 2026-10-09 (verificado pela API: `merged: true`). |
