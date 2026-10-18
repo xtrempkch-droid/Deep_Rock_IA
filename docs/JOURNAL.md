@@ -1966,9 +1966,7 @@ o que dava a impressão de que o negativo funcionava.
 
 ---
 
-
-
-### Sessão #29 — 2026-10-16 · 🧷 Sincronizar com o GitHub + a correção do #28 que não corrigia
+### Sessão #33 — 2026-10-16 · 🧷 Sincronizar com o GitHub + a correção do #28 que não corrigia
 
 - **Objetivo:** o dono pediu "houve mudanças no GitHub; verifique como está e
   atualize o repo local para não ter erros de envio".
@@ -2209,6 +2207,145 @@ o que dava a impressão de que o negativo funcionava.
 
 ---
 
+### Sessão #33 — 2026-10-17 · 🌐 O sistema instalado subia SEM REDE (rede virou preparação da ISO)
+
+- **Objetivo:** o dono instalou uma ISO mais antiga numa máquina de teste e
+  relatou: **não conseguia logar por SSH**, e depois descobriu que **a rede não
+  ativava por DHCP sozinha** — era preciso configurar à mão no terminal.
+  Pedido: "adicionar uma pré-configuração na preparação da ISO, assim como foi
+  com a senha".
+- **Causa raiz:** o `autoinstall.yaml` do caminho Ubuntu **não tinha a chave
+  `network:`**. O Subiquity usa DHCP para si mesmo, mas **não grava uma
+  configuração de rede persistente no alvo** — o sistema instalado nasce sem
+  netplan, com a placa DOWN. Não é hardware, não é o tuning: é a configuração
+  que nunca foi escrita.
+- **Feito:**
+  - `iso/build-iso.sh`: novas flags **`--network auto|dhcp|static|none`**,
+    `--network-interface`, `--network-ip` (aceita `/N`), `--network-gateway`,
+    `--network-dns`, `--network-prefix`. Validação estrita de IPv4/prefixo/DNS/
+    interface; **default `auto`** (DHCP) — e o default nunca derruba o build
+    (Regra 13-a: IP/gateway sem `static` só geram aviso).
+  - `iso/autoinstall/autoinstall.yaml`: recebeu `@@NETWORK_SECTION@@`, que vira
+    o bloco `network:` (dhcp com `match: en*`/`eth*`, ou IP fixo) **ou
+    desaparece** no modo `none` (não dá para emitir `network:` vazio).
+  - `iso/preseed/ai-cpu-os.cfg`: `@@NETWORK_PRESEED@@` → `netcfg`
+    (`disable_autoconfig false` ou ip/netmask/gateway/dns). **Bug de passagem
+    corrigido:** o hostname da preseed era fixo em `ai-cpu-os` e ignorava
+    `--hostname`; agora usa `@@HOSTNAME@@`.
+  - `iso/preseed/late-command.sh` (§ 2-e): copia o **mesmo** netplan
+    (`/preseed/ai-cpu-os-netplan.yaml`, gerado pelo build) para
+    `/etc/netplan/99-ai-cpu-os.yaml` (0600), move o netplan do instalador/
+    cloud-init para `.ai-cpu-os.bak` e grava
+    `/etc/cloud/cloud.cfg.d/99-ai-cpu-os-disable-network.cfg`
+    (`network: {config: disabled}`) para o cloud-init não reescrever.
+  - `iso/verify-iso.sh`: nova seção **"Rede do sistema instalado"** — confere
+    modo × autoinstall × netplan da mídia × aviso do cloud-init.
+  - `iso/build-iso.sh --check-templates`: agora exercita **rede `auto`,
+    `static` e `none`** nos dois layouts de disco (6 variantes), validando o
+    YAML resultante (autoinstall + netplan) e a preseed.
+  - `webui/`: seletor de rede + campos de IP fixo (só aparecem no modo
+    `static`); validadores `v_network_mode`, `v_net_ip`, `v_gateway`,
+    `v_iface`, `v_dns` (nada de texto do navegador vai ao shell sem formato
+    conferido).
+  - Guardas novos no `validate.yml` e casos plantados no `test-ci-guards.sh`:
+    default DHCP, marcador do autoinstall, marcador da preseed, netplan na
+    mídia, netplan no alvo, cloud-init desligado.
+- **Verificado:** `make iso-yaml` (6 variantes) OK; `make ci-guards-test`
+  **41/41**; `make ui-test` **46/46**; `bash -n`/`sh -n` nos scripts.
+- **O que NÃO foi provado:** **nenhuma ISO nova foi gerada/bootada** depois da
+  mudança. O que vale hoje é "o YAML é válido e coerente" — ainda **não** é
+  "o alvo pega IP sozinho". A prova é o **Bloco M.5-b** do `VALIDATION.md`.
+
+### ✅ Continuação da sessão #33 — a prova em VM (e 3 bugs reais)
+
+O dono pediu: *"instalei numa máquina de teste uma versão mais antiga, tente
+conectar via SSH e faça os testes"*. A varredura da rede (`192.168.1.0/24`,
+host em `.5`) não achou nenhum host com a porta 22 aberta — só o roteador. A
+máquina de teste **estava sem rede por DHCP**, que é exatamente o bug que esta
+sessão corrige. Sem endereço, não há SSH.
+
+Como o ambiente tem `qemu` + `/dev/kvm` + as ISOs em cache, a validação foi
+feita **em VM**, com o mesmo rigor: gerar a ISO → instalar → **bootar o disco
+instalado com `hostfwd` na 22** → entrar por SSH e rodar os testes no alvo.
+
+**Resultado (tudo verificado dentro do alvo):**
+
+| Verificação | Resultado |
+|---|---|
+| IP por DHCP **sozinho** | ✅ `ens3: DHCPv4 address 10.0.2.15/24 … acquired` |
+| Netplan instalado 0600, idêntico ao build | ✅ `/etc/netplan/99-ai-cpu-os.yaml` |
+| cloud-init desligado | ✅ `99-ai-cpu-os-disable-network.cfg` |
+| SSH | ✅ `ai-cpu-os@ai-cpu-os` |
+| Família / manifesto | ✅ `intel-haswell`, `-march=haswell`, `AVX-512: no` |
+| Mods | ✅ swappiness 10, rmem 128 MB, THP `always`, `max_cstate=1` |
+| `smoke-test.sh` | ✅ 11 PASS / 1 FAIL (governor: VM sem `cpufreq`) / 1 SKIP |
+| `ai-server` `/health` | ✅ `{"status":"ok"}` |
+| Inferência real | ✅ 48 tokens coerentes (Qwen2.5-Coder-1.5B Q4_K_M) |
+| `llama-bench` (4 vCPU, AVX2) | ✅ **pp64 46,55 t/s · tg32 25,95 t/s** |
+
+**3 bugs reais encontrados executando (e corrigidos):**
+
+1. **Arquivos com 0 byte após o 1º boot.** `llama-server`,
+   `ai-server.service` e `.firstboot-status` existiam com tamanho **zero**: o
+   `test-vm.sh` matava o qemu no instante do marcador, sem o guest nem o qemu
+   descarregarem o disco. Um unit vazio é lido pelo systemd como **`masked`** —
+   o serviço de inferência simplesmente não existia, e o sintoma
+   (`is-enabled → masked`) não aponta para o disco. Correção: `sync` no
+   `firstboot.sh` **antes** de remover a sentinela (+ no caminho de falha) e
+   15 s de espera antes de encerrar a VM. Bônus: protege contra queda de
+   energia num servidor real.
+2. **`--no-mmap` foi REMOVIDO do llama.cpp.** A unit fixava a flag (era
+   intencional: não mmap-ar o modelo importa num servidor cujo gargalo é
+   memória) e o serviço entrava em loop com
+   `error: invalid argument: --no-mmap` + `restart counter is at 13`. O
+   equivalente moderno é `--load-mode none`. Correção: a unit usa
+   `${LLAMA_EXTRA_ARGS}` e o `install.sh` **pergunta ao binário** que acabou de
+   compilar (`--help`) qual sintaxe vale — funciona nas duas gerações. Sem
+   isso, **toda** ISO gerada com `LLAMA_REF=master` subiria o `ai-server`
+   quebrado.
+3. **`shell-ia.py` devolvia a linha do protocolo.** Ao esgotar as rodadas de
+   ferramentas, retornava `messages[-1]` — o `RESULT: …` cru — como resposta ao
+   usuário. Pior: logava "ferramenta 'X' executada" mesmo quando X não existia,
+   e o erro não listava as ferramentas válidas (um 1,5B repetia o nome
+   inventado até esgotar). Correção: pedido de resposta final em texto + lista
+   das ferramentas válidas + log honesto.
+
+**Guardas novos (provados por violação plantada):** `ci-guards` 43 → **46**;
+`webui` **46**; `families` 85; `validate` verde.
+
+**Prova final (ISO NOVA, com as três correções):** `ai-cpu-os-ubuntu-rede-v2.iso`
+foi gerada (`verify-iso` **PASS=38 FAIL=0**) e **instalada do zero** numa VM
+(qemu/KVM, `--ram 6144 --cpus 4`). Depois, o disco foi bootado com `hostfwd` na
+22 e inspecionado **por SSH** — e é aí que os dois bugs anteriores provariam
+não estar corrigidos:
+
+| Verificação na ISO v2 | Antes (bug) | Agora |
+|---|---|---|
+| `/etc/systemd/system/ai-server.service` | 0 byte → `masked` | **2179 bytes**, `enabled` |
+| `/etc/default/ai-server` | vazio | `LLAMA_EXTRA_ARGS=--load-mode none` |
+| `.firstboot-status` | 0 byte | `status=ok` + role/family/data |
+| `llama-server` | 0 byte | 17.888 bytes (`--version` ok) |
+| Rede no alvo | placa DOWN | `ens3 UP 10.0.2.15/24` + rota default **por DHCP** |
+| `/etc/netplan/99-ai-cpu-os.yaml` | ausente | presente, 0600, idêntico ao build |
+| Login por SSH | impossível | ✅ `ai-cpu-os@ai-cpu-os` |
+| `systemctl start ai-server` | loop `invalid argument` | falha **só** por não haver modelo (`--iso-model none`) — a flag foi aceita |
+
+O log do `test-vm.sh` mostrou a espera de 15 s antes de encerrar a VM
+("Aguardando 15 s para o guest/qemu descarregarem o disco"), que é o que
+garante os arquivos íntegros acima.
+- **Nota de campo (para a próxima tentativa de SSH na máquina de teste):** a
+  rede do ambiente de desenvolvimento é `192.168.1.0/24` (host em
+  `192.168.1.5`); a varredura não achou nenhum host com a porta 22 aberta além
+  do roteador (`192.168.1.1`), e `enp5s0` do host está sem carrier. Ou seja: o
+  problema do SSH era **o mesmo** do alvo — sem configuração de rede, não há
+  endereço para conectar. Gerar a ISO nova e repetir a validação é o caminho.
+- **Commits:** *(ver `git log`)*.
+
+---
+
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,
@@ -2259,6 +2396,9 @@ o que dava a impressão de que o negativo funcionava.
 | ⚠️ **Gatilho do autoinstall (sinalizado, sessão #30)** | **Auditado, nenhum defeito novo confirmado**, mas a automação pode falhar em 3 modos: **(1)** `--disk` fixado que não existe no alvo (default do CI = `/dev/vda`); **(2)** **UEFI nunca bootado**; **(3)** **Debian/preseed nunca executado**. Detalhes e evidência em `docs/TROUBLESHOOTING.md` § "SINALIZADO". |
 | 🔬 **Quem avisa quando o `iso` falha?** | ⚠️ O workflow `iso` roda **manualmente** (`workflow_dispatch`) ou por tag. O run **#16** (2026-10-14) falhou e eu **só descobri de passagem**, numa sessão seguinte, olhando a lista de runs por outro motivo — ninguém foi notificado. Enquanto for assim, uma ISO que não gera pode ficar dias sem ninguém notar. Ideias: um lembrete em `docs/STATE.md`, ou disparar o `iso` no `main` com `air_gapped=false` (a ISO leve, ~1 GB) para usar o CI como sinal. |
 | 🔬 **O run #16 depois do fix (confirmar)** | ⚠️ A 2ª tentativa agora roda `apt-get update` e loga a resposta do `apt`, mas **nenhum run novo rodou ainda**: a correção é hipótese informada pela medição (4 s + erro idêntico ⇒ lista inválida/404), não fato observado. **Disparar o `iso` com `air_gapped=true` e conferir as anotações.** |
+| 🌐 **Rede do alvo (sessão #33)** | A configuração agora vai na ISO (bloco `network:` + netplan na mídia + `99-ai-cpu-os.yaml` no alvo). ✅ **PROVADO EM VM**: o alvo pegou IP por DHCP sozinho e o SSH funcionou. **Falta** o modo `static`, o hardware físico e o reboot de persistência. |
+| 🔴 **Flags do llama.cpp mudam entre versões (sessão #33)** | `--no-mmap` foi removido do upstream e derrubava o `ai-server` em loop. A unit passou a usar `${LLAMA_EXTRA_ARGS}` + detecção no `install.sh`. **Vale para QUALQUER flag futura**: ao subir `LLAMA_REF`, revisar `llama-server --help`. |
+| 🟠 **Gravação do disco no 1º boot (sessão #33)** | Arquivos de **0 byte** (unit vazio = `masked`) quando o disco não é descarregado. `sync` no `firstboot.sh` + espera no `test-vm.sh`. **Falta** exercitar um desligamento abrupto de propósito (queda de energia simulada). |
 
 ### 5.3 Dúvidas em aberto / dívida técnica (requerem decisão sua)
 
@@ -2307,7 +2447,11 @@ o que dava a impressão de que o negativo funcionava.
 
 | Armadilha | O que acontece | Como evitar |
 |-----------|----------------|-------------|
+| Assumir que **`autoinstall` sem `network:`** configura a rede do alvo | O Subiquity usa DHCP para si mesmo, mas **não grava netplan no alvo** → o sistema instalado sobe **sem IP** (placa DOWN) até configurar à mão | O build grava `network:` no autoinstall **e** o netplan em `/preseed/ai-cpu-os-netplan.yaml`; o late-command copia para `/etc/netplan/99-ai-cpu-os.yaml`, move o netplan do instalador/cloud-init e desliga a rede do cloud-init. Ver `docs/ISO.md` § 4.3 (sessão #33) |
 | `grep` **sem arquivo** no terminal | Ele lê o **stdin** e **trava a sessão** | Sempre passe arquivo/glob, ou use `grep ... <<<"$var"` |
+| Matar o **qemu logo após o marcador** do firstboot | O guest não descarregou o disco → arquivos de **0 byte**; um `unit` vazio vira **`masked`** no systemd (parece "serviço mascado", não "arquivo corrompido") | `sync` no `firstboot.sh` e 15 s de espera antes de encerrar (`test-vm.sh`). Idem numa queda de energia real |
+| Fixar uma **flag do llama.cpp** na unit | O upstream renomeia/remove (`--no-mmap` → `--load-mode none`) e o serviço entra em loop com `invalid argument` | A unit usa `${LLAMA_EXTRA_ARGS}`; o `install.sh` pergunta ao binário (`--help`) qual sintaxe vale |
+| Escrever guarda de CI com `grep` **sem âncora** | O texto do próprio comentário que explica o bug casa com o guarda → **falso positivo** (aconteceu 2× na sessão #33) | Ancore na forma real (`^[[:space:]]+--flag`, `^nome()`, `^[[:space:]]*nome()`); `make ci-guards-test` denuncia na hora |
 | Polling agressivo na **API do GitHub** sem token | `abuse detection` — bloqueia por vários minutos | Poll no **navegador**; na API, com calma (60 req/h) |
 | Assumir que **logs** do CI são públicos | HTTP **403** (exige login) | Use as *annotations* (públicas) ou o navegador logado |
 | `cmake` no **Docker** com `GGML_NATIVE=ON` | O CMake pega a CPU do **runner** (pode ter AVX-512) → `SIGILL` no alvo | Mantenha `GGML_NATIVE=OFF` no container (Regra 12) |

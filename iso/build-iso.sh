@@ -157,6 +157,30 @@ SYS_HOSTNAME=""
 PASSWORD_HASH=""
 ROOT_PASSWORD_HASH=""
 GENERATED_PASSWORD=""
+
+# --- rede do sistema instalado (--network) ----------------------------------
+# Sem esta pré-configuração o Subiquity NÃO grava uma configuração de rede
+# persistente no alvo quando o autoinstall não tem a chave `network:` — o
+# sistema instala, mas sobe SEM DHCP (a placa fica DOWN até alguém rodar
+# `ip link set`/`dhclient` na mão). Foi exatamente o que aconteceu numa
+# instalação real (sessão #28). Agora a intenção vai escrita na ISO:
+#
+#   auto   (padrão) → DHCP em todas as interfaces Ethernet (en*/eth*)
+#   dhcp            → igual a auto, mas explícito
+#   static          → IP fixo (exige --network-ip e --network-gateway)
+#   none            → não grava configuração de rede (comportamento antigo)
+NETWORK_MODE="auto"
+NET_IFACE=""          # vazio = casa en*/eth* por glob (netplan) / auto (d-i)
+NET_IP=""             # aceita 192.168.1.50 ou 192.168.1.50/24
+NET_GATEWAY=""
+NET_DNS=""            # vazio = 1.1.1.1,8.8.8.8 (só no modo static)
+NET_PREFIX="24"       # usado quando --network-ip vem sem /prefixo
+# Derivados de validate_network (usados na preseed e no late-command).
+NET_IP_ADDR=""
+NET_PREFIX_EFF=""
+NET_NETMASK=""
+NET_DNS_SPACE=""
+
 LOCALE="pt_BR.UTF-8"
 LANG_CODE="pt"
 COUNTRY="BR"
@@ -344,6 +368,22 @@ Opções principais:
                         root fica BLOQUEADO (padrão). Com ele, o root é
                         habilitado: no Ubuntu via late-command (chpasswd -e);
                         no Debian via preseed (passwd/root-login true).
+  --network MODE        Rede do sistema INSTALADO (gravada na ISO):
+                          auto (padrão) — DHCP em todas as interfaces Ethernet
+                          dhcp          — igual a auto, mas explícito
+                          static        — IP fixo (exige --network-ip e
+                                          --network-gateway)
+                          none          — não grava configuração (a placa pode
+                                          subir DOWN; foi o padrão antigo)
+                        Sem isto o Subiquity não deixa configuração persistente
+                        no alvo e o sistema sobe SEM DHCP.
+  --network-interface NOME  Interface alvo (ex.: enp5s0). Vazio = casa en*/eth*
+                        por glob no Ubuntu e usa 'auto' no Debian. Em modo
+                        static, informe-a se a placa não for en*/eth*.
+  --network-ip IP[/PREFIXO]  Endereço do modo static (prefixo padrão: 24).
+  --network-gateway IP  Gateway do modo static (obrigatório no modo static).
+  --network-dns "A,B"   Servidores DNS do modo static (padrão: 1.1.1.1,8.8.8.8).
+  --network-prefix N    Prefixo usado quando --network-ip vem sem /N (padrão: 24).
   --locale / --keymap / --timezone / --mirror-host / --mirror-dir
   --extra-packages "…"  Pacotes extras instalados no alvo.
   --iso-model VALOR     Modelo .gguf embutido na mídia (a ISO é air-gapped, logo
@@ -388,6 +428,109 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Rede: validação e normalização (ver --network)
+# ---------------------------------------------------------------------------
+NET_DNS_DEFAULT="1.1.1.1,8.8.8.8"
+
+# IPv4 estrito (cada octeto 0-255, sem zeros à esquerda). É o que vai para o
+# netplan/preseed — um valor torto aqui deixaria o alvo sem rede.
+RE_IPV4='^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$'
+RE_IFACE='^[A-Za-z0-9_.:-]+$'
+
+# Prefixo CIDR → máscara decimal (o debian-installer pede netmask, não /N).
+prefix_to_netmask() {
+  local p="$1" octet out="" i
+  for i in 0 1 2 3; do
+    if (( p >= 8 * (i + 1) )); then
+      octet=255
+    elif (( p > 8 * i )); then
+      octet=$(( 256 - (1 << (8 - (p - 8 * i))) ))
+    else
+      octet=0
+    fi
+    out="${out:+${out}.}${octet}"
+  done
+  printf '%s' "$out"
+}
+
+validate_network() {
+  case "$NETWORK_MODE" in
+    auto|dhcp|static|none) ;;
+    *) log_error "Rede inválida: '${NETWORK_MODE}' (use auto, dhcp, static ou none)."; exit 2 ;;
+  esac
+
+  if [[ -n "$NET_IFACE" ]]; then
+    if ! [[ "$NET_IFACE" =~ $RE_IFACE ]]; then
+      log_error "Interface inválida: '${NET_IFACE}' (esperado algo como enp5s0)."
+      exit 2
+    fi
+  fi
+
+  if [[ "$NETWORK_MODE" != "static" ]]; then
+    # Um default NUNCA pode derrubar o build (Regra 13-a): se o usuário passou
+    # endereço sem escolher static, avisamos e seguimos no modo escolhido.
+    if [[ -n "$NET_IP" || -n "$NET_GATEWAY" ]]; then
+      log_warn "--network-ip/--network-gateway exigem --network static; ignorados no modo '${NETWORK_MODE}'."
+      NET_IP=""; NET_GATEWAY=""; NET_DNS=""
+    fi
+    NET_IP_ADDR=""; NET_PREFIX_EFF=""; NET_NETMASK=""; NET_DNS_SPACE=""
+    if [[ "$NETWORK_MODE" == "none" ]]; then
+      log_warn "--network none: o alvo pode subir SEM rede (a placa fica DOWN até configurar à mão)."
+    fi
+    return 0
+  fi
+
+  [[ -n "$NET_IP" ]] || { log_error "--network static exige --network-ip."; exit 2; }
+  [[ -n "$NET_GATEWAY" ]] || { log_error "--network static exige --network-gateway."; exit 2; }
+
+  local addr prefix
+  if [[ "$NET_IP" == */* ]]; then
+    addr="${NET_IP%%/*}"; prefix="${NET_IP##*/}"
+  else
+    addr="$NET_IP"; prefix="$NET_PREFIX"
+  fi
+  if ! [[ "$prefix" =~ ^[0-9]{1,2}$ ]] || (( 10#$prefix < 1 || 10#$prefix > 32 )); then
+    log_error "Prefixo inválido: '${prefix}' (use 1..32)."
+    exit 2
+  fi
+  if ! [[ "$addr" =~ $RE_IPV4 ]]; then
+    log_error "IP inválido: '${addr}'."
+    exit 2
+  fi
+  if ! [[ "$NET_GATEWAY" =~ $RE_IPV4 ]]; then
+    log_error "Gateway inválido: '${NET_GATEWAY}'."
+    exit 2
+  fi
+  NET_IP="${addr}/${prefix}"
+
+  [[ -n "$NET_DNS" ]] || NET_DNS="$NET_DNS_DEFAULT"
+  # Aceita "1.1.1.1 8.8.8.8", "1.1.1.1,8.8.8.8" e "1.1.1.1, 8.8.8.8".
+  NET_DNS="$(printf '%s' "$NET_DNS" | tr -s '[:space:]' ',' | sed -e 's/,,*/,/g' -e 's/^,//' -e 's/,$//')"
+  [[ -n "$NET_DNS" ]] || { log_error "--network-dns vazio (informe ao menos um IP)."; exit 2; }
+  local d
+  local -a dns_list=()
+  IFS=',' read -r -a dns_list <<<"$NET_DNS"
+  for d in "${dns_list[@]}"; do
+    [[ -n "$d" ]] || continue
+    if ! [[ "$d" =~ $RE_IPV4 ]]; then
+      log_error "DNS inválido: '${d}'."
+      exit 2
+    fi
+  done
+  [[ ${#dns_list[@]} -gt 0 ]] || { log_error "--network-dns vazio."; exit 2; }
+
+  NET_IP_ADDR="${NET_IP%%/*}"
+  NET_PREFIX_EFF="${NET_IP##*/}"
+  NET_NETMASK="$(prefix_to_netmask "$NET_PREFIX_EFF")"
+  NET_DNS_SPACE="$(printf '%s' "$NET_DNS" | tr ',' ' ')"
+
+  if [[ -z "$NET_IFACE" ]]; then
+    log_warn "--network static sem --network-interface: aplicarei em en* (se houver mais de uma placa Ethernet, o IP se repete)."
+  fi
+  log_info "Rede do alvo: static ${NET_IP} via ${NET_GATEWAY} (DNS: ${NET_DNS})"
+}
+
+# ---------------------------------------------------------------------------
 # Argumentos
 # ---------------------------------------------------------------------------
 parse_args() {
@@ -420,6 +563,12 @@ parse_args() {
       --username)        [[ $# -ge 2 ]] || { log_error "--username exige valor"; exit 2; }; USERNAME="$2"; shift 2 ;;
       --password-hash)   [[ $# -ge 2 ]] || { log_error "--password-hash exige valor"; exit 2; }; PASSWORD_HASH="$2"; shift 2 ;;
       --root-password-hash) [[ $# -ge 2 ]] || { log_error "--root-password-hash exige valor"; exit 2; }; ROOT_PASSWORD_HASH="$2"; shift 2 ;;
+      --network)         [[ $# -ge 2 ]] || { log_error "--network exige valor (auto|dhcp|static|none)"; exit 2; }; NETWORK_MODE="$2"; shift 2 ;;
+      --network-interface) [[ $# -ge 2 ]] || { log_error "--network-interface exige valor"; exit 2; }; NET_IFACE="$2"; shift 2 ;;
+      --network-ip)      [[ $# -ge 2 ]] || { log_error "--network-ip exige valor"; exit 2; }; NET_IP="$2"; shift 2 ;;
+      --network-gateway) [[ $# -ge 2 ]] || { log_error "--network-gateway exige valor"; exit 2; }; NET_GATEWAY="$2"; shift 2 ;;
+      --network-dns)     [[ $# -ge 2 ]] || { log_error "--network-dns exige valor"; exit 2; }; NET_DNS="$2"; shift 2 ;;
+      --network-prefix)  [[ $# -ge 2 ]] || { log_error "--network-prefix exige valor"; exit 2; }; NET_PREFIX="$2"; shift 2 ;;
       --locale)          [[ $# -ge 2 ]] || { log_error "--locale exige valor"; exit 2; }; LOCALE="$2"; shift 2 ;;
       --keymap)          [[ $# -ge 2 ]] || { log_error "--keymap exige valor"; exit 2; }; KEYMAP="$2"; shift 2 ;;
       --timezone)        [[ $# -ge 2 ]] || { log_error "--timezone exige valor"; exit 2; }; TIMEZONE="$2"; shift 2 ;;
@@ -461,6 +610,8 @@ parse_args() {
   if [[ -z "$SYS_HOSTNAME" ]]; then
     SYS_HOSTNAME="$(printf '%s' "$USERNAME" | tr '_' '-')"
   fi
+
+  validate_network
 
   if [[ -z "$DISK" && $ALLOW_ANY_DISK -eq 0 && $DRY_RUN -eq 0 ]]; then
     log_error "Informe o disco alvo com --disk /dev/xxx (será APAGADO)."
@@ -1556,6 +1707,110 @@ expand_packages_block() {
   ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
 }
 
+# Bloco `network:` do autoinstall (e o MESMO conteúdo vira o netplan do alvo,
+# copiado do /preseed da mídia pelo late-command — uma fonte de verdade só).
+#
+# Por que `match: name: "en*"` em vez do nome da interface: no momento de gerar
+# a ISO não se sabe qual placa a máquina terá. O glob cobre os nomes previsíveis
+# (`enp5s0`, `eno1`, `enp1s0`) e o `eth*` cobre máquinas antigas. Quando o
+# usuário sabe o nome (caso típico do IP fixo), ele passa --network-interface e
+# o bloco fica nominal.
+network_yaml_block() {
+  [[ "$NETWORK_MODE" == "none" ]] && return 0
+
+  printf 'network:\n'
+  printf '  version: 2\n'
+  printf '  renderer: networkd\n'
+  printf '  ethernets:\n'
+
+  if [[ "$NETWORK_MODE" == "static" ]]; then
+    local addr="${NET_IP%%/*}" prefix="${NET_IP##*/}"
+    local dns_yaml
+    dns_yaml="$(printf '%s' "$NET_DNS" | sed -e 's/,/, /g')"
+    if [[ -n "$NET_IFACE" ]]; then
+      printf '    %s:\n' "$NET_IFACE"
+    else
+      printf '    lan:\n'
+      printf '      match:\n'
+      printf '        name: "en*"\n'
+    fi
+    printf '      addresses: [%s/%s]\n' "$addr" "$prefix"
+    printf '      routes:\n'
+    printf '        - to: default\n'
+    printf '          via: %s\n' "$NET_GATEWAY"
+    printf '      nameservers:\n'
+    printf '        addresses: [%s]\n' "$dns_yaml"
+    printf '      optional: true\n'
+    return 0
+  fi
+
+  # DHCP (auto/dhcp)
+  if [[ -n "$NET_IFACE" ]]; then
+    printf '    %s:\n' "$NET_IFACE"
+    printf '      dhcp4: true\n'
+    printf '      dhcp6: false\n'
+    printf '      optional: true\n'
+  else
+    # Duas definições por glob: se a máquina tiver en* E eth*, as duas recebem
+    # DHCP — que é o desejado num DHCP (e `optional: true` evita boot travado).
+    local id
+    for id in en eth; do
+      printf '    all-%s:\n' "$id"
+      printf '      match:\n'
+      printf '        name: "%s*"\n' "$id"
+      printf '      dhcp4: true\n'
+      printf '      dhcp6: false\n'
+      printf '      optional: true\n'
+    done
+  fi
+}
+
+# Expande o marcador @@NETWORK_SECTION@@ no autoinstall. No modo `none` o bloco
+# INTEIRO some (não dá para emitir `network:` sem conteúdo: viraria `null`).
+expand_network_block() {
+  local f="$1" block
+  block="$(mktemp)"
+  network_yaml_block > "$block"
+  awk -v block="$block" '
+    /^@@NETWORK_SECTION@@$/ {
+      while ((getline l < block) > 0) print l
+      close(block)
+      next
+    }
+    { print }
+  ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+  rm -f "$block"
+}
+
+# Bloco de rede da preseed do debian-installer. O d-i não usa netplan: ou ele
+# pergunta por DHCP (`disable_autoconfig false`, o padrão) ou recebe os campos
+# estáticos (`disable_autoconfig true` + ip/netmask/gateway/dns).
+expand_network_preseed_block() {
+  local f="$1" iface_line
+  if [[ -n "$NET_IFACE" ]]; then iface_line="$NET_IFACE"; else iface_line="auto"; fi
+
+  awk -v mode="$NETWORK_MODE" -v iface="$iface_line" \
+      -v ip="${NET_IP%%/*}" -v gw="$NET_GATEWAY" \
+      -v mask="$NET_NETMASK" -v dns="$NET_DNS_SPACE" '
+    /^@@NETWORK_PRESEED@@$/ {
+      print "d-i netcfg/choose_interface select " iface
+      if (mode == "static") {
+        print "d-i netcfg/disable_autoconfig boolean true"
+        print "d-i netcfg/get_ipaddress string " ip
+        print "d-i netcfg/get_netmask string " mask
+        print "d-i netcfg/get_gateway string " gw
+        print "d-i netcfg/get_nameservers string " dns
+        print "d-i netcfg/confirm_static boolean true"
+      } else {
+        print "d-i netcfg/disable_autoconfig boolean false"
+        print "d-i netcfg/dhcp_timeout string 60"
+      }
+      next
+    }
+    { print }
+  ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+}
+
 # Substitui tokens @@NOME@@ nos templates (preseed e autoinstall).
 subst_template() {
   local src="$1" dst="$2"
@@ -1590,6 +1845,15 @@ subst_template() {
     -e "s|@@APT_PRIMARY_URI@@|${APT_PRIMARY_URI}|g" \
     -e "s|@@STORAGE_LAYOUT@@|${store_esc}|g" \
     -e "s|@@PARTMAN_DISK@@|${PARTMAN_DISK_LINE}|g" \
+    -e "s|@@NETWORK_MODE@@|${NETWORK_MODE}|g" \
+    -e "s|@@NET_IFACE@@|${NET_IFACE}|g" \
+    -e "s|@@NET_IP@@|${NET_IP}|g" \
+    -e "s|@@NET_IP_ADDR@@|${NET_IP_ADDR}|g" \
+    -e "s|@@NET_PREFIX@@|${NET_PREFIX_EFF}|g" \
+    -e "s|@@NET_GATEWAY@@|${NET_GATEWAY}|g" \
+    -e "s|@@NET_NETMASK@@|${NET_NETMASK}|g" \
+    -e "s|@@NET_DNS@@|${NET_DNS}|g" \
+    -e "s|@@NET_DNS_SPACE@@|${NET_DNS_SPACE}|g" \
     "$src" > "$dst"
 }
 
@@ -1614,6 +1878,7 @@ check_no_leftover_tokens() {
     DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME PASSWORD_HASH ROOT_PASSWORD_HASH
     LOCALE KEYMAP TIMEZONE EXTRA_PACKAGES PACKAGES_BLOCK STORAGE_LAYOUT ISO_MODEL
     APT_REPO_PATH APT_LOCAL_SOURCES APT_LOCAL_PRESEED APT_PRIMARY_URI LLAMA_SRC_NAME ROOT_PRESEED
+    NETWORK_SECTION NETWORK_PRESEED NETWORK_MODE NET_IFACE NET_IP NET_GATEWAY NET_DNS
   )
   local t leftover=0
   for t in "${required_tokens[@]}"; do
@@ -1643,8 +1908,16 @@ inject_templates() {
     expand_packages_block "${UBUNTU_STAGE}/autoinstall.yaml"
     # Idem para o repositório local: a fonte extra entra — ou some por completo.
     expand_apt_local_block "${UBUNTU_STAGE}/autoinstall.yaml"
+    # A rede: o bloco `network:` entra (dhcp/static) ou desaparece por inteiro.
+    expand_network_block "${UBUNTU_STAGE}/autoinstall.yaml"
     chmod 0644 "${UBUNTU_STAGE}/autoinstall.yaml"
     inject_common_templates "${UBUNTU_STAGE}/preseed"
+    # O MESMO bloco vira o netplan do sistema instalado (copiado pelo
+    # late-command): instalador e alvo não divergem.
+    if [[ "$NETWORK_MODE" != "none" ]]; then
+      network_yaml_block > "${UBUNTU_STAGE}/preseed/ai-cpu-os-netplan.yaml"
+      chmod 0644 "${UBUNTU_STAGE}/preseed/ai-cpu-os-netplan.yaml"
+    fi
     check_no_leftover_tokens "${UBUNTU_STAGE}/autoinstall.yaml" \
                             "${UBUNTU_STAGE}/preseed/late-command.sh" \
                             "${UBUNTU_STAGE}/preseed/firstboot.sh" || exit 1
@@ -1674,6 +1947,7 @@ inject_templates() {
   subst_template "${ISO_DIR}/preseed/ai-cpu-os.cfg" "${dest}/ai-cpu-os.cfg"
   expand_apt_local_block "${dest}/ai-cpu-os.cfg"
   expand_root_preseed_block "${dest}/ai-cpu-os.cfg"
+  expand_network_preseed_block "${dest}/ai-cpu-os.cfg"
   chmod 0644 "${dest}/ai-cpu-os.cfg"
   inject_common_templates "$dest"
   check_no_leftover_tokens "${dest}/ai-cpu-os.cfg" "${dest}/late-command.sh" "${dest}/firstboot.sh" || exit 1
@@ -2161,59 +2435,134 @@ check_templates() {
   PASSWORD_HASH="${PASSWORD_HASH:-\$6\$EXEMPLO\$autoteste}"
   ROOT_PASSWORD_HASH="${ROOT_PASSWORD_HASH:-\$6\$EXEMPLO\$root}"
 
-  local variant disk dir
+  local variant disk dir netmode
   for variant in com-disco sem-disco; do
     if [[ "$variant" == "com-disco" ]]; then disk="/dev/nvme0n1"; else disk=""; fi
     DISK="$disk"
-    dir="${tmp}/${variant}"
-    mkdir -p "$dir"
 
-    subst_template "${ISO_DIR}/autoinstall/autoinstall.yaml" "${dir}/autoinstall.yaml"
-    expand_packages_block "${dir}/autoinstall.yaml"
-    expand_apt_local_block "${dir}/autoinstall.yaml"
-    subst_template "${ISO_DIR}/preseed/late-command.sh"       "${dir}/late-command.sh"
-    subst_template "${ISO_DIR}/preseed/firstboot.sh"          "${dir}/firstboot.sh"
-    subst_template "${ISO_DIR}/preseed/ai-cpu-os.cfg"         "${dir}/ai-cpu-os.cfg"
-    expand_apt_local_block "${dir}/ai-cpu-os.cfg"
-    expand_root_preseed_block "${dir}/ai-cpu-os.cfg"
-
-    log_info "variante '${variant}': storage = $(storage_layout_line)"
-    log_info "              packages =${EXTRA_PACKAGES:+ }${EXTRA_PACKAGES}"
-
-    if check_no_leftover_tokens "${dir}/autoinstall.yaml" "${dir}/late-command.sh" \
-                                "${dir}/firstboot.sh" "${dir}/ai-cpu-os.cfg"; then
-      log_ok "  marcadores: todos substituídos"
-    else
-      rc=1
-    fi
-
-    if bash -n "${dir}/firstboot.sh" 2>/dev/null; then
-      log_ok "  firstboot.sh: sintaxe bash OK"
-    else
-      log_error "  firstboot.sh: sintaxe bash inválida"
-      rc=1
-    fi
-
-    if sh -n "${dir}/late-command.sh" 2>/dev/null; then
-      log_ok "  late-command.sh: sintaxe POSIX sh OK"
-    else
-      log_error "  late-command.sh: sintaxe POSIX sh inválida"
-      rc=1
-    fi
-
-    if command -v yamllint >/dev/null 2>&1; then
-      if yamllint -c "${REPO_ROOT}/.yamllint.yml" "${dir}/autoinstall.yaml" >/dev/null 2>&1; then
-        log_ok "  autoinstall.yaml: YAML válido"
+    # Três modos de rede, porque cada um gera um YAML DIFERENTE (e o modo
+    # `none` precisa fazer o bloco `network:` desaparecer por inteiro).
+    for netmode in auto static none; do
+      NETWORK_MODE="$netmode"
+      if [[ "$netmode" == "static" ]]; then
+        NET_IP="192.168.1.50/24"; NET_GATEWAY="192.168.1.1"; NET_DNS="1.1.1.1,8.8.8.8"
+        NET_IP_ADDR="192.168.1.50"; NET_PREFIX_EFF="24"
+        NET_NETMASK="255.255.255.0"; NET_DNS_SPACE="1.1.1.1 8.8.8.8"
       else
-        log_error "  autoinstall.yaml: YAML inválido"
-        yamllint -c "${REPO_ROOT}/.yamllint.yml" "${dir}/autoinstall.yaml" || true
+        NET_IP=""; NET_GATEWAY=""; NET_DNS=""
+        NET_IP_ADDR=""; NET_PREFIX_EFF=""; NET_NETMASK=""; NET_DNS_SPACE=""
+      fi
+
+      # O modo `auto` (default) mantém os nomes históricos `com-disco`/
+      # `sem-disco` — `tests/test-iso-disk.sh` e quem já inspecionava a árvore
+      # com `--keep-templates` dependem deles. Os modos extras ganham sufixo.
+      if [[ "$netmode" == "auto" ]]; then
+        dir="${tmp}/${variant}"
+      else
+        dir="${tmp}/${variant}-${netmode}"
+      fi
+      mkdir -p "$dir"
+
+      subst_template "${ISO_DIR}/autoinstall/autoinstall.yaml" "${dir}/autoinstall.yaml"
+      expand_packages_block "${dir}/autoinstall.yaml"
+      expand_apt_local_block "${dir}/autoinstall.yaml"
+      expand_network_block "${dir}/autoinstall.yaml"
+      subst_template "${ISO_DIR}/preseed/late-command.sh"       "${dir}/late-command.sh"
+      subst_template "${ISO_DIR}/preseed/firstboot.sh"          "${dir}/firstboot.sh"
+      subst_template "${ISO_DIR}/preseed/ai-cpu-os.cfg"         "${dir}/ai-cpu-os.cfg"
+      expand_apt_local_block "${dir}/ai-cpu-os.cfg"
+      expand_root_preseed_block "${dir}/ai-cpu-os.cfg"
+      expand_network_preseed_block "${dir}/ai-cpu-os.cfg"
+      if [[ "$NETWORK_MODE" != "none" ]]; then
+        network_yaml_block > "${dir}/ai-cpu-os-netplan.yaml"
+      fi
+
+      log_info "variante '${variant}' · rede '${netmode}': storage = $(storage_layout_line)"
+      log_info "              packages =${EXTRA_PACKAGES:+ }${EXTRA_PACKAGES}"
+
+      if check_no_leftover_tokens "${dir}/autoinstall.yaml" "${dir}/late-command.sh" \
+                                  "${dir}/firstboot.sh" "${dir}/ai-cpu-os.cfg"; then
+        log_ok "  marcadores: todos substituídos"
+      else
         rc=1
       fi
-    else
-      log_warn "  yamllint ausente: o YAML do autoinstall NÃO foi validado."
-    fi
+
+      # Coerência da rede: o bloco tem de existir (e ser o pedido) ou sumir.
+      if [[ "$netmode" == "none" ]]; then
+        if grep -q '^network:' "${dir}/autoinstall.yaml"; then
+          log_error "  rede 'none': o bloco 'network:' deveria ter sumido"
+          rc=1
+        else
+          log_ok "  rede 'none': sem bloco 'network:' (comportamento antigo)"
+        fi
+      elif [[ "$netmode" == "static" ]]; then
+        if grep -q 'addresses: \[192.168.1.50/24\]' "${dir}/ai-cpu-os-netplan.yaml" \
+           && grep -q 'via: 192.168.1.1' "${dir}/ai-cpu-os-netplan.yaml"; then
+          log_ok "  rede static: addresses + rota default no netplan do alvo"
+        else
+          log_error "  rede static: netplan do alvo não tem endereço/rota"
+          rc=1
+        fi
+        if grep -q 'netcfg/get_ipaddress string 192.168.1.50' "${dir}/ai-cpu-os.cfg" \
+           && grep -q 'netcfg/get_netmask string 255.255.255.0' "${dir}/ai-cpu-os.cfg"; then
+          log_ok "  rede static: preseed com IP + netmask (d-i)"
+        else
+          log_error "  rede static: preseed sem get_ipaddress/get_netmask"
+          rc=1
+        fi
+      else
+        if grep -q 'dhcp4: true' "${dir}/ai-cpu-os-netplan.yaml"; then
+          log_ok "  rede dhcp: dhcp4 no netplan do alvo"
+        else
+          log_error "  rede dhcp: netplan do alvo sem dhcp4"
+          rc=1
+        fi
+        if grep -q 'netcfg/disable_autoconfig boolean false' "${dir}/ai-cpu-os.cfg"; then
+          log_ok "  rede dhcp: preseed com DHCP explícito (d-i)"
+        else
+          log_error "  rede dhcp: preseed sem netcfg/disable_autoconfig false"
+          rc=1
+        fi
+      fi
+
+      if bash -n "${dir}/firstboot.sh" 2>/dev/null; then
+        log_ok "  firstboot.sh: sintaxe bash OK"
+      else
+        log_error "  firstboot.sh: sintaxe bash inválida"
+        rc=1
+      fi
+
+      if sh -n "${dir}/late-command.sh" 2>/dev/null; then
+        log_ok "  late-command.sh: sintaxe POSIX sh OK"
+      else
+        log_error "  late-command.sh: sintaxe POSIX sh inválida"
+        rc=1
+      fi
+
+      if command -v yamllint >/dev/null 2>&1; then
+        if yamllint -c "${REPO_ROOT}/.yamllint.yml" "${dir}/autoinstall.yaml" >/dev/null 2>&1; then
+          log_ok "  autoinstall.yaml: YAML válido"
+        else
+          log_error "  autoinstall.yaml: YAML inválido"
+          yamllint -c "${REPO_ROOT}/.yamllint.yml" "${dir}/autoinstall.yaml" || true
+          rc=1
+        fi
+        if [[ -f "${dir}/ai-cpu-os-netplan.yaml" ]]; then
+          if yamllint -c "${REPO_ROOT}/.yamllint.yml" "${dir}/ai-cpu-os-netplan.yaml" >/dev/null 2>&1; then
+            log_ok "  netplan do alvo: YAML válido"
+          else
+            log_error "  netplan do alvo: YAML inválido"
+            yamllint -c "${REPO_ROOT}/.yamllint.yml" "${dir}/ai-cpu-os-netplan.yaml" || true
+            rc=1
+          fi
+        fi
+      else
+        log_warn "  yamllint ausente: o YAML do autoinstall NÃO foi validado."
+      fi
+    done
   done
 
+  NETWORK_MODE="auto"
   DISK=""
   if [[ $KEEP_TEMPLATES -eq 1 ]]; then
     # Não remove a árvore e imprime o caminho de forma MECÂNICA (a linha
@@ -2444,7 +2793,12 @@ selftest_iso_tools() {
   subst_template "${ISO_DIR}/autoinstall/autoinstall.yaml" "${stage}/autoinstall.yaml"
   expand_packages_block "${stage}/autoinstall.yaml"
   expand_apt_local_block "${stage}/autoinstall.yaml"
+  expand_network_block "${stage}/autoinstall.yaml"
   inject_common_templates "${stage}/preseed"
+  if [[ "$NETWORK_MODE" != "none" ]]; then
+    network_yaml_block > "${stage}/preseed/ai-cpu-os-netplan.yaml"
+    chmod 0644 "${stage}/preseed/ai-cpu-os-netplan.yaml"
+  fi
 
   # 2) O projeto real (o mesmo tar que o build injeia).
   mkdir -p "${stage}/ai-cpu-os"

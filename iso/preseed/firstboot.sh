@@ -160,6 +160,7 @@ acao=Veja /var/log/ai-cpu-os-firstboot.log e /var/log/ai-cpu-os-build.log.
 EOF
   # Mantém a sentinela: tenta de novo no próximo boot (falha pode ser de rede).
   log "sentinela mantida; será tentado de novo no próximo boot."
+  sync   # o status precisa sobreviver a um desligamento logo depois
   exit 1
 fi
 
@@ -176,9 +177,14 @@ data=$(_ts)
 nota=Se o C-states foi alterado, reinicie para o tuning valer plenamente.
 EOF
 
+# Ordem deliberada: o status tem de estar DURÁVEL antes de a sentinela sumir.
+# Se a sentinela desaparecesse primeiro e faltasse energia, o sistema ficaria
+# "aplicado" com um `.firstboot-status` vazio — sem nada dizendo o que houve.
+sync
+
 # Desarma: remove a sentinela para não rodar de novo.
 rm -f "$SENTINEL"
-
+sync
 cat > /etc/motd <<'MOTD'
 ai-cpu-os: tuning aplicado no primeiro boot.
   - Estado:      cat /opt/ai-cpu-os/.firstboot-status
@@ -191,6 +197,16 @@ MOTD
 systemctl disable ai-cpu-os-firstboot.service >/dev/null 2>&1 || true
 
 log "=== concluído ==="
+
+# `sync` DELIBERADO ANTES DE SAIR. O primeiro boot é o momento em que mais
+# arquivos nascem (binários do llama.cpp, units, /etc/default, o próprio
+# status). Sem o flush explícito, um desligamento abrupto logo depois — queda
+# de energia num servidor, ou o `kill` do qemu no iso/test-vm.sh — deixa
+# arquivos com **0 byte** no disco (ext4 com alocação postergada + cache
+# writeback do qemu). Visto na prática (sessão #29): `llama-server`,
+# `ai-server.service` e `.firstboot-status` existiam com tamanho zero, e um
+# unit vazio é interpretado pelo systemd como **masked**.
+sync
 
 # Reboot automático opcional (é o que faz a cmdline de C-states valer).
 if [[ "${FIRSTBOOT_REBOOT,,}" == "yes" || "${FIRSTBOOT_REBOOT,,}" == "true" ]]; then

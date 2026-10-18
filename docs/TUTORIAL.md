@@ -29,6 +29,17 @@
 > mídia **sem rede**. Detalhes em [`docs/STATE.md`](STATE.md) § 3.3. **O que
 > segue `pendente`:** medições de `llama-bench` (seções 7.6/8), o caminho
 > **Debian** da ISO, o **boot UEFI** e tudo em **hardware físico**.
+>
+> 🆕 **Atualização de 2026-10-17 (sessão #28):** a **rede do sistema
+> instalado** passou a ser parte da preparação da ISO. Motivo: uma instalação
+> real subiu **sem DHCP** (a placa ficava DOWN até configurar à mão), porque o
+> Subiquity não deixa configuração de rede persistente no alvo quando o
+> autoinstall não tem `network:`. Agora `--network auto|dhcp|static|none`
+> grava a intenção na mídia e o `late-command` instala o netplan no alvo. O
+> padrão (**DHCP**) não exige nenhuma flag. Ver
+> [`docs/ISO.md`](ISO.md) § 4.3 e [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
+> **Ainda não bootado** depois desta mudança — o que está provado é o YAML
+> gerado (`make iso-yaml`) e a coerência que o verificador cobra.
 
 ---
 

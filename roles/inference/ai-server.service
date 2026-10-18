@@ -27,7 +27,15 @@ ExecStart=/opt/llama.cpp/build/bin/llama-server \
     --threads ${LLAMA_THREADS} \
     --ctx-size ${LLAMA_CTX} \
     --n-gpu-layers 0 \
-    --no-mmap
+    $LLAMA_EXTRA_ARGS
+
+# `$LLAMA_EXTRA_ARGS` (sem chaves, de propósito): o systemd expande e SEPARA
+# por espaço, então o valor pode conter mais de uma flag. Quem o preenche é o
+# `roles/inference/install.sh`, que PERGUNTA ao binário qual é a sintaxe válida
+# — o llama.cpp renomeia flags entre versões, e a unit já quebrou assim:
+# `--no-mmap` (que o projeto usava para não mmap-ar o modelo) foi REMOVIDO do
+# upstream e o serviço entrava em loop com `error: invalid argument: --no-mmap`.
+# Hoje o equivalente é `--load-mode none`. Vazio = nenhuma flag extra.
 
 # Restart robusto.
 Restart=on-failure

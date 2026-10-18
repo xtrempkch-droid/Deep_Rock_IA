@@ -439,6 +439,51 @@ jobs:
           grep -q -- '--llama-source' build.sh
           grep -q -- '--model-file' build.sh
           grep -q 'llama-src' iso/verify-iso.sh
+          # REDE DO ALVO: o Subiquity nao grava configuracao persistente quando
+          # o autoinstall nao tem `network:`, e o sistema sobe com a placa DOWN
+          # (bug real, sessao #28). O default tem de ser DHCP e os tres elos
+          # (autoinstall -> netplan na midia -> late-command) tem de existir.
+          grep -q '^NETWORK_MODE="auto"' iso/build-iso.sh
+          if grep -q '^NETWORK_MODE="none"' iso/build-iso.sh; then
+            echo "::error file=iso/build-iso.sh::default de rede voltou a 'none' (alvo subiria sem DHCP)"
+            exit 1
+          fi
+          grep -q -- '--network' iso/build-iso.sh
+          grep -q '^network_yaml_block()' iso/build-iso.sh
+          grep -q '@@NETWORK_SECTION@@' iso/autoinstall/autoinstall.yaml
+          grep -q '@@NETWORK_PRESEED@@' iso/preseed/ai-cpu-os.cfg
+          grep -q 'ai-cpu-os-netplan.yaml' iso/build-iso.sh
+          grep -q 'ai-cpu-os-netplan.yaml' iso/preseed/late-command.sh
+          grep -q '/target/etc/netplan/99-ai-cpu-os.yaml' iso/preseed/late-command.sh
+          grep -q '99-ai-cpu-os-disable-network.cfg' iso/preseed/late-command.sh
+          grep -q 'NETWORK_MODE' iso/verify-iso.sh
+          # O firstboot tem de SINCRONIZAR o disco antes de sair, e o teste de
+          # VM tem de dar tempo ao qemu antes de encerrar. Sem isso, um
+          # desligamento logo depois deixa arquivos com 0 byte — `llama-server`,
+          # `ai-server.service` (unit vazio = "masked") e `.firstboot-status`
+          # (visto na sessao #29, ao inspecionar o disco instalado).
+          grep -q '^sync' iso/preseed/firstboot.sh
+          grep -q 'descarregarem o disco' iso/test-vm.sh
+          # O llama.cpp RENOMEIA flags entre versões: um `--no-mmap` fixo na
+          # unit derrubou o servico em loop com "invalid argument" na primeira
+          # ISO cujo ai-server subiu de verdade (sessao #29). A unit tem de
+          # deixar o install.sh PERGUNTAR ao binario qual sintaxe vale.
+          # Ancorado numa DIRETIVA (linha indentada), nao na citacao dentro do
+          # comentario que explica o bug — foi o erro que este guarda cometeu
+          # na primeira versao.
+          if grep -qE '^[[:space:]]+--no-mmap' roles/inference/ai-server.service; then
+            echo "::error file=roles/inference/ai-server.service::--no-mmap fixo (use LLAMA_EXTRA_ARGS + deteccao)"
+            exit 1
+          fi
+          grep -q 'LLAMA_EXTRA_ARGS' roles/inference/ai-server.service
+          grep -qE '^[[:space:]]*detect_extra_args\(\)' roles/inference/install.sh
+          grep -q -- '--load-mode' roles/inference/install.sh
+          # shell-ia: esgotar as rodadas NAO pode devolver a linha do protocolo
+          # ("RESULT: ...") como se fosse a resposta do modelo.
+          if grep -q 'return messages\[-1\]' roles/inference/shell-ia.py; then
+            echo "::error file=roles/inference/shell-ia.py::devolve a linha do protocolo como resposta final"
+            exit 1
+          fi
           # O dry-run dos DOIS caminhos da ISO tem de ser um alvo do Makefile, e
           # o CI tem de CHAMAR esse alvo (e nao repetir o comando). Foi um
           # comando duplicado que deixou passar a regressao do --iso-repo auto:

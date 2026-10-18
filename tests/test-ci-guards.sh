@@ -233,6 +233,34 @@ planta "o retry deixar de refrescar o índice (404 de espelho volta)" iso/build-
 planta "o retry voltar a descartar a saída do apt (log ilegível)" iso/build-iso.sh \
   sed_ 's|apt-get download -o Acquire::Retries=5 "\$p"|apt-get download -o Acquire::Retries=5 ${faltando}|' iso/build-iso.sh
 
+# --- Rede do alvo: default DHCP + os três elos da configuração --------------
+planta "o default de --network voltar a 'none'" iso/build-iso.sh \
+  sed_ 's|^NETWORK_MODE="auto"|NETWORK_MODE="none"|' iso/build-iso.sh
+planta "o autoinstall perder o bloco de rede" iso/autoinstall/autoinstall.yaml \
+  sed_ 's|^@@NETWORK_SECTION@@$|# sem rede|' iso/autoinstall/autoinstall.yaml
+planta "o late-command deixar de gravar o netplan do alvo" iso/preseed/late-command.sh \
+  sed_ 's|99-ai-cpu-os.yaml|SEM-REDE.yaml|' iso/preseed/late-command.sh
+planta "a ISO deixar de embarcar o netplan do alvo" iso/build-iso.sh \
+  sed_ 's|ai-cpu-os-netplan.yaml|sem-netplan.yaml|g' iso/build-iso.sh
+planta "a preseed perder o marcador de rede" iso/preseed/ai-cpu-os.cfg \
+  sed_ 's|^@@NETWORK_PRESEED@@$|# sem rede|' iso/preseed/ai-cpu-os.cfg
+planta "cloud-init deixar de ser desligado na rede" iso/preseed/late-command.sh \
+  sed_ 's|99-ai-cpu-os-disable-network.cfg|cloud-init.yaml|' iso/preseed/late-command.sh
+
+# --- Gravação do disco: sync no alvo + tempo antes de matar o qemu ----------
+planta "o firstboot deixar de sincronizar o disco (arquivos de 0 byte)" iso/preseed/firstboot.sh \
+  sed_ 's|^sync$|true|' iso/preseed/firstboot.sh
+planta "o test-vm voltar a matar o qemu sem esperar o disco" iso/test-vm.sh \
+  sed_ 's|descarregarem o disco|encerrando|' iso/test-vm.sh
+
+# --- Flags do llama.cpp que o upstream renomeia -----------------------------
+planta "a unit voltar a fixar --no-mmap (removido do llama.cpp)" roles/inference/ai-server.service \
+  app '    --no-mmap' roles/inference/ai-server.service
+planta "o install.sh deixar de detectar a sintaxe do binário" roles/inference/install.sh \
+  sed_ 's|detect_extra_args()|detect_extra_args_velho()|' roles/inference/install.sh
+planta "o shell-ia voltar a devolver a linha do protocolo" roles/inference/shell-ia.py \
+  sed_ 's|^        return chat(messages)$|        return messages[-1].get("content", "")|' roles/inference/shell-ia.py
+
 echo
 if [[ $FAIL -eq 0 ]]; then
   echo "ci-guards: PASS=${PASS} FAIL=0"

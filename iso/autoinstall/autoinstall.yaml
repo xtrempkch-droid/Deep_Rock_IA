@@ -29,9 +29,10 @@
 #     hardware real é conhecido (ver docs/ISO.md § "Por que primeiro boot").
 #
 # ⚠️ AVISO PARA QUEM EDITA: este arquivo NÃO é YAML válido como está. O `@` é
-# um indicador reservado do YAML, então linhas como `@@STORAGE_LAYOUT@@` não
-# podem ser interpretadas — o yamllint falha nelas, e está certo. Só o arquivo
-# DEPOIS da substituição é YAML de verdade. Para validar uma edição:
+# um indicador reservado do YAML, então as linhas com marcadores (layout de
+# armazenamento, bloco de rede, lista de pacotes) não podem ser interpretadas —
+# o yamllint falha nelas, e está certo. Só o arquivo DEPOIS da substituição é
+# YAML de verdade. Para validar uma edição:
 #
 #     bash iso/build-iso.sh --check-templates      # (ou: make iso-yaml)
 #
@@ -45,6 +46,17 @@ locale: "@@LOCALE@@"
 keyboard:
   layout: "@@KEYMAP@@"
 timezone: "@@TIMEZONE@@"
+
+# --- Rede --------------------------------------------------------------------
+# A configuração de rede é decidida na GERAÇÃO da ISO (--network) e escrita
+# aqui, porque o Subiquity NÃO deixa uma configuração persistente no alvo
+# quando o autoinstall não traz a chave `network:` — o sistema instalava e
+# subia SEM DHCP (a placa ficava DOWN até alguém configurar à mão).
+#
+# O MESMO bloco é copiado para /etc/netplan/99-ai-cpu-os.yaml do sistema
+# instalado pelo late-command.sh (é uma fonte de verdade só; ver docs/ISO.md).
+# Com --network none o bloco inteiro desaparece (o instalador decide sozinho).
+@@NETWORK_SECTION@@
 
 # --- Usuário administrativo --------------------------------------------------
 # A senha vai como hash crypt (sha-512) gerado no build da ISO; nunca em claro.

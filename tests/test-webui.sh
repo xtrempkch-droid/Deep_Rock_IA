@@ -157,6 +157,11 @@ expect_400 "disco com injeção"           /api/preview '{"disk":"/dev/vda; rebo
 expect_400 "disco não é /dev"            /api/preview '{"disk":"etc/passwd"}'
 expect_400 "disco com pipe"              /api/preview '{"disk":"/dev/vda | tee /etc/x"}'
 expect_400 "payload fora da lista"       /api/preview '{"payload":"tudo","disk":"/dev/vda"}'
+expect_400 "rede fora da lista"          /api/preview '{"network":"wifi","disk":"/dev/vda"}'
+expect_400 "IP fixo inválido"            /api/preview '{"network":"static","net_ip":"999.1.1.1","net_gateway":"10.0.0.1"}'
+expect_400 "IP fixo sem gateway"         /api/preview '{"network":"static","net_ip":"10.0.0.5"}'
+expect_400 "DNS inválido"                /api/preview '{"network":"static","net_ip":"10.0.0.5","net_gateway":"10.0.0.1","net_dns":"nao-e-ip"}'
+expect_400 "interface com injeção"       /api/preview '{"network":"dhcp","net_iface":"enp5s0; rm -rf /"}'
 expect_400 "JSON malformado"             /api/preview '{nao é json}'
 expect_400 "corpo não é objeto"          /api/preview '["a"]'
 expect_400 "caminho de ISO inexistente"  /api/iso-check '{"iso":"/tmp/nao-existe-xyz.iso"}'
@@ -235,6 +240,41 @@ out="$(api POST /api/preview '{"distro":"ubuntu","disk":"/dev/vda","role":"auto"
 [[ "$(status_of "$out")" == "400" ]] \
   && ok "senha com quebra de linha é recusada (400)" \
   || bad "senha com \\n deveria ser recusada (deu $(status_of "$out"))"
+
+# ---------------------------------------------------------------------------
+# 3-c) Rede do sistema instalado: o default é DHCP e o modo static monta as
+#      flags de IP/gateway/DNS (é o que impede o alvo de subir sem rede).
+# ---------------------------------------------------------------------------
+out="$(api POST /api/preview '{"distro":"ubuntu","disk":"/dev/vda","role":"auto","family":"auto","payload":"none"}')"
+case "$(body_of "$out")" in
+  *'"--network"'*'"auto"'*) ok "sem escolha no formulário, o argv leva --network auto (DHCP)" ;;
+  *) bad "o argv não leva --network auto por padrão" ;;
+esac
+
+out="$(api POST /api/preview '{"distro":"ubuntu","disk":"/dev/vda","role":"auto","family":"auto","network":"static","net_ip":"10.0.0.5/24","net_gateway":"10.0.0.1","net_dns":"8.8.8.8 1.1.1.1","net_iface":"enp5s0"}')"
+body="$(body_of "$out")"
+if [[ "$(status_of "$out")" == "200" ]] && python3 - "$body" >/dev/null 2>&1 <<'PY'
+import json, sys
+argv = json.loads(sys.argv[1]).get("argv", [])
+i = argv.index("--network")
+assert argv[i + 1] == "static", argv
+assert argv[argv.index("--network-ip") + 1] == "10.0.0.5/24"
+assert argv[argv.index("--network-gateway") + 1] == "10.0.0.1"
+assert argv[argv.index("--network-dns") + 1] == "8.8.8.8,1.1.1.1"
+assert argv[argv.index("--network-interface") + 1] == "enp5s0"
+print("ok")
+PY
+then
+  ok "modo static monta --network-ip/--network-gateway/--network-dns (DNS normalizado)"
+else
+  bad "modo static não montou as flags de rede: $(echo "$body" | head -c 160)"
+fi
+
+out="$(api POST /api/preview '{"distro":"ubuntu","disk":"/dev/vda","role":"auto","family":"auto","network":"none"}')"
+case "$(body_of "$out")" in
+  *"--network-ip"*) bad "modo none não deveria levar flags de IP" ;;
+  *) ok "modo none não inventa IP/gateway" ;;
+esac
 
 # ---------------------------------------------------------------------------
 # 3) Prévia (dry-run) funciona SEM xorriso — é o coração da UI

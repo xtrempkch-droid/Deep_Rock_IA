@@ -389,7 +389,8 @@ Estas regras são **obrigatórias**:
     - **Só executa o que está na lista branca** (`ACTIONS` em `server.py`). A UI
       **nunca** aceita comando, caminho de script ou nome de alvo vindo do
       navegador: ela monta a linha de comando a partir de valores **validados**
-      (`v_disk`, `v_family`, `v_distro`, …) e chama os alvos do `Makefile`.
+      (`v_disk`, `v_family`, `v_distro`, `v_network_mode`, `v_net_ip`, …) e
+      chama os alvos do `Makefile`.
     - **Escuta só em `127.0.0.1`** e **recusa** explicitamente outra interface
       (amarrar em `0.0.0.0` exporia uma página que gera ISO e particiona disco).
     - **Somente biblioteca padrão.** Nada de `fastapi`/`flask`/`pip install`:
@@ -424,7 +425,36 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-16 (sessão #32)
+- **Data:** 2026-10-17 (sessão #33)
+- **O que mudou:** **A rede do sistema instalado passou a ser preparada na ISO
+  — e foi PROVADA EM VM.** O alvo agora pega IP sozinho e aceita SSH. Uma
+  instalação real subia **sem DHCP** — a placa ficava DOWN até alguém
+  configurar à mão — porque o Subiquity **não grava configuração de rede
+  persistente no alvo** quando o `autoinstall.yaml` não tem a chave `network:`.
+  A correção segue o padrão da senha: a intenção é decidida na geração da ISO.
+  Novas flags `--network auto|dhcp|static|none` (padrão `auto` = DHCP),
+  `--network-interface`, `--network-ip` (aceita `/N`), `--network-gateway`,
+  `--network-dns`, `--network-prefix`. O **mesmo** bloco netplan vai para o
+  `autoinstall.yaml` e para `/preseed/ai-cpu-os-netplan.yaml`; o
+  `late-command.sh` o instala em `/etc/netplan/99-ai-cpu-os.yaml` (0600), move o
+  netplan do instalador/cloud-init para `.ai-cpu-os.bak` e grava
+  `/etc/cloud/cloud.cfg.d/99-ai-cpu-os-disable-network.cfg`
+  (`network: {config: disabled}`). No Debian as flags alimentam o `netcfg` da
+  preseed (e o hostname da preseed, que era fixo, passou a usar
+  `@@HOSTNAME@@`). O **default nunca derruba o build** (Regra 13-a). O
+  `verify-iso.sh` ganhou a seção "Rede do sistema instalado"; o `make iso-yaml`
+  exercita `auto`/`static`/`none` nos dois layouts de disco; a webui ganhou o
+  seletor de rede com validadores próprios. **Três bugs reais** foram achados ao
+  executar (não ao revisar): arquivos de **0 byte** após o 1º boot (um unit
+  vazio vira **`masked`** — o `ai-server` não existia), `--no-mmap` **removido
+  do llama.cpp** (o serviço entrava em loop) e o `shell-ia.py` devolvendo a
+  linha do **protocolo** como resposta. Medido no alvo (4 vCPU, AVX2):
+  `smoke-test` 11 PASS/1 FAIL (governor sem `cpufreq` na VM),
+  `ai-server /health` = `{"status":"ok"}` e **`llama-bench` pp64 46,55 t/s ·
+  tg32 25,95 t/s**. Guardas: `ci-guards` **46**, `webui` **46**. **Falta:**
+  modo `static`, hardware físico, caminho Debian e UEFI.
+
+- **Data anterior:** 2026-10-16 (sessão #32)
 - **O que mudou:** **`validate` #57 vermelho — o teste da trava dependia de uma
   otimização que o bash NÃO promete.** O `tests/test-iso-lock.sh` segurava a
   trava num `bash -c '…; sleep 30' &` e a soltava com `kill`, contando que o
@@ -442,7 +472,7 @@ Estas regras são **obrigatórias**:
 
 - **Data anterior:** 2026-10-16
 - **O que mudou:** **A "correção" do SIGILL do `build-llama` não corrigia — e o
-  trabalho local de 14/10 foi recuperado (sessão #29).** (1) **Sync:** o `main`
+  trabalho local de 14/10 foi recuperado (sessão #33).** (1) **Sync:** o `main`
   local estava **7 commits atrás** e com trabalho **não commitado**; foi
   preservado numa branch de backup (`backup/local-sessao26-pre-sync`) e
   alinhado a `origin/main` (o `push` voltou a ser fast-forward). (2) **O bug:**

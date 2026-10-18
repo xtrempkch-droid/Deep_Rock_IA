@@ -295,10 +295,88 @@ Opções mais usadas:
 | `--password-hash '$6$…'` | Senha do usuário (gere com `mkpasswd -m sha-512`). Se omitido, gera e **mostra** uma. |
 | `--root-password-hash '$6$…'` | Senha do **root** (hash crypt). Se omitido, o root fica **bloqueado** (padrão). |
 | `--username NOME` | Usuário administrativo (padrão `ai-cpu-os`; root fica bloqueado). |
+| `--network auto` | Rede do sistema **instalado**: `auto`/`dhcp` (padrão = DHCP), `static` ou `none`. Ver a subseção "Rede do sistema instalado" em § 4.3. |
+| `--network-ip`, `--network-gateway`, `--network-dns`, `--network-interface` | Valores do modo `static` (IP aceita `192.168.1.50/24`; DNS padrão `1.1.1.1,8.8.8.8`). |
 | `--iso PATH` | Usa uma ISO local (trabalhar offline). |
 | `--out PATH` | Caminho da ISO de saída. |
 | `--keep-work` | Mantém o diretório de trabalho para inspeção. |
 | `--check-templates` | **Autoteste:** substitui os templates e valida o YAML gerado. Não gera ISO, não precisa de disco nem root (é o `make iso-yaml`). |
+
+#### Rede do sistema instalado (o alvo subia SEM DHCP)
+
+**Sintoma real (sessão #28):** a ISO instalou, mas o sistema instalado subiu com
+a placa de rede **DOWN** — era preciso `ip link set … up` + `dhclient` na mão a
+cada boot. A causa não era o hardware: **o Subiquity não grava uma configuração
+de rede persistente no alvo quando o `autoinstall.yaml` não traz a chave
+`network:`**. O instalador usa DHCP para si mesmo, mas não deixa o netplan
+correspondente no sistema instalado.
+
+**A correção (mesmo padrão da senha):** a intenção de rede é decidida **na
+geração da ISO** e vai escrita na mídia em três lugares coerentes:
+
+| Onde | O que é gravado |
+|------|-----------------|
+| `autoinstall.yaml` → `network:` | O netplan que o **instalador** usa (DHCP ou IP fixo). |
+| `/preseed/ai-cpu-os-netplan.yaml` | O **mesmo** YAML, para ser copiado ao alvo (uma fonte de verdade só). |
+| `late-command.sh` → `/etc/netplan/99-ai-cpu-os.yaml` | O netplan **persistente** do sistema instalado. |
+
+No Ubuntu o late-command também:
+
+- move para `.ai-cpu-os.bak` o netplan deixado pelo instalador/cloud-init
+  (`00-installer-config.yaml`, `50-cloud-init.yaml`, `01-netcfg.yaml`) — duas
+  definições do mesmo adaptador fazem o netplan recusar a configuração;
+- grava `/etc/cloud/cloud.cfg.d/99-ai-cpu-os-disable-network.cfg`
+  (`network: {config: disabled}`) para o cloud-init não reescrever o netplan a
+  cada boot;
+- usa `optional: true`, para o boot não esperar uma placa que não tem cabo.
+
+No Debian (preseed) o caminho é outro, e o mesmo `--network` alimenta o
+`netcfg` do d-i: `disable_autoconfig false` (DHCP) ou
+`get_ipaddress`/`get_netmask`/`get_gateway`/`get_nameservers` (static). O d-i
+escreve `/etc/network/interfaces` no alvo.
+
+Modos:
+
+| `--network` | O que faz | Quando usar |
+|-------------|-----------|-------------|
+| `auto` (padrão) / `dhcp` | DHCP em todas as placas `en*`/`eth*`. | Servidor numa rede com DHCP. |
+| `static` | IP fixo (`--network-ip`, `--network-gateway`; DNS opcional). | Servidor de inferência com IP fixo. |
+| `none` | **Não** grava configuração (comportamento antigo). | Só se você configura a rede por outro meio. |
+
+```bash
+# DHCP (padrão) — o caso normal
+sudo bash iso/build-iso.sh --disk /dev/nvme0n1
+
+# IP fixo, com a placa nomeada (mais previsível)
+sudo bash iso/build-iso.sh --disk /dev/nvme0n1 \
+  --network static --network-interface enp5s0 \
+  --network-ip 192.168.1.50/24 --network-gateway 192.168.1.1 \
+  --network-dns "1.1.1.1,8.8.8.8"
+```
+
+O `iso/verify-iso.sh` confere a coerência dos três elos (modo gravado × bloco
+do autoinstall × netplan da mídia) — é o tipo de erro que o build não vê
+sozinho. O `make iso-yaml` exercita os modos `auto`, `static` e `none` nos dois
+layouts de disco.
+
+> ⚠️ **Ainda não validado em hardware/VM depois desta mudança**: o que está
+> provado é que o YAML gerado é válido e coerente (`make iso-yaml`) e que o
+> verificador reprova quando um dos elos desaparece (`make ci-guards-test`).
+> Falta bootar uma ISO nova e confirmar que o alvo pega IP sozinho.
+
+> ✅ **PROVADO em VM (sessão #33, 2026-10-17).** Uma ISO gerada com `--network
+> auto` (DHCP) foi instalada numa VM qemu/KVM e o sistema instalado pegou IP
+> **sem nenhum comando manual**, no journal do alvo:
+>
+> ```text
+> systemd-networkd[634]: ens3: Configuring with /run/systemd/network/10-netplan-all-en.network
+> systemd-networkd[634]: ens3: DHCPv4 address 10.0.2.15/24, gateway 10.0.2.2 acquired
+> ```
+>
+> O netplan instalado (`/etc/netplan/99-ai-cpu-os.yaml`, 0600) era exatamente o
+> gerado pelo build, e `/etc/cloud/cloud.cfg.d/99-ai-cpu-os-disable-network.cfg`
+> existia. Login por SSH funcionou com a chave do usuário. **Continua sem prova
+> em hardware físico e sem prova do modo `static`** (só o `auto` foi bootado).
 
 #### Como a ISO base é escolhida (e o bug que isso já causou)
 

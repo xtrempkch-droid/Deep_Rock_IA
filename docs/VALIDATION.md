@@ -924,6 +924,102 @@ cat /opt/ai-cpu-os/.iso-config
 | Compilou o llama.cpp? (papel `inference`) | _(preencher — pode levar 10-20 min)_ |
 | Funcionou sem rede? (teste proposital) | _(preencher — deve adiar para o próximo boot)_ |
 
+### M.5-b Rede do sistema instalado (a partir da sessão #28)
+
+> **Por que existe:** uma instalação real subiu **sem DHCP** — o Subiquity não
+> grava rede persistente no alvo quando o autoinstall não tem `network:`. A ISO
+> passou a levar a configuração (ver `docs/ISO.md` § 4.3, subseção "Rede do
+> sistema instalado"). Este bloco é o que falta provar: **que o alvo pega IP
+> sozinho**.
+
+**Antes (o que já é provado, sem boot):**
+
+```bash
+make iso-yaml          # gera os 3 modos (auto/static/none) e valida o YAML
+make iso-verify        # ou: bash iso/verify-iso.sh --iso <ISO>
+make ci-guards-test    # prova que o verificador reprova sem um dos elos
+```
+
+**No alvo (o que este bloco pede):**
+
+```bash
+# DHCP (ISO gerada sem --network ou com --network dhcp)
+ip -br addr                       # a placa en*/eth* tem IP SEM comandos manuais?
+cat /etc/netplan/99-ai-cpu-os.yaml
+cat /etc/cloud/cloud.cfg.d/99-ai-cpu-os-disable-network.cfg
+systemctl status systemd-networkd --no-pager
+ping -c2 1.1.1.1
+
+# IP fixo (--network static)
+ip -4 addr show dev <iface>       # endereço é o que foi passado?
+ip route | grep default           # gateway correto?
+cat /etc/resolv.conf              # DNS aplicado?
+ssh <usuario>@<ip-fixo>           # o SSH (openssh-server) responde?
+
+# Depois de um reboot, tudo continua valendo? (é o teste de persistência)
+sudo reboot
+# ...e repita `ip -br addr` sem tocar em nada.
+```
+
+| Campo | Valor |
+|-------|-------|
+| Modo usado na ISO (`auto`/`dhcp`/`static`/`none`) | `auto` (default) |
+| Alvo pegou IP **sem** comando manual? | ✅ **SIM** (`ens3 10.0.2.15/24` + rota default) |
+| Sobreviveu ao reboot? | ✅ (o disco foi bootado uma 2ª vez e a rede voltou igual) |
+| SSH respondeu? | ✅ `ai-cpu-os@ai-cpu-os` |
+| Modo `static` aplicou IP/gateway/DNS corretos? | ⬜ **não testado** (só o `auto` foi bootado) |
+| cloud-init não sobrescreveu o netplan? | ✅ `99-ai-cpu-os.yaml` intacto, sem `50-cloud-init.yaml` |
+
+> A 2ª linha de prova é a **ISO v2** (gerada com as três correções da sessão
+> #29) instalada do zero: unit `ai-server` com 2179 bytes + `enabled`,
+> `LLAMA_EXTRA_ARGS=--load-mode none`, `.firstboot-status` completo e
+> `llama-server` real. Ver `JOURNAL.md` sessão #33.
+
+#### ✅ RESULTADO EXECUTADO — sessão #33 (2026-10-17), VM qemu/KVM, modo `auto`
+
+**Ambiente:** ISO Ubuntu 24.04 gerada com `--network auto` (default),
+`--iso-model none --iso-source none --iso-repo none --serial-console`, instalada
+com `iso/test-vm.sh --ram 6144 --cpus 4`. Depois, o disco virtual foi bootado
+outra vez com `hostfwd` na porta 22 para inspeção por SSH.
+
+| Verificação | Resultado |
+|-------------|-----------|
+| Instalação automática (sem perguntas) | ✅ |
+| 1º boot aplicou o ai-cpu-os | ✅ `aplicação concluída com sucesso` |
+| **`ens3` ganhou IP por DHCP sozinho** | ✅ `DHCPv4 address 10.0.2.15/24 … acquired` (systemd-networkd) |
+| `/etc/netplan/99-ai-cpu-os.yaml` presente e 0600 | ✅ conteúdo **idêntico** ao gerado no build |
+| `/etc/cloud/cloud.cfg.d/99-ai-cpu-os-disable-network.cfg` | ✅ `network: {config: disabled}` |
+| Netplan do instalador/cloud-init removido | ✅ nenhum `00-installer-config.yaml`/`50-cloud-init.yaml` sobrou |
+| **Login por SSH** | ✅ `ai-cpu-os@ai-cpu-os` (chave ed25519) |
+| Família detectada (VM = Xeon E5-2676 v3) | ✅ `intel-haswell` |
+| Manifesto `AI-CPU-OS-BUILD.txt` | ✅ `-march=haswell -mtune=haswell`, `AVX-512: no` |
+| Mods aplicadas (`sysctl`, THP, C-states) | ✅ swappiness=10, rss 128 MB, THP=always, `intel_idle.max_cstate=1` |
+| Units `ai-cpu-governor` / `ai-hugepages` | ✅ `enabled` (governor fica `failed` sem `cpufreq` na VM — esperado) |
+| `smoke-test.sh` | ✅ **PASS=11 FAIL=1 SKIP=1** (único FAIL: governor, por falta de `cpufreq`) |
+| `ai-server` sobe e responde `/health` | ✅ `{"status":"ok"}` |
+| Inferência real (`/v1/completions`, Qwen2.5-Coder-1.5B Q4_K_M) | ✅ 48 tokens coerentes |
+| `shell-ia.py` executa ferramenta e responde | ✅ `list_dir` executou (após corrigir o protocolo) |
+| `llama-bench` (4 vCPU, AVX2) | ✅ **pp64 = 46,55 t/s · tg32 = 25,95 t/s** |
+
+**Dois bugs reais encontrados por ESTE teste (corrigidos):**
+
+1. **Arquivos com 0 byte após o primeiro boot.** O `test-vm.sh` matava o qemu
+   assim que o marcador aparecia, e nem o guest nem o qemu tinham descarregado
+   o disco: `llama-server`, `ai-server.service` e `.firstboot-status` existiam
+   com tamanho zero. Um unit vazio é lido pelo systemd como **`masked`** — o
+   serviço de inferência simplesmente não existia. Correção: `sync` explícito
+   no `firstboot.sh` (antes de remover a sentinela) + 15 s de espera antes de
+   encerrar a VM no `test-vm.sh`. Isso também protege contra queda de energia
+   num servidor real.
+2. **`--no-mmap` não existe mais no llama.cpp.** A unit fixava a flag, e o
+   `llama-server` entrava em loop: `error: invalid argument: --no-mmap`. O
+   upstream renomeou para `--load-mode none`. Correção: a unit usa
+   `$LLAMA_EXTRA_ARGS` e o `install.sh` **pergunta ao binário** qual sintaxe
+   vale (funciona nas duas gerações).
+
+**O que NÃO foi provado:** modo `static` (só o `auto` foi bootado), hardware
+físico, caminho Debian, UEFI.
+
 ### M.6 Critério de "pronto"
 
 O bloco M só é **✅** quando:
@@ -935,6 +1031,8 @@ O bloco M só é **✅** quando:
       vê os dois marcadores).
 - [ ] Em VM, ao menos o `inference` (llama.cpp) ou o `builder` (Docker) funciona.
 - [ ] A senha gerada permite login e `sudo`.
+- [ ] O alvo pega rede **sozinho** (DHCP ou IP fixo) e sobrevive ao reboot
+      (M.5-b).
 
 | Campo | Valor |
 |-------|-------|

@@ -421,6 +421,20 @@ bash iso/build-iso.sh --iso-repo none                  # ISO sem repositório ap
 bash iso/build-iso.sh --iso-source none                # ISO sem a fonte do llama.cpp
 ```
 
+**A rede do sistema instalado também vai na ISO** (padrão: DHCP em todas as
+placas Ethernet). Isso existe porque, sem essa configuração escrita na mídia, o
+sistema instalado podia subir **sem IP** — era preciso configurar a rede à mão
+em todo boot. Para IP fixo:
+
+```bash
+sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/vda \
+  --network static --network-interface enp5s0 \
+  --network-ip 192.168.1.50/24 --network-gateway 192.168.1.1
+```
+
+Use `--network none` só se você configura a rede por outro meio (a placa pode
+subir desligada). Detalhes: [`docs/ISO.md`](docs/ISO.md) § 4.3.
+
 > 💡 A ISO fica em torno de **4,3–5 GB** com tudo embutido (base ~2,6 GB +
 > modelo ~1,1 GB + pacotes ~0,5 GB + fonte). Com tudo em `none`, uns 2,7 GB.
 >

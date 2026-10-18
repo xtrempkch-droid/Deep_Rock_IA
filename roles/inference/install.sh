@@ -129,6 +129,7 @@ install_service() {
 MODEL_PATH=${MODEL_PATH}
 LLAMA_THREADS=$(nproc --all 2>/dev/null || echo 24)
 LLAMA_CTX=4096
+LLAMA_EXTRA_ARGS=${extra_args}
 EOF
     if [[ -f "$env_dst" ]] && cmp -s "$tmp" "$env_dst"; then
       log_info "EnvironmentFile já atualizado (idempotente)."; rm -f "$tmp"; return 0
@@ -137,11 +138,39 @@ EOF
     rm -f "$tmp"
   }
 
+  # O llama.cpp RENOMEIA flags entre versões, e a unit não pode ser escrita
+  # contra uma sintaxe só: `--no-mmap` (usado para não mmap-ar o modelo, que
+  # importa num servidor cujo gargalo é memória) foi REMOVIDO do upstream e o
+  # serviço entrava em loop com `error: invalid argument: --no-mmap` — visto na
+  # primeira ISO bootada de verdade em que o serviço subiu (sessão #29).
+  # A resposta certa é perguntar ao BINÁRIO que acabamos de compilar.
+  detect_extra_args() {
+    local bin="${LLAMA_DIR}/build/bin/llama-server"
+    local help
+    if [[ ! -x "$bin" ]]; then
+      log_warn "llama-server ausente: não consigo detectar a sintaxe; sem flags extras."
+      return 0
+    fi
+    help="$("$bin" --help 2>&1 || true)"
+    if grep -q -- '--no-mmap' <<<"$help"; then
+      printf '%s' '--no-mmap'
+    elif grep -q -- '--load-mode' <<<"$help"; then
+      # Equivalente moderno: `none` = não mapear o modelo em memória.
+      printf '%s' '--load-mode none'
+    else
+      log_warn "Nem --no-mmap nem --load-mode no binário: usando o padrão dele."
+      printf '%s' ''
+    fi
+  }
+
+  local extra_args=""
   if [[ $DRY_RUN -eq 1 ]]; then
     log_info "[dry-run] instalaria ${unit_src} → ${unit_dst}"
-    log_info "[dry-run] escreveria ${env_dst}"
+    log_info "[dry-run] escreveria ${env_dst} (detectando a sintaxe do llama-server)"
     return 0
   fi
+  extra_args="$(detect_extra_args)"
+  log_info "Flags extras do llama-server: ${extra_args:-<nenhuma>}"
 
   install -m 0644 "$unit_src" "$unit_dst"
   write_env_file

@@ -107,6 +107,40 @@
         <option value="auto">Tudo na mídia (air-gapped) — fonte + modelo + pacotes (~4 GB)</option>
       </select>
 
+      <label for="network">Rede do sistema instalado</label>
+      <select id="network">
+        <option value="auto">DHCP em todas as placas Ethernet (en*/eth*) — padrão</option>
+        <option value="dhcp">DHCP explícito (igual ao padrão)</option>
+        <option value="static">IP fixo (preencha os campos abaixo)</option>
+        <option value="none">Não configurar (a placa pode subir DESLIGADA)</option>
+      </select>
+      <div class="muted" style="margin-top:4px">
+        Sem esta configuração o sistema instalado podia subir <b>sem DHCP</b>
+        (a placa ficava DOWN até configurar à mão).
+      </div>
+      <div id="net-static" style="display:none">
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+          <div>
+            <label for="net-ip">IP com prefixo</label>
+            <input id="net-ip" placeholder="192.168.1.50/24" spellcheck="false">
+          </div>
+          <div>
+            <label for="net-gateway">Gateway</label>
+            <input id="net-gateway" placeholder="192.168.1.1" spellcheck="false">
+          </div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
+          <div>
+            <label for="net-dns">DNS</label>
+            <input id="net-dns" placeholder="1.1.1.1,8.8.8.8" spellcheck="false">
+          </div>
+          <div>
+            <label for="net-iface">Interface (opcional)</label>
+            <input id="net-iface" placeholder="enp5s0 — vazio casa en*/eth*" spellcheck="false">
+          </div>
+        </div>
+      </div>
+
       <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
         <div>
           <label for="user-password">Senha do usuário (ai-cpu-os)</label>
@@ -394,6 +428,9 @@ $("btn-build").onclick = () => {
     "Base: " + v.distro + "\n" +
     "Papel: " + v.role + " · Família: " + v.family + "\n" +
     "Conteúdo: " + (v.payload === "auto" ? "tudo na mídia (air-gapped)" : "nenhum") + "\n" +
+    "Rede: " + (v.network === "static"
+      ? v.net_ip + " via " + v.net_gateway
+      : v.network) + "\n" +
     "Root: " + (v.root_password ? "habilitado (senha definida)" : "bloqueado (padrão)") + "\n\n" +
     "O disco " + v.disk + " será o alvo da INSTALAÇÃO (na máquina de destino).\n" +
     "O build pode demorar e baixar alguns GB."
@@ -433,10 +470,22 @@ function formValues() {
     role: $("role").value,
     family: $("family").value,
     payload: $("payload").value,
+    network: $("network").value,
+    net_ip: $("net-ip").value.trim(),
+    net_gateway: $("net-gateway").value.trim(),
+    net_dns: $("net-dns").value.trim(),
+    net_iface: $("net-iface").value.trim(),
     user_password: $("user-password").value,
     root_password: $("root-password").value,
   };
 }
+
+/* Os campos de IP fixo só aparecem (e só são exigidos) no modo static. */
+function syncNetworkFields() {
+  $("net-static").style.display = $("network").value === "static" ? "" : "none";
+}
+$("network").onchange = syncNetworkFields;
+syncNetworkFields();
 
 /* Senha forte gerada NO NAVEGADOR (crypto.getRandomValues) — nada de CDN. */
 function randomPassword(n) {

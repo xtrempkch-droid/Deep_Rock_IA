@@ -78,7 +78,12 @@ if [[ -n "$tpl_dir" && -d "$tpl_dir" ]]; then
   else
     bad "sem --disk o layout não é o esperado"
   fi
-  if grep -q 'match:' "$sem" 2>/dev/null; then
+  # Ancorado no bloco `storage:` — o autoinstall também tem `match:` no bloco
+  # `network:` (interface por glob), que NÃO tem nada a ver com disco. Um
+  # `grep 'match:'` no arquivo inteiro dava falso positivo desde que a rede
+  # passou a ser emitida (sessão #33).
+  storage_block="$(awk '/^storage:/{f=1} f{print} /^# ---/{if(f)exit}' "$sem")"
+  if grep -q 'match:' <<<"$storage_block"; then
     bad "sem --disk o layout ainda restringe disco (o instalador não acharia nenhum)"
   else
     ok "sem --disk: NENHUM match no layout (não trava em disco inexistente)"

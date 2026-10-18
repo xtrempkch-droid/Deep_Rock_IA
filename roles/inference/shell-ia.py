@@ -307,7 +307,12 @@ def run_once(prompt: str, messages: list[dict[str, str]], verbose: bool = False)
         name, args = call
         tool = TOOLS.get(name)
         if tool is None:
-            result = f"ERRO: ferramenta desconhecida: {name}"
+            # Nome inventado pelo modelo (acontece com modelos pequenos). A
+            # mensagem de erro tem de DIZER quais ferramentas existem, senão o
+            # modelo repete o mesmo nome inválido até esgotar as rodadas.
+            result = (f"ERRO: ferramenta desconhecida: {name}. "
+                      f"Ferramentas válidas: {', '.join(TOOLS)}.")
+            log_warn(f"o modelo pediu a ferramenta inexistente '{name}'")
         else:
             try:
                 result = tool(args)
@@ -315,12 +320,25 @@ def run_once(prompt: str, messages: list[dict[str, str]], verbose: bool = False)
                 result = f"ERRO (sandbox): {exc}"
             except Exception as exc:  # noqa: BLE001
                 result = f"ERRO ao executar {name}: {exc}"
+            # Só aqui a ferramenta foi realmente executada.
+            log_info(f"ferramenta '{name}' executada ({len(result)} bytes de saída).")
 
-        log_info(f"ferramenta '{name}' executada ({len(result)} bytes de saída).")
         messages.append({"role": "user", "content": f"RESULT: {name}\n{result}"})
 
-    # Esgotou as rodadas de ferramentas.
-    return messages[-1].get("content", "") or "(limite de ferramentas atingido)"
+    # Esgotou as rodadas de ferramentas. NÃO devolva `messages[-1]` como
+    # resposta: essa é a linha do PROTOCOLO ("RESULT: …"), e o usuário
+    # recebia isso como se fosse a resposta do modelo — visto ao testar com um
+    # modelo pequeno (sessão #29). Peça uma resposta final em texto.
+    messages.append({"role": "user", "content":
+                     "Limite de ferramentas atingido. Responda ao usuário agora, "
+                     "em texto, SEM emitir TOOL."})
+    try:
+        return chat(messages)
+    except (SystemExit, KeyboardInterrupt):
+        raise
+    except Exception as exc:  # noqa: BLE001
+        log_error(f"não consegui obter a resposta final: {exc}")
+        return "(limite de ferramentas atingido; sem resposta final do modelo)"
 
 def interactive(messages: list[dict[str, str]], verbose: bool = False) -> int:
     log_info(f"shell-IA pronto. Backend: {AI_SERVER_URL}")

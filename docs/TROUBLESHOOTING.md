@@ -413,6 +413,116 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
 - **Alternativa:** passe `--password-hash '$6$…'` (gerado com
   `mkpasswd -m sha-512`).
 
+### O sistema instalado sobe **sem rede** (a placa fica DOWN)
+
+- **Sintoma:** a ISO instala normalmente, mas depois do boot não há IP; é
+  preciso rodar `ip link set enp5s0 up` + `dhclient enp5s0` (ou
+  `netplan apply` com um arquivo escrito à mão) **em todo boot**.
+- **Causa (medida numa instalação real, sessão #28):** o **Subiquity não grava
+  uma configuração de rede persistente** no alvo quando o `autoinstall.yaml`
+  não tem a chave `network:`. O instalador usa DHCP para si mesmo e não deixa
+  o netplan correspondente em `/etc/netplan` — o sistema instalado nasce sem
+  configuração de rede.
+- **Solução (a partir da sessão #28):** a rede virou parte da preparação da
+  ISO, exatamente como a senha:
+  `--network auto|dhcp|static|none` (+ `--network-ip`,
+  `--network-gateway`, `--network-dns`, `--network-interface` no modo
+  `static`). O build escreve o **mesmo** netplan no `autoinstall.yaml` e em
+  `/preseed/ai-cpu-os-netplan.yaml`, e o `late-command.sh` o instala em
+  `/etc/netplan/99-ai-cpu-os.yaml`, move o netplan do instalador/cloud-init
+  para `.ai-cpu-os.bak` e desliga a rede do cloud-init
+  (`/etc/cloud/cloud.cfg.d/99-ai-cpu-os-disable-network.cfg`). O padrão é
+  DHCP — não é preciso passar nada.
+- **Se a sua ISO é anterior a essa mudança:** no sistema já instalado, crie
+  `/etc/netplan/99-rede.yaml` com `dhcp4: true` (ou o IP fixo) e rode
+  `sudo netplan apply`; para o cloud-init não sobrescrever, crie
+  `/etc/cloud/cloud.cfg.d/99-disable-network.cfg` com
+  `network: {config: disabled}`. Ou gere uma ISO nova (recomendado: o caminho
+  é testado por `make iso-yaml`/`make ci-guards-test`).
+- **Diagnóstico no alvo:**
+
+```bash
+ip -br addr                      # a placa está UP? tem IP?
+ls -l /etc/netplan/              # existe 99-ai-cpu-os.yaml?
+sudo netplan generate            # o YAML é válido?
+systemctl status systemd-networkd cloud-init
+```
+
+- **Teste que guarda isso:** `make iso-yaml` exercita os modos `auto`,
+  `static` e `none`; `make iso-verify-test`/`make ci-guards-test` provam que o
+  verificador reprova quando um dos três elos some.
+- ✅ **PROVADO em VM (sessão #33, 2026-10-17):** uma ISO com `--network auto`
+  foi instalada e o alvo pegou IP por DHCP **sozinho**
+  (`systemd-networkd: ens3: DHCPv4 address 10.0.2.15/24 … acquired`), com
+  `/etc/netplan/99-ai-cpu-os.yaml` intacto e o cloud-init desligado. **Falta** o
+  modo `static` e o hardware físico.
+
+---
+
+## Serviço de inferência (ai-server)
+
+### `ai-server` fica em loop: `error: invalid argument: --no-mmap`
+
+- **Sintoma:** `systemctl status ai-server` mostra `activating` eternamente;
+  o journal repete `error: invalid argument: --no-mmap` seguido de
+  `Main process exited, code=exited, status=1/FAILURE` e um novo restart.
+- **Causa:** o llama.cpp **removeu** `--no-mmap` do upstream (o projeto usava a
+  flag para não mapear o modelo em memória). A unit `ai-server.service` fixava
+  a flag, então qualquer build de uma versão recente do llama.cpp quebra.
+- **Solução (já no código):** a unit usa `${LLAMA_EXTRA_ARGS}` e o
+  `roles/inference/install.sh` **pergunta ao binário recém-compilado** qual
+  sintaxe vale — grava `--no-mmap` (versões antigas), `--load-mode none`
+  (versões novas) ou nada. Para conferir:
+  `grep LLAMA_EXTRA_ARGS /etc/default/ai-server`.
+- **Se a sua ISO é anterior:** edite `/etc/default/ai-server`, acrescente
+  `LLAMA_EXTRA_ARGS=--load-mode none` (ou deixe vazio) e rode
+  `sudo systemctl daemon-reload && sudo systemctl restart ai-server`.
+  Confira antes com `llama-server --help | grep -E 'no-mmap|load-mode'`.
+- **Teste que guarda isso:** `make ci-guards-test` (proíbe `--no-mmap` fixo na
+  unit e exige a detecção no `install.sh`).
+
+### Arquivos com **0 byte** depois do primeiro boot (`ai-server.service` "masked")
+
+- **Sintoma:** depois de instalar, `systemctl is-enabled ai-server` responde
+  **`masked`** (e não `enabled`), `/etc/default/ai-server` está vazio,
+  `llama-server` tem 0 byte e `.firstboot-status` também. O log do firstboot
+  diz `aplicação concluída com sucesso`.
+- **Causa:** o disco não foi descarregado. O `firstboot` grava dezenas de
+  arquivos (binários do llama.cpp, units, env) e o sistema foi desligado logo
+  depois — num teste de VM, o `iso/test-vm.sh` matava o qemu assim que via o
+  marcador; num servidor real, uma queda de energia faz o mesmo. Um **unit com
+  0 byte** é interpretado pelo systemd como *masked* (é assim que se mascara
+  um serviço), o que torna o sintoma especialmente confuso.
+- **Solução (já no código):** o `firstboot.sh` faz `sync` **antes** de remover
+  a sentinela (o status precisa estar durável antes de "marcar como feito") e o
+  `test-vm.sh` espera 15 s antes de encerrar o qemu.
+- **Se aconteceu com você:** rode o build de novo, que é idempotente:
+  `sudo bash /opt/ai-cpu-os/build.sh --role auto --family auto --yes`.
+  Se `llama-server` estiver com 0 byte, apague o build antes
+  (`sudo rm -rf /opt/llama.cpp/build`) — arquivos `.o` de 0 byte fazem o `make`
+  achar que está tudo compilado e só o **link** falha, com
+  `undefined reference to 'main'`.
+- **Teste que guarda isso:** `make ci-guards-test` (exige o `sync` no
+  `firstboot.sh` e a espera no `test-vm.sh`).
+
+### `shell-ia.py` responde `RESULT: …` ou `ERRO: ferramenta desconhecida`
+
+- **Sintoma:** ao usar o shell-IA com um modelo pequeno, a resposta final é
+  literalmente `RESULT: factorial` + `ERRO: ferramenta desconhecida: factorial`,
+  em vez de uma resposta em português.
+- **Causa (duas, ambas corrigidas):** (1) ao esgotar as rodadas de ferramentas,
+  o código devolvia `messages[-1]` — que é a linha do **protocolo**, não a
+  resposta do modelo; (2) o log dizia "ferramenta 'X' executada" **mesmo quando
+  X não existia**, e a mensagem de erro não listava as ferramentas válidas, o
+  que fazia um modelo pequeno repetir o nome inventado até esgotar as rodadas.
+- **Solução (já no código):** ao esgotar, o script pede uma resposta final em
+  texto (`Limite de ferramentas atingido. Responda … SEM emitir TOOL`); nome
+  inválido gera `warn` e a mensagem lista as ferramentas reais.
+- **Nota:** um modelo de 1,5B ainda **inventa** nomes de ferramenta com
+  frequência. Se acontecer muito, use um modelo maior — isso não é bug do
+  script.
+- **Teste que guarda isso:** `make ci-guards-test`.
+
 ---
 
 ## Gravar o pendrive

@@ -191,6 +191,65 @@ else
 fi
 
 ## ---------------------------------------------------------------------------
+## 2-e. Rede do sistema instalado
+## ---------------------------------------------------------------------------
+## Por que isto existe: o autoinstall do Subiquity NÃO grava uma configuração
+## de rede persistente no alvo quando a chave `network:` está ausente. O
+## sistema instalava e subia com a placa DOWN (sem DHCP) até alguém rodar
+## `ip link set ... up`/`dhclient` à mão — foi o que aconteceu numa instalação
+## real. A ISO agora traz o netplan PRONTO em /preseed/ai-cpu-os-netplan.yaml
+## (gerado pelo build-iso.sh a partir de --network) e nós o copiamos para o
+## alvo. É o MESMO YAML que o instalador usou: uma fonte de verdade só.
+NETWORK_MODE="@@NETWORK_MODE@@"
+DISTRO_NAME="@@DISTRO@@"
+NET_IP="@@NET_IP@@"
+NET_GATEWAY="@@NET_GATEWAY@@"
+NET_DNS="@@NET_DNS@@"
+
+if [ "${NETWORK_MODE}" = "none" ]; then
+    log "rede: --network none (nenhuma configuracao gravada; a placa pode subir DOWN)"
+elif [ "${DISTRO_NAME}" = "ubuntu" ]; then
+    NETPLAN_SRC="${SRC}/preseed/ai-cpu-os-netplan.yaml"
+    NETPLAN_DST="/target/etc/netplan/99-ai-cpu-os.yaml"
+    if [ -f "${NETPLAN_SRC}" ]; then
+        mkdir -p /target/etc/netplan
+        # O instalador (e o cloud-init) podem ter deixado OUTRA definicao para
+        # a mesma placa. Duas definicoes do mesmo adaptador fazem o netplan
+        # recusar a configuracao; a nossa e a fonte de verdade.
+        for f in /target/etc/netplan/00-installer-config.yaml \
+                 /target/etc/netplan/50-cloud-init.yaml \
+                 /target/etc/netplan/01-netcfg.yaml; do
+            if [ -f "$f" ]; then
+                mv "$f" "$f.ai-cpu-os.bak" 2>/dev/null && \
+                    log "netplan: ${f} movido para .ai-cpu-os.bak"
+            fi
+        done
+        if cp "${NETPLAN_SRC}" "${NETPLAN_DST}"; then
+            # 0600: e o que o netplan espera (ele avisa quando o arquivo e
+            # legivel por outros usuarios).
+            chmod 0600 "${NETPLAN_DST}"
+            log "rede: ${NETPLAN_DST} gravado (modo ${NETWORK_MODE})"
+            if [ "${NETWORK_MODE}" = "static" ]; then
+                log "rede: IP ${NET_IP} via ${NET_GATEWAY} (DNS: ${NET_DNS})"
+            fi
+        else
+            log "AVISO: falha ao gravar ${NETPLAN_DST}; o alvo pode subir sem rede"
+        fi
+        # cloud-init desligado para nao reescrever o netplan a cada boot.
+        mkdir -p /target/etc/cloud/cloud.cfg.d
+        cat > /target/etc/cloud/cloud.cfg.d/99-ai-cpu-os-disable-network.cfg <<'CFG'
+network: {config: disabled}
+CFG
+    else
+        log "AVISO: ${NETPLAN_SRC} ausente na midia; o alvo pode subir sem rede"
+    fi
+else
+    # Debian: a rede vem da preseed (netcfg) e o d-i escreve
+    # /etc/network/interfaces no alvo. Nada a fazer aqui.
+    log "rede: configuracao do Debian vem da preseed (netcfg)"
+fi
+
+## ---------------------------------------------------------------------------
 ## 3. Serviço de primeiro boot
 ## ---------------------------------------------------------------------------
 log "instalando o serviço de primeiro boot"
@@ -307,6 +366,7 @@ Base do SO: @@DISTRO@@
 Build da ISO: @@ISO_BUILD@@
 Papel configurado: @@ROLE@@ (auto = detecta no hardware real)
 Família configurada: @@FAMILY@@ (auto = detecta no hardware real)
+Rede configurada: @@NETWORK_MODE@@${NET_IP:+ (${NET_IP}${NET_GATEWAY:+ via ${NET_GATEWAY}})}
 Reboot automático após aplicar: @@FIRSTBOOT_REBOOT@@
 
 O que acontece no primeiro boot:

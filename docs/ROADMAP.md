@@ -95,6 +95,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | **`--disk auto` consertado** (a mitigação documentada estava **quebrada**: ia literal para o YAML e virava `match: {path: auto}`) + formato do disco validado + **aviso** de disco inexistente + **default do CI = `auto`** (o artefato deixa de sair preso a `/dev/vda`, que só existe em VM) — `make iso-disk-test` (16), `ci-guards` 40 → **43** | 2026-10-16 | 2026-10-16 |
 | **`docs/IMPLANTAR-EM-OUTRO-PC.md`** — roteiro para instalar/validar em **outra máquina** (checklist do destino, os 3 modos de falha, o que medir, o que trazer de volta, e o registro honesto do que **não** está provado) | 2026-10-16 | 2026-10-16 |
 | `build-iso.sh`: `--keep-templates` (mantém a árvore do autoteste e imprime `TEMPLATES_DIR=…`, o que permite **testar semântica** — não só sintaxe — do `autoinstall.yaml`) + remoção de chamadas `expand_apt_local_block` **duplicadas** | 2026-10-16 | 2026-10-16 |
+| 🌐 **Rede do sistema instalado na ISO** (`--network auto\|dhcp\|static\|none` + `--network-ip/gateway/dns/interface`): o **mesmo** netplan vai no `autoinstall.yaml` e em `/preseed/ai-cpu-os-netplan.yaml`, e o `late-command.sh` o instala em `/etc/netplan/99-ai-cpu-os.yaml`, move o netplan do instalador/cloud-init e desliga a rede do cloud-init. No Debian alimenta o `netcfg` da preseed. Corrige o alvo que subia **SEM DHCP** — **provado em VM** (alvo pegou IP sozinho e aceitou SSH). + **3 bugs reais** achados ao executar: arquivos de **0 byte** no 1º boot (unit vazio = `masked`), `--no-mmap` removido do llama.cpp e o `shell-ia.py` devolvendo a linha do protocolo. Guardas: `ci-guards` 43 → **46**, `webui` 38 → **46** | 2026-10-17 | 2026-10-17 |
 
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em
@@ -117,6 +118,8 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | ~~ISO em base Ubuntu Server~~ (`--distro ubuntu` + autoinstall/Subiquity) | 2026-10-12 | ✅ **Executada contra uma ISO real (sessão #21).** |
 | 🔴 **ISO em base Debian** (`--distro debian` + preseed/`apt-setup/local0`) | 2026-10-12 | **Nunca executada** — é o que falta do caminho ISO |
 | 🔴 **ISO em HARDWARE FÍSICO** (Xeon e Ryzen) | 2026-10-13 | O caminho funciona em VM; falta no hardware alvo (Blocos A–O) |
+| 🟡 **Rede do alvo pós-instalação** (Bloco M.5-b) | 2026-10-17 | ✅ **PROVADO EM VM (sessão #33):** o alvo pegou IP por DHCP sozinho (`DHCPv4 address 10.0.2.15/24 … acquired`), o netplan ficou intacto, o cloud-init desligado e o **SSH funcionou**. Falta o modo `static`, o reboot de persistência e o hardware físico |
+| **Flags do llama.cpp mudam entre versões** | 2026-10-17 | Bug real (sessão #33): `--no-mmap` foi removido do upstream e o `ai-server` entrava em loop. A unit usa `${LLAMA_EXTRA_ARGS}` e o `install.sh` detecta a sintaxe no binário |
 | **Validar a resolução de famílias em hardware real** (blocos N/O do `VALIDATION.md`) | 2026-10-12 | Testado só com nomes de CPU simulados |
 | ✅ ~~ISO air-gapped~~ | 2026-10-12 | **Concluída no código E PROVADA (sessão #21):** o 1º boot compilou do tarball e usou modelo + repo local, sem rede. Resta um resíduo (UI do llama.cpp) — ver `ISO.md` § 6. |
 

@@ -316,6 +316,24 @@ main() {
   if [[ $rc -eq 0 ]]; then
     log_ok "Teste de VM: OK — a ISO bootou, instalou e aplicou o ai-cpu-os."
     log_info "Log completo: ${SERIAL_LOG}"
+
+    # ANTES DE MATAR O QEMU: dar tempo ao guest de gravar o disco.
+    #
+    # O marcador do firstboot sai ANTES do `sync` dele terminar, e o qemu com
+    # cache `writeback` ainda tem dados em memória do HOST. Matar o processo
+    # imediatamente (era o comportamento anterior) deixava arquivos com
+    # **0 byte** no disco virtual — na prática, `llama-server`,
+    # `ai-server.service` e `.firstboot-status` vazios, e um unit vazio é lido
+    # pelo systemd como "masked" (visto na sessão #29, ao bootar o disco
+    # instalado para inspecionar). Um `sleep` curto + SIGTERM dá ao qemu tempo
+    # de descarregar o cache; o `sync` do firstboot já forçou o lado do guest.
+    if [[ $KEEP -eq 0 ]]; then
+      log_info "Aguardando 15 s para o guest/qemu descarregarem o disco…"
+    else
+      log_info "Aguardando 15 s para o guest/qemu descarregarem o disco (disco será mantido)…"
+    fi
+    sleep 15
+
     log_info "Cole os pontos relevantes no Bloco M de docs/VALIDATION.md."
   else
     log_error "Teste de VM: FALHOU (ou não terminou a tempo)."

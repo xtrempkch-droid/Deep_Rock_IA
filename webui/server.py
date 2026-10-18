@@ -82,11 +82,25 @@ ACTIONS = {
 DISTROS = ("ubuntu", "debian")
 ROLES = ("auto", "inference", "builder")
 PAYLOADS = ("auto", "none")
+# Rede do sistema INSTALADO. O default é `auto` (DHCP) de propósito: sem uma
+# configuração persistente o alvo sobe com a placa DOWN (bug real, sessão #28).
+NETWORK_MODES = ("auto", "dhcp", "static", "none")
 
 # Um dispositivo de bloco: /dev/sdb, /dev/nvme0n1, /dev/vda. Nada além disso.
 RE_DISK = re.compile(r"^/dev/[a-zA-Z0-9]+$")
 # Nome de ISO gerada pelo projeto (usado para achar arquivos dentro de iso/out).
 RE_ISO_NAME = re.compile(r"^[A-Za-z0-9._-]+\.iso$")
+# Valores que vão para o netplan/preseed — validados aqui também (a UI nunca
+# repassa texto do navegador sem conferir o formato).
+RE_IPV4 = re.compile(
+    r"^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
+    r"(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$"
+)
+RE_IFACE = re.compile(r"^[A-Za-z0-9_.:-]{1,32}$")
+RE_NET_IP = re.compile(
+    r"^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
+    r"(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(/[0-9]{1,2})?$"
+)
 
 # Tempo máximo para comandos "curtos" (status, listagens).
 FAST_TIMEOUT = 60
@@ -267,6 +281,49 @@ def v_disk(value: str) -> str:
     return value
 
 
+def v_network_mode(value: str) -> str:
+    if value not in NETWORK_MODES:
+        raise Invalid(f"modo de rede inválido: {value!r} (use {' ou '.join(NETWORK_MODES)})")
+    return value
+
+
+def v_net_ip(value: str) -> str:
+    if not RE_NET_IP.match(value):
+        raise Invalid(f"IP inválido: {value!r} (esperado algo como 192.168.1.50/24)")
+    if "/" in value:
+        prefix = int(value.rsplit("/", 1)[1])
+        if not 1 <= prefix <= 32:
+            raise Invalid(f"prefixo inválido em {value!r} (use 1..32)")
+    return value
+
+
+def v_gateway(value: str) -> str:
+    if not RE_IPV4.match(value):
+        raise Invalid(f"gateway inválido: {value!r}")
+    return value
+
+
+def v_iface(value: str) -> str:
+    if value == "":
+        return value
+    if not RE_IFACE.match(value):
+        raise Invalid(f"interface inválida: {value!r} (esperado algo como enp5s0)")
+    return value
+
+
+def v_dns(value: str) -> str:
+    """Aceita '1.1.1.1,8.8.8.8' (também com espaço) e devolve normalizado."""
+    parts = [p for p in re.split(r"[,\s]+", value.strip()) if p]
+    if not parts:
+        raise Invalid("DNS vazio (informe ao menos um IP)")
+    if len(parts) > 4:
+        raise Invalid("DNS: no máximo 4 servidores")
+    for p in parts:
+        if not RE_IPV4.match(p):
+            raise Invalid(f"DNS inválido: {p!r}")
+    return ",".join(parts)
+
+
 def v_iso_path(value: str) -> Path:
     """Resolve um caminho de ISO para LEITURA (conferir/verificar).
 
@@ -363,9 +420,10 @@ def action_options() -> dict[str, Any]:
         "roles": list(ROLES),
         "families": families,
         "payloads": list(PAYLOADS),
+        "network_modes": list(NETWORK_MODES),
         "mods": mods,
         "defaults": {"distro": "ubuntu", "disk": "/dev/vda", "role": "auto",
-                     "family": "auto", "payload": "none"},
+                     "family": "auto", "payload": "none", "network": "auto"},
     }
 
 
@@ -435,8 +493,18 @@ def _iso_args_from(params: dict[str, Any]) -> list[str]:
     role = v_role(str(params.get("role", "auto")))
     family = v_family(str(params.get("family", "auto")))
     payload = v_payload(str(params.get("payload", "none")))
+    netmode = v_network_mode(str(params.get("network", "auto")))
+    netiface = v_iface(str(params.get("net_iface", "")))
     args = ["--distro", distro, "--disk", disk, "--role", role,
-            "--family", family]
+            "--family", family, "--network", netmode]
+    if netiface:
+        args += ["--network-interface", netiface]
+    if netmode == "static":
+        # Só no modo static: os campos de IP/gateway são obrigatórios aqui (e
+        # o build-iso.sh também recusa static sem eles — defesa em dois níveis).
+        args += ["--network-ip", v_net_ip(str(params.get("net_ip", "")))]
+        args += ["--network-gateway", v_gateway(str(params.get("net_gateway", "")))]
+        args += ["--network-dns", v_dns(str(params.get("net_dns", "1.1.1.1,8.8.8.8")))]
     if payload != "none":
         # air-gapped: fonte + modelo + repositório na mídia
         args += ["--iso-source", "auto", "--iso-model", "auto",
@@ -451,17 +519,18 @@ def _iso_args_from(params: dict[str, Any]) -> list[str]:
         args += ["--password-hash", _crypt_hash(user_pw)]
     if root_pw is not None:
         args += ["--root-password-hash", _crypt_hash(root_pw)]
-    return args, distro, disk, role, family, payload, bool(user_pw), bool(root_pw)
+    return (args, distro, disk, role, family, payload, netmode,
+            bool(user_pw), bool(root_pw))
 
 
 def action_preview(params: dict[str, Any]) -> dict[str, Any]:
-    args, distro, disk, role, family, payload, has_user_pw, has_root = \
+    args, distro, disk, role, family, payload, netmode, has_user_pw, has_root = \
         _iso_args_from(params)
     argv = ["bash", "iso/build-iso.sh", *args, "--dry-run", "--yes"]
-    job = new_job(argv, f"Simulação ({distro} · {role} · {family})")
+    job = new_job(argv, f"Simulação ({distro} · {role} · {family} · rede {netmode})")
     return {"job": job.id, "argv": argv,
             "summary": {"distro": distro, "disk": disk, "role": role,
-                        "family": family, "payload": payload,
+                        "family": family, "payload": payload, "network": netmode,
                         "user_password": has_user_pw, "root": has_root}}
 
 
@@ -473,7 +542,7 @@ def action_build(params: dict[str, Any]) -> dict[str, Any]:
             "impossível. Use a seção 'Gerar no GitHub Actions' desta página: "
             "o CI faz o build e você baixa o artifact."
         )
-    args, distro, disk, role, family, payload, has_user_pw, has_root = \
+    args, distro, disk, role, family, payload, netmode, has_user_pw, has_root = \
         _iso_args_from(params)
     out = ISO_OUT / f"ai-cpu-os-{distro}.iso"
     argv = ["bash", "iso/build-iso.sh", *args, "--yes", "--out", str(out)]

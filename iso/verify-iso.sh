@@ -650,6 +650,83 @@ else
   skip "sem late-command.sh para conferir a senha do root"
 fi
 
+section "Rede do sistema instalado"
+# O Subiquity NÃO grava rede persistente no alvo quando o autoinstall não tem
+# `network:` — o sistema sobe com a placa DOWN (bug real, sessão #28). A ISO
+# agora carrega o netplan pronto em /preseed/ai-cpu-os-netplan.yaml e o
+# late-command o copia para /etc/netplan/99-ai-cpu-os.yaml. Conferimos a
+# COERÊNCIA entre o modo gravado, o YAML do instalador e o netplan do alvo.
+if [[ -n "$LATE_LOCAL" ]]; then
+  if ! grep -qE '^NETWORK_MODE="' "$LATE_LOCAL"; then
+    fail "late-command sem NETWORK_MODE (template antigo? o alvo pode subir sem rede)"
+  else
+    NETMODE="$(grep -E '^NETWORK_MODE="' "$LATE_LOCAL" | head -1 | cut -d'"' -f2)"
+    NETPLAN_ISO="$(fetch "/preseed/ai-cpu-os-netplan.yaml" 2>/dev/null || true)"
+    case "$NETMODE" in
+      auto|dhcp)
+        pass "rede: modo ${NETMODE} (DHCP)"
+        if [[ -z "$NETPLAN_ISO" ]]; then
+          fail "rede ${NETMODE} sem /preseed/ai-cpu-os-netplan.yaml (o alvo subiria sem DHCP)"
+        elif grep -q 'dhcp4: true' "$NETPLAN_ISO"; then
+          pass "netplan do alvo tem dhcp4: true"
+        else
+          fail "netplan do alvo sem dhcp4: true (não pegaria IP por DHCP)"
+        fi
+        if [[ "$DISTRO" == "ubuntu" && -n "$AI_LOCAL" ]]; then
+          if grep -qE '^network:' "$AI_LOCAL" && grep -q 'dhcp4: true' "$AI_LOCAL"; then
+            pass "autoinstall: bloco network com dhcp4 (instalador e alvo iguais)"
+          else
+            fail "autoinstall sem o bloco network/dhcp4 (instalador ficaria sem rede)"
+          fi
+        elif [[ "$DISTRO" == "debian" && -n "$PRESEED_LOCAL" ]]; then
+          if grep -q 'netcfg/disable_autoconfig boolean false' "$PRESEED_LOCAL"; then
+            pass "preseed: DHCP explícito (disable_autoconfig false)"
+          else
+            fail "preseed sem netcfg/disable_autoconfig false (rede indefinida)"
+          fi
+        fi
+        ;;
+      static)
+        pass "rede: modo static"
+        if [[ -z "$NETPLAN_ISO" ]]; then
+          fail "rede static sem /preseed/ai-cpu-os-netplan.yaml"
+        elif grep -qE 'addresses: \[[0-9]' "$NETPLAN_ISO" && grep -q 'via: ' "$NETPLAN_ISO"; then
+          pass "netplan do alvo tem endereço fixo e rota default"
+        else
+          fail "netplan static sem addresses/via"
+        fi
+        if [[ "$DISTRO" == "debian" && -n "$PRESEED_LOCAL" ]]; then
+          if grep -q 'netcfg/get_ipaddress string ' "$PRESEED_LOCAL" \
+             && grep -q 'netcfg/get_gateway string ' "$PRESEED_LOCAL"; then
+            pass "preseed: IP fixo + gateway definidos"
+          else
+            fail "preseed static sem get_ipaddress/get_gateway"
+          fi
+        fi
+        ;;
+      none)
+        pass "rede: modo none (comportamento antigo, sem configuração persistente)"
+        if [[ -n "$AI_LOCAL" ]] && grep -qE '^network:' "$AI_LOCAL"; then
+          fail "modo none mas o autoinstall tem bloco network (incoerente)"
+        fi
+        ;;
+      *)
+        fail "NETWORK_MODE desconhecido no late-command: '${NETMODE}'"
+        ;;
+    esac
+
+    if [[ "$NETMODE" != "none" && "$DISTRO" == "ubuntu" ]]; then
+      if grep -q 'cloud.cfg.d/99-ai-cpu-os-disable-network.cfg' "$LATE_LOCAL"; then
+        pass "cloud-init com a rede desligada (não reescreve o netplan)"
+      else
+        fail "sem cloud-init network disable: ele pode sobrescrever o netplan"
+      fi
+    fi
+  fi
+else
+  skip "sem late-command.sh para conferir a rede"
+fi
+
 # Papel/família gravados no template (o .iso-config nasce no alvo).
 #
 # Atenção: depois da substituição NÃO existe mais @@ROLE@@ no arquivo — é

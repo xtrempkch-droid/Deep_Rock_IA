@@ -1,10 +1,9 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-16 (🔑 **senha de usuário/root na webui** —
-> hash crypt antes da linha de comando, root habilitável e bloqueado por
-> padrão — e 🧬 **14 famílias de CPU com AVX-512 por padrão** nas famílias que
-> o têm. Ver `JOURNAL.md` sessões #26/#27)
+> **Última atualização:** 2026-10-17 (🌐 **rede do sistema instalado na ISO** —
+> `--network auto|dhcp|static|none`, netplan persistente no alvo e cloud-init
+> desligado; corrige o alvo que subia **sem DHCP**. Ver `JOURNAL.md` sessão #28)
 
 ---
 
@@ -363,6 +362,58 @@ de a automação falhar, detalhados em `docs/TROUBLESHOOTING.md` § "SINALIZADO"
 pega); **(2)** **UEFI nunca bootado** (`--boot-mode uefi` exige `ovmf`);
 **(3)** **Debian/preseed nunca executado**.
 
+**Passo 1-e — ✅ FEITO (2026-10-17, sessão #33). Rede do sistema instalado na
+ISO — corrige o alvo que subia SEM DHCP.**
+
+Uma instalação real (ISO anterior) subiu com a placa **DOWN**: o Subiquity não
+grava rede persistente no alvo quando o `autoinstall.yaml` não tem `network:`.
+Agora a rede é decidida na geração da ISO, no mesmo padrão da senha:
+
+```bash
+# padrão: DHCP em en*/eth* (nenhuma flag necessária)
+sudo bash iso/build-iso.sh --disk /dev/nvme0n1
+
+# IP fixo
+sudo bash iso/build-iso.sh --disk /dev/nvme0n1 --network static \
+  --network-interface enp5s0 --network-ip 192.168.1.50/24 \
+  --network-gateway 192.168.1.1
+```
+
+O **mesmo** bloco netplan vai para o `autoinstall.yaml` e para
+`/preseed/ai-cpu-os-netplan.yaml`, e o `late-command.sh` o instala em
+`/etc/netplan/99-ai-cpu-os.yaml` (+ move o netplan do instalador/cloud-init e
+desliga a rede do cloud-init). No Debian, as mesmas flags alimentam o `netcfg`
+da preseed. `iso/verify-iso.sh` confere os três elos; `make iso-yaml` exercita
+`auto`/`static`/`none`; `make ci-guards-test` foi de 43 para **46** casos e
+`make ui-test` de 38 para **46** (a UI ganhou o seletor de rede).
+▶️ **A prova em VM veio em seguida — ver o Passo 1-f.**
+
+**Passo 1-f — ✅ EXECUTADO E PROVADO EM VM (2026-10-17, sessão #33).** A ISO com
+`--network auto` foi **gerada e instalada numa VM qemu/KVM**, e o que este
+trabalho prometia foi **verificado no alvo, por SSH**:
+
+| Verificação | Resultado |
+|---|---|
+| Alvo pega IP **sozinho** (DHCP) | ✅ `ens3: DHCPv4 address 10.0.2.15/24 … acquired` |
+| Login por SSH | ✅ `ai-cpu-os@ai-cpu-os` |
+| Família / manifesto de build | ✅ `intel-haswell`, `-march=haswell`, `AVX-512: no` |
+| Mods (`sysctl`, THP, C-states) | ✅ swappiness 10, rmem 128 MB, THP `always`, `max_cstate=1` |
+| `smoke-test.sh` | ✅ **PASS=11 FAIL=1 SKIP=1** (FAIL só no governor: VM sem `cpufreq`) |
+| `ai-server` + `/health` | ✅ `{"status":"ok"}` |
+| Inferência real (Qwen2.5-Coder-1.5B Q4) | ✅ 48 tokens coerentes |
+| `llama-bench` (4 vCPU, AVX2) | ✅ **pp64 46,55 t/s · tg32 25,95 t/s** |
+
+**Dois bugs reais que só a execução mostrou (já corrigidos):** (1) arquivos com
+**0 byte** após o 1º boot (o `test-vm.sh` matava o qemu antes do flush; um unit
+vazio vira **`masked`** e o `ai-server` não existia) → `sync` no `firstboot.sh` +
+15 s antes de encerrar a VM; (2) **`--no-mmap` não existe mais** no llama.cpp
+(loop com `invalid argument`) → unit usa `${LLAMA_EXTRA_ARGS}` e o `install.sh`
+pergunta ao binário qual sintaxe vale (`--load-mode none` vs `--no-mmap`).
+Também corrigido o `shell-ia.py`, que devolvia a linha do **protocolo**
+(`RESULT: …`) como resposta final.
+
+**NÃO provado:** modo `static`, hardware físico, caminho Debian, UEFI.
+
 **Passo 2 (AGORA) — validar em HARDWARE FÍSICO (Xeon E5-2680 v4 e Ryzen 5 3500X).**
 
 O que falta não é código: é rodar os blocos preenchíveis de
@@ -371,6 +422,8 @@ resultados. Prioridades:
 
 - **Bloco M** (ISO): repetir o passo 1 no Xeon/Ryzen e ver o efeito do tuning;
   **gerar também `--distro debian`** (o caminho preseed **nunca foi testado**).
+- **Bloco M.5-b (novo)**: uma ISO gerada com o código atual tem de fazer o
+  alvo pegar IP **sozinho** (DHCP e `static`) e continuar assim após reboot.
 - **Bloco N**: `bash families/resolve.sh`, `./detect-hardware.sh` e
   `sudo ./build.sh --dry-run` em cada máquina.
 - **Bloco O**: `bash mods/apply.sh check` e `make mods-test`.
@@ -412,6 +465,7 @@ Ao terminar qualquer tarefa:
 
 | Data       | Mudança                                                    |
 |------------|------------------------------------------------------------|
+| 2026-10-17 | 🌐 **Rede do sistema instalado na ISO (sessão #33).** Uma instalação real subia **sem DHCP** — o Subiquity não grava rede persistente no alvo quando o autoinstall não tem `network:`. Novo `--network auto\|dhcp\|static\|none` (+ `--network-ip`, `--network-gateway`, `--network-dns`, `--network-interface`); o **mesmo** netplan vai para o `autoinstall.yaml` e para `/preseed/ai-cpu-os-netplan.yaml`, e o `late-command.sh` o instala em `/etc/netplan/99-ai-cpu-os.yaml`, move o netplan do instalador/cloud-init e desliga a rede do cloud-init. No Debian as flags alimentam o `netcfg` da preseed (e o hostname da preseed passou a usar `@@HOSTNAME@@`). O verificador confere os três elos; a UI ganhou o seletor de rede. ✅ **PROVADO EM VM** (alvo pegou IP por DHCP sozinho e aceitou SSH). + **3 bugs reais** achados ao executar: arquivos de **0 byte** no 1º boot (unit vazio = `masked`), `--no-mmap` removido do llama.cpp e o `shell-ia.py` devolvendo a linha do protocolo. `ci-guards` 43 → **46**, `webui` 38 → **46**. |
 | 2026-10-16 | 🧷 **`validate` #57 vermelho: o teste da trava dependia do `exec` do bash (sessão #32).** O `tests/test-iso-lock.sh` matava o detentor da trava contando que o `bash -c '…; sleep 30'` **trocasse de identidade** pelo último comando; essa otimização **não é garantida** (um `BASH_ENV` com `trap` já a desliga) e então o `sleep`, como filho, herda o fd 9: a trava sobrevivia ao `kill` e a asserção final falhava com o gerador **correto** (sintoma no CI: `exit code 2`, passo de 6 s = 5 s de laço de espera estourando). Detentor reescrito (`sleep 300 9>&- &` + `wait` + `flock -w 20`), pré-voo que exige a trava livre e diz **quem** a segura, e todo `FALHOU` vira **anotação** `::error::`. Asserções 10 → **13**; `make validate` verde e `validate` **#58** (`0041c0e`) **verde** no CI (passo 17 em 0 s). Ver `JOURNAL.md` sessão #32. | O `main` local estava 7 commits atrás e com trabalho não commitado (preservado em `backup/local-sessao26-pre-sync`). A correção do #28 (`matrix.exec != 'false'` no `if:`) **nunca pulava o passo**: no GitHub, booleano × string vira número (`false`→0, `'false'`→NaN) e o `!=` dá sempre true — daí o `exit 132` (SIGILL) em icelake-sp/sapphirerapids-sp/emeraldrapids-sp/graniterapids-sp **no próprio commit da correção**. Agora o valor vai por `env:` e a decisão é no `bash`; guarda no `project-rules` + violação plantada. Recuperados do trabalho local de 14/10: `flock` de instância única + `download_to()` (confere o `.part`, `--speed-time`) no `build-iso.sh` (`make iso-lock-test`, 10 asserções) e `make avx512-test` (37 → **61** asserções, 14 famílias). `ci-guards` 35 → **40**. Ver `JOURNAL.md` sessão #29. |
 | 2026-10-16 | 🧬 **14 famílias + AVX-512 por padrão.** Adicionadas as famílias de servidor `intel-cascadelake-sp` (v6), `intel-icelake-sp` (v7), `intel-sapphirerapids-sp` (v8), `intel-emeraldrapids-sp` (v9), `intel-graniterapids-sp` (Xeon 6 P) e `amd-zen5` (Ryzen 9000/Ryzen AI 300/EPYC Turin). **Decisão do dono:** nas famílias cujas CPUs têm AVX-512, a política virou `auto` — o AVX-512 é o padrão quando a CPU reporta a flag (verificação em runtime mantida; hardcode segue proibido). Novo `--no-avx512` (desliga e troca o `-march` pelo fallback sem AVX-512, via `FAMILY_MARCH_HAS_AVX512`). Corpus: 85 CPUs reais. Ver `JOURNAL.md` sessão #26. |
 | 2026-10-13 | 🎉 **A ISO foi gerada E bootada pela primeira vez** (VM qemu/KVM, Ubuntu 24.04): instalou sozinha, reiniciou e o 1º boot aplicou o ai-cpu-os (`status=ok`, família `intel-haswell`), com llama.cpp compilado no alvo sem rede. **8 bugs reais** só visíveis ao executar (xorriso `-rm`/`-boot_image`/`-map`, GRUB sem `--id`, apt do curtin em chroot sem `/cdrom`, marcadores fora do console, aspas do `-find`, SIGPIPE). Novo § 3.3. Ver `JOURNAL.md` sessão #21. |
