@@ -378,6 +378,12 @@ layouts de disco.
 > existia. Login por SSH funcionou com a chave do usuário. **Continua sem prova
 > em hardware físico e sem prova do modo `static`** (só o `auto` foi bootado).
 
+> 🔧 **Máquina já instalada (ISO anterior): não precisa reinstalar.**
+> `sudo bash /opt/ai-cpu-os/mods/network/apply.sh` aplica no próprio sistema o
+> mesmo netplan que a ISO nova traz — e move o netplan do instalador/cloud-init
+> para `.bak`. Ver `docs/MODS.md` § 3 e `docs/TROUBLESHOOTING.md` § "sobe sem
+> rede".
+
 #### Como a ISO base é escolhida (e o bug que isso já causou)
 
 O build **não** confia numa URL fixa: baixa o `SHA256SUMS` oficial, escolhe a

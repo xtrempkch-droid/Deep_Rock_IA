@@ -14,7 +14,13 @@ bash mods/apply.sh test                    # testa em container Ubuntu (sem root
 ```
 
 Conjuntos prontos: `--set system` (tuning de base, usado pelo `build.sh`) e
-`--set portable` (seguras em qualquer máquina).
+`--set portable` (seguras em qualquer máquina). A mod `network` tem conjunto
+próprio (`--set network`): mudar a rede de um servidor é decisão do dono da
+máquina, nunca efeito colateral de um tuning.
+
+> 🔧 **Está sem rede depois de instalar?** `sudo bash mods/network/apply.sh`
+> (ou `make network-fix`) aplica no sistema em execução o netplan que a ISO nova
+> traz. Ver [`docs/TROUBLESHOOTING.md`](../docs/TROUBLESHOOTING.md).
 
 Estrutura de uma mod:
 

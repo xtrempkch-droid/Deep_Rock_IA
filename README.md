@@ -435,6 +435,18 @@ sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/vda \
 Use `--network none` só se você configura a rede por outro meio (a placa pode
 subir desligada). Detalhes: [`docs/ISO.md`](docs/ISO.md) § 4.3.
 
+> 🔧 **Já instalou com uma ISO antiga e a máquina está sem rede?** Não precisa
+> reinstalar — conserte no próprio sistema:
+>
+> ```bash
+> sudo bash /opt/ai-cpu-os/mods/network/apply.sh     # DHCP
+> ip -br addr                                        # confira
+> ```
+>
+> É a mod `network` (reversível com `revert.sh`). Ver
+> [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) §
+> "sobe sem rede".
+
 > 💡 A ISO fica em torno de **4,3–5 GB** com tudo embutido (base ~2,6 GB +
 > modelo ~1,1 GB + pacotes ~0,5 GB + fonte). Com tudo em `none`, uns 2,7 GB.
 >

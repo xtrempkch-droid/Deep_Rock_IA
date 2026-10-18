@@ -13,6 +13,11 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 ROLE     ?= auto
+# Rede do sistema DESTA máquina (make network-fix) — ver mods/network/
+NET_MODE ?= auto
+NET_IFACE ?=
+NET_IP   ?=
+NET_GW   ?=
 FAMILY   ?= auto
 # Base da ISO: ubuntu (autoinstall, padrão) | debian (preseed, legado)
 DISTRO   ?= ubuntu
@@ -41,7 +46,7 @@ SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
         iso-select-test iso-repo-test iso-verify-test ci-guards-test \
         iso-lock-test \
         pendrives pendrive pendrive-test iso-check iso-check-test \
-        ui ui-test \
+        ui ui-test network-fix network-test \
         docker docker-check ci clean
 
 help: ## Lista os alvos disponíveis
@@ -82,7 +87,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test pendrive-test iso-check-test ui-test iso-dry-run-both ## Lint + docs + famílias + AVX-512 + testes de ISO + UI + guardas + dry-run
+validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test network-test pendrive-test iso-check-test ui-test iso-dry-run-both ## Lint + docs + famílias + AVX-512 + testes de ISO + rede + UI + guardas + dry-run
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -183,6 +188,17 @@ iso-check-test: ## Prova a conferência de ISO baixada (fixtures; sem xorriso)
 
 ui: ## Abre a interface web local (criar/conferir a ISO pelo navegador)
 	@python3 webui/server.py $(UI_ARGS)
+
+network-test: ## Prova a mod `network` numa árvore falsa (sem root, sem rede)
+	@bash tests/test-network-mod.sh
+
+network-fix: ## Conserta a rede DESTA máquina (DHCP); use NET_MODE/NET_IP/NET_GW
+	@set -euo pipefail; args=(--mode "$(NET_MODE)"); \
+	if [ -n "$(NET_IFACE)" ]; then args+=(--interface "$(NET_IFACE)"); fi; \
+	if [ -n "$(NET_IP)" ];    then args+=(--ip "$(NET_IP)"); fi; \
+	if [ -n "$(NET_GW)" ];    then args+=(--gateway "$(NET_GW)"); fi; \
+	echo "sudo bash mods/network/apply.sh $${args[*]}"; \
+	sudo bash mods/network/apply.sh "$${args[@]}"
 
 ui-test: ## Prova a interface web (API + salvaguardas; sem navegador, sem rede)
 	@bash tests/test-webui.sh

@@ -200,7 +200,9 @@ ai-cpu-os/
 │   ├── kernel-tuning/       # sysctl + cmdline + io_uring   (conjunto system)
 │   ├── hugepages/           # THP + huge pages estáticas    (conjunto system)
 │   ├── governor/            # scaling_governor=performance (conjunto system)
-│   └── openblas-threads/    # OPENBLAS_NUM_THREADS=1       (conjunto portable)
+│   ├── openblas-threads/    # OPENBLAS_NUM_THREADS=1       (conjunto portable)
+│   └── network/             # netplan persistente (DHCP/static) — reparo do
+│                            # alvo que subiu sem IP      (conjunto network)
 └── tests/
     ├── smoke-test.sh       # Testes rápidos pós-build
     ├── test-families.sh    # Casamento CPU → família (corpus; sem hardware)

@@ -2346,6 +2346,50 @@ garante os arquivos íntegros acima.
 
 ---
 
+### Sessão #34 — 2026-10-18 · 🔧 Reparo da máquina JÁ instalada (mod `network`)
+
+- **Objetivo:** o dono repetiu o relato ("a rede não ativa DHCP automaticamente,
+  é preciso configurar à mão") — e a chave é que a **máquina já está
+  instalada**. A correção da sessão #33 vale para ISOs **novas**; uma ISO nova
+  não conserta o que está no chão.
+- **Feito:** nova mod **`mods/network/`** (`mod.conf` + `apply.sh` +
+  `revert.sh`). O projeto já vive em `/opt/ai-cpu-os` no sistema instalado, logo
+  o reparo é um comando:
+  `sudo bash /opt/ai-cpu-os/mods/network/apply.sh`.
+  - Grava `/etc/netplan/99-ai-cpu-os.yaml` (0600) — DHCP em `en*`/`eth*` por
+    padrão, `--interface` para bloco nominal, `--mode static` com
+    `--ip/--gateway/--dns`.
+  - **Move** `00-installer-config.yaml`/`50-cloud-init.yaml`/`01-netcfg.yaml`
+    para `*.ai-cpu-os.bak`: duas definições do mesmo adaptador fazem o netplan
+    **recusar** a configuração e o sistema ficaria sem rede — o oposto do
+    objetivo.
+  - Grava `99-ai-cpu-os-disable-network.cfg` (cloud-init não reescreve).
+  - **Valida com `netplan generate` ANTES de aplicar**: se a config nova for
+    inválida, não aplica (a rede atual continua de pé). Esse é o ponto mais
+    importante do script.
+  - Validação estrita de IPv4/prefixo/interface (um YAML torto = máquina sem
+    rede), `--dry-run` e `--root DIR` (testar/preparar disco montado sem tocar
+    no sistema em execução), idempotente, `revert.sh` restaura os backups.
+  - Conjunto próprio (`MOD_SETS="network"`): **nunca** entra em
+    `apply --set system`, que roda no build — tuning não deve mexer na
+    conectividade.
+- **Testes:** `tests/test-network-mod.sh` (**37 asserções**, árvore falsa,
+  sem root/rede/netplan/docker) cobre os 3 modos, o `.bak`, o cloud-init, a
+  idempotência, o revert-com-restauração, 8 entradas inválidas (`rc 2` e nada
+  escrito) e o `--dry-run`. `make network-test` no `validate`;
+  `make network-fix` para esta máquina. Guardas novos no `validate.yml`, cada
+  um provado por violação plantada: `ci-guards` 54 → **62**.
+- **Docs:** `TROUBLESHOOTING.md` § "sobe sem rede" (a seção que o dono vai ler),
+  `MODS.md` § 3, `ISO.md`, `README.md` e `STATE.md` — todos apontam a mod como
+  o caminho de reparo, e a alternativa manual (`/etc/netplan/99-rede.yaml`).
+- **O que NÃO foi provado:** a mod **nunca rodou numa máquina real com
+  `netplan`** — os testes usam `--root`. O `netplan generate`/`apply` do
+  caminho real não foi exercitado, e o revert também não. É a próxima prova
+  (basta rodar na máquina de teste).
+- **Commits:** *(ver `git log`)*.
+
+---
+
 ## 5. 🧵 Threads abertas (o que ficou no ar)
 
 > **Esta é a seção mais importante para retomar.** Lista o que está *incompleto*,

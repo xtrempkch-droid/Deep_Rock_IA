@@ -77,9 +77,13 @@ MOD_GAIN="Evita oversubscription de threads; reduz jitter de latência."
 | `hugepages` | `transparent_hugepage` + huge pages estáticas opcionais | medium | **sim** | `system` | any |
 | `governor` | `scaling_governor=performance` via serviço systemd | medium | no | `system` | any |
 | `openblas-threads` | `OPENBLAS_NUM_THREADS=1` para não competir com o ggml | **low** | no | `portable` | inference |
+| `network` | grava o netplan persistente (`99-ai-cpu-os.yaml`), tira o netplan do instalador/cloud-init do caminho e desliga a rede do cloud-init — **conserta a máquina que subia sem IP** | medium | no | `network` | any |
 
 Conjuntos: **`system`** = o que o `build.sh` aplica (tuning de base);
-**`portable`** = seguras em qualquer máquina, aplicáveis uma a uma.
+**`portable`** = seguras em qualquer máquina, aplicáveis uma a uma;
+**`network`** = só a conectividade, **nunca** aplicado automaticamente (mudar a
+rede de um servidor é decisão do dono da máquina — e `apply --set system` roda
+no build).
 
 > Mods `high` (ex.: desativar C-states por completo, trocar o scheduler) **não**
 > entram em nenhum conjunto automático: são sempre um `apply <id>` deliberado.

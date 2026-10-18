@@ -212,6 +212,7 @@ for f in \
   build.sh detect-hardware.sh llama-build.sh \
   families/resolve.sh families/_base/family.conf families/intel-broadwell/family.conf \
   mods/apply.sh mods/kernel-tuning/mod.conf mods/openblas-threads/apply.sh \
+  mods/network/mod.conf mods/network/apply.sh \
   roles/inference/install.sh roles/builder/install.sh \
   tests/smoke-test.sh \
   ; do

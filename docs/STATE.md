@@ -388,6 +388,25 @@ da preseed. `iso/verify-iso.sh` confere os três elos; `make iso-yaml` exercita
 `make ui-test` de 38 para **46** (a UI ganhou o seletor de rede).
 ▶️ **A prova em VM veio em seguida — ver o Passo 1-f.**
 
+**Passo 1-g — ✅ FEITO (2026-10-18). Reparo da máquina JÁ instalada: mod
+`network`.** Uma ISO nova não conserta o que está no chão — e o dono tem uma
+máquina instalada com ISO anterior que sobe sem IP. Agora existe o caminho no
+próprio sistema (que já tem `/opt/ai-cpu-os`):
+
+```bash
+sudo bash /opt/ai-cpu-os/mods/network/apply.sh          # DHCP (padrão)
+sudo bash /opt/ai-cpu-os/mods/network/apply.sh --mode static \
+  --interface enp5s0 --ip 192.168.1.50/24 --gateway 192.168.1.1
+sudo bash /opt/ai-cpu-os/mods/network/revert.sh         # desfaz
+```
+
+A mod grava `99-ai-cpu-os.yaml` (0600), move o netplan do instalador/cloud-init
+para `.bak`, desliga a rede do cloud-init e **valida com `netplan generate`
+antes de aplicar** (config inválida não derruba a rede que está funcionando).
+Conjunto próprio (`network`): **nunca** entra em `apply --set system`.
+`make network-test` (**37 asserções**, árvore falsa via `--root`, sem root/rede)
++ `make network-fix` (atalho nesta máquina). Guardas: `ci-guards` 54 → **62**.
+
 **Passo 1-f — ✅ EXECUTADO E PROVADO EM VM (2026-10-17, sessão #33).** A ISO com
 `--network auto` foi **gerada e instalada numa VM qemu/KVM**, e o que este
 trabalho prometia foi **verificado no alvo, por SSH**:

@@ -433,12 +433,33 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
   para `.ai-cpu-os.bak` e desliga a rede do cloud-init
   (`/etc/cloud/cloud.cfg.d/99-ai-cpu-os-disable-network.cfg`). O padrão é
   DHCP — não é preciso passar nada.
-- **Se a sua ISO é anterior a essa mudança:** no sistema já instalado, crie
-  `/etc/netplan/99-rede.yaml` com `dhcp4: true` (ou o IP fixo) e rode
-  `sudo netplan apply`; para o cloud-init não sobrescrever, crie
-  `/etc/cloud/cloud.cfg.d/99-disable-network.cfg` com
-  `network: {config: disabled}`. Ou gere uma ISO nova (recomendado: o caminho
-  é testado por `make iso-yaml`/`make ci-guards-test`).
+- **Se a sua ISO é anterior a essa mudança (a máquina JÁ está instalada):**
+  **não precisa reinstalar.** O projeto está em `/opt/ai-cpu-os` na máquina, e
+  a mod `network` faz exatamente este reparo:
+
+```bash
+sudo bash /opt/ai-cpu-os/mods/network/apply.sh          # DHCP (padrão)
+ip -br addr                                             # confira: já tem IP?
+
+# IP fixo (ex.: o servidor de inferência)
+sudo bash /opt/ai-cpu-os/mods/network/apply.sh --mode static \
+  --interface enp5s0 --ip 192.168.1.50/24 --gateway 192.168.1.1
+```
+
+  Ela grava `/etc/netplan/99-ai-cpu-os.yaml` (0600), **move** o netplan do
+  instalador/cloud-init para `*.ai-cpu-os.bak` (duas definições do mesmo
+  adaptador fazem o netplan **recusar** a configuração) e escreve
+  `/etc/cloud/cloud.cfg.d/99-ai-cpu-os-disable-network.cfg`. Valida com
+  `netplan generate` **antes** de aplicar — se a config nova for inválida, não
+  aplica (a rede atual continua de pé). Para desfazer:
+  `sudo bash /opt/ai-cpu-os/mods/network/revert.sh` (restaura os backups).
+  Ver `docs/MODS.md` § 3 e `make network-test`.
+- **Não tem o projeto na máquina?** Copie `mods/network/` + `mods/apply.sh`
+  (ou clone o repositório) e rode o mesmo comando. Alternativa manual, sem
+  nada disso: crie `/etc/netplan/99-rede.yaml` com `dhcp4: true` e rode
+  `sudo netplan apply`.
+- **Prefere reinstalar?** Uma ISO nova já nasce com a rede configurada (o
+  caminho é testado por `make iso-yaml`/`make network-test`/`make ci-guards-test`).
 - **Diagnóstico no alvo:**
 
 ```bash

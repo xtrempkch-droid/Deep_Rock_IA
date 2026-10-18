@@ -278,6 +278,7 @@ jobs:
             mods/hugepages/mod.conf mods/hugepages/apply.sh mods/hugepages/revert.sh
             mods/governor/mod.conf mods/governor/apply.sh mods/governor/revert.sh
             mods/openblas-threads/mod.conf mods/openblas-threads/apply.sh mods/openblas-threads/revert.sh
+            mods/network/mod.conf mods/network/apply.sh mods/network/revert.sh
             roles/inference/install.sh roles/inference/sysctl.conf
             roles/inference/shell-ia.py roles/inference/ai-server.service
             roles/builder/install.sh roles/builder/docker-setup.sh
@@ -290,7 +291,7 @@ jobs:
             tests/test-verify-iso-repo-distro.sh
             tests/test-write-pendrive.sh
             tests/test-check-iso.sh
-            tests/test-webui.sh
+            tests/test-webui.sh tests/test-network-mod.sh
             tests/test-avx512-policy.sh
             tests/test-iso-lock.sh
             tests/test-iso-disk.sh
@@ -457,6 +458,25 @@ jobs:
           grep -q '/target/etc/netplan/99-ai-cpu-os.yaml' iso/preseed/late-command.sh
           grep -q '99-ai-cpu-os-disable-network.cfg' iso/preseed/late-command.sh
           grep -q 'NETWORK_MODE' iso/verify-iso.sh
+          # A REDE TAMBEM TEM DE SER REPARAVEL no sistema ja instalado: uma ISO
+          # nova nao conserta uma maquina que esta no chao. A mod `network` e o
+          # caminho (ela ja existe em /opt/ai-cpu-os no alvo). Se ela sumir ou
+          # perder as protecoes, quem ja instalou fica sem saida.
+          grep -q 'network-test' Makefile
+          grep -q 'validate:.*network-test' Makefile
+          grep -q 'make network-test' .github/workflows/validate.yml
+          grep -qE '^MOD_ID="network"' mods/network/mod.conf
+          grep -qE '^MOD_SETS="network"' mods/network/mod.conf
+          grep -q 'netplan' mods/network/apply.sh
+          grep -q '99-ai-cpu-os.yaml' mods/network/apply.sh
+          grep -q 'ai-cpu-os.bak' mods/network/apply.sh
+          grep -q '99-ai-cpu-os-disable-network.cfg' mods/network/apply.sh
+          grep -q -- '--root' mods/network/apply.sh
+          grep -q -- '--dry-run' mods/network/apply.sh
+          grep -q 'restaurado' mods/network/revert.sh
+          # Ancorado na DEFINIÇÃO do alvo: 'network-fix' também aparece no
+          # .PHONY e num comentário, então um grep solto não prova nada.
+          grep -qE '^network-fix:' Makefile
           # O firstboot tem de SINCRONIZAR o disco antes de sair, e o teste de
           # VM tem de dar tempo ao qemu antes de encerrar. Sem isso, um
           # desligamento logo depois deixa arquivos com 0 byte — `llama-server`,

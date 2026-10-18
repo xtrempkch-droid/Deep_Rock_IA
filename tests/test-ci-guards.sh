@@ -247,6 +247,24 @@ planta "a preseed perder o marcador de rede" iso/preseed/ai-cpu-os.cfg \
 planta "cloud-init deixar de ser desligado na rede" iso/preseed/late-command.sh \
   sed_ 's|99-ai-cpu-os-disable-network.cfg|cloud-init.yaml|' iso/preseed/late-command.sh
 
+# --- Mod `network`: o reparo da maquina JA instalada ------------------------
+planta "a mod network perder o netplan do ai-cpu-os" mods/network/apply.sh \
+  sed_ 's|99-ai-cpu-os.yaml|rede.yaml|g' mods/network/apply.sh
+planta "a mod network deixar de mover o netplan do cloud-init" mods/network/apply.sh \
+  sed_ 's|ai-cpu-os.bak|bak2|g' mods/network/apply.sh
+planta "a mod network deixar de desligar a rede do cloud-init" mods/network/apply.sh \
+  sed_ 's|99-ai-cpu-os-disable-network.cfg|cloud-init.yaml|g' mods/network/apply.sh
+planta "a mod network perder o --root (impede testar sem root)" mods/network/apply.sh \
+  sed_ 's|--root|--raiz|g' mods/network/apply.sh
+planta "o revert deixar de restaurar o netplan original" mods/network/revert.sh \
+  sed_ 's|restaurado|removido|' mods/network/revert.sh
+planta "a mod network entrar no conjunto system (mexeria na rede no build)" mods/network/mod.conf \
+  sed_ 's|^MOD_SETS="network"|MOD_SETS="system"|' mods/network/mod.conf
+planta "tirar network-test do validate" Makefile \
+  sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test pendrive-test iso-check-test ui-test iso-dry-run-both|' Makefile
+planta "tirar o alvo network-fix (o reparo na propria maquina)" Makefile \
+  sed_ 's|^network-fix:|network_velho:|' Makefile
+
 # --- Gravação do disco: sync no alvo + tempo antes de matar o qemu ----------
 planta "o firstboot deixar de sincronizar o disco (arquivos de 0 byte)" iso/preseed/firstboot.sh \
   sed_ 's|^sync$|true|' iso/preseed/firstboot.sh
