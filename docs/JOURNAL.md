@@ -2394,6 +2394,57 @@ garante os arquivos íntegros acima.
   (basta rodar na máquina de teste).
 - **Commits:** *(ver `git log`)*.
 
+### Sessão #38 — 2026-10-18 · ⚡ "sem internet não instala": 4 defeitos, um deles engana
+
+- **Objetivo:** "ambas as distribuições não instalaram automaticamente se não
+  tiver internet... com a internet o ubuntu fez o auto install certinho, o
+  debian a instalação funcionou bem. agora o debian está disponível para testes
+  de acesso via ssh".
+- **SSH primeiro (o pedido explícito):** a nova instalação apareceu no meu DHCP
+  em `192.168.0.117`, `ssh` **enabled+active** e login com senha OK;
+  `apt-get update` do alvo **sem** nenhuma fonte fantasma. Ou seja: as
+  correções das sessões #36/#37 seguraram em metal.
+- **Depois, o defeito de fundo — a ISO exigia internet.** Reproduzi numa VM
+  ligada a uma **bridge isolada** (DHCP de verdade, **sem NAT**), que é o
+  cenário do dono: rede local sem internet. Quatro defeitos, cada um numa
+  camada diferente:
+  1. **`[!] Please check the specified mirror`** — o `apt-setup` **sempre**
+     configurava o espelho de rede. Sem internet ele para e pede outro. →
+     `d-i apt-setup/use_mirror boolean false`.
+  2. **`[!!] Select and install software — Installation step failed`** — li o
+     `postinst` do `pkgsel` (udeb 0.85): `tasksel`/`apt-get install` falhando
+     caem em `aptfailed`, que faz `exit $ret` → o d-i mostra a tela e **espera
+     um Enter**. → sem repo local: `pkgsel/include` vazio,
+     `pkgsel/run_tasksel false`, `pkgsel/upgrade none`.
+  3. **`[!!] Configure the network`** — o `netcfg` reprova DHCP **sem
+     gateway** (rede isolada). Não é bug do projeto: com gateway passa.
+  4. **O bug mais enganoso:** com `--iso-repo auto` o repositório **estava** na
+     mídia, era copiado para `/opt/apt-repo`… e **nunca virava fonte**. O
+     `Release` gerado pelo build tinha **`Suite: ./` / `Codename: ./`**, e a
+     validação que eu mesmo escrevi na #36 comparava esse codename com o do
+     alvo — `./` nunca casa, então o `late-command` **descartava o repo** com
+     um `AVISO` no log. Resultado: alvo sem fonte local → `apt` falha (rc=100)
+     e `git clone` falha (rc=128). → agora o Release traz o codename **real**
+     (`trixie`, via `iso_base_codename`, com reserva por tabela Debian).
+- **Provado SEM INTERNET NENHUMA** (ISO gerada num container `debian:13-slim`,
+  VM em bridge isolada, `--iso-repo auto --iso-source auto`):
+  `reiniciando` → `aplicação concluída com sucesso` → `.firstboot-status:
+  status=ok` e `AI-CPU-OS-BUILD.txt` com **`Rede: não usada (fonte local)`**.
+  `verify-iso` **PASS=56 FAIL=0**; `sshd` e `sudo` presentes no alvo.
+- **Achado de processo (importante):** `--iso-repo auto` **exige a mesma
+  base/release** da ISO. No meu host (Ubuntu 26.04) gerando ISO Debian, o build
+  **avisou e seguiu sem repo** — proteção correta, mas significa que quem
+  precisa de uma ISO auto-suficiente tem de gerá-la num container da mesma
+  distro/release. Documentado no `ISO.md` § 4.5.2 e no `TROUBLESHOOTING`.
+- **Uma descoberta de método:** inspecionar o disco instalado **offline**
+  (`qemu-nbd` + `mount -o ro`) foi o que separou "não instalou" de "instalou e
+  o 1º boot falhou": o `sshd`/`sudo` estavam lá, o que faltava era a **fonte**
+  do apt.
+- **Guardas:** `ci-guards` 86 → **89**, com violação plantada para
+  `use_mirror`, `run_tasksel` e `Codename: ./`.
+- **O que NÃO foi provado:** Ubuntu **sem internet** (só Debian), rede **sem
+  DHCP**, e o mesmo teste em hardware físico.
+
 ### Sessão #37 — 2026-10-18 · 🖥️ A PRIMEIRA validação em hardware FÍSICO (e o primeiro `llama-bench`)
 
 - **Objetivo:** "teste debian, boot ok e auto install ok. agora só falta testar

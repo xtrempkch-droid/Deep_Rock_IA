@@ -644,6 +644,38 @@ d-i preseed/late_command  →  sh /preseed/late-command.sh  (copia o projeto)
 
 ---
 
+### 4.5.2 ⚡ O que muda quando a ISO NÃO tem repositório local (e não há rede)
+
+Medido na sessão #38, com uma VM numa rede local **sem internet** (DHCP
+funciona, o espelho não responde). Sem `--iso-repo`, a instalação Debian
+**parava** em telas interativas. Foram três telas, cada uma com uma causa:
+
+| Tela | Causa | Correção |
+|---|---|---|
+| `[!!] Configure the network` | `netcfg` reprova o DHCP quando não há **gateway** (rede isolada) | não é bug do projeto: com DHCP de verdade (gateway presente) passa |
+| `[!] Please check the specified mirror` | o `apt-setup` **sempre** tentava o espelho de rede; sem internet ele para e pede outro | `d-i apt-setup/use_mirror boolean false` — a mídia é a fonte |
+| `[!!] Select and install software — Installation step failed` | o `pkgsel` chama `aptfailed` (`exit $ret`) quando `tasksel`/`apt-get install` falham | sem repo local: `pkgsel/include` vazio + `pkgsel/run_tasksel false` + `pkgsel/upgrade none` |
+
+Com `--iso-repo auto`, além disso: o `Release` do repositório passou a trazer o
+**`Codename` real** (antes era `./`, e o `late-command` recusava o repositório
+por "outra release" — o alvo ficava **sem a fonte local** e o 1º boot dependia
+de rede).
+
+**Resultado medido, sem internet nenhuma** (`--iso-repo auto --iso-source auto`):
+
+```
+[ai-cpu-os/iso-late] reiniciando
+[ai-cpu-os/firstboot] aplicação concluída com sucesso (papel auto, família auto)
+
+. firstboot-status: status=ok
+AI-CPU-OS-BUILD.txt:
+  Família:   intel-haswell (Intel Xeon E5 v3 (Haswell-EP))
+  llama.cpp: tarball local llama-src.tar.gz
+  Rede:      não usada (fonte local)
+```
+
+---
+
 ### 4.6 Validar a ISO (as duas ferramentas do projeto)
 
 O projeto traz duas ferramentas — e elas cobrem coisas **diferentes**:

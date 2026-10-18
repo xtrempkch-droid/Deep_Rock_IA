@@ -341,6 +341,47 @@ real do repositório.
 > air-gapped **completo** (esta ISO levou modelo + fonte, mas **não** os
 > pacotes apt: instalou `openssh-server`/`git`/toolchain pela rede).
 
+### 3.7 ⚡ A ISO sem internet: 3 telas do d-i + o `Codename` do repo (2026-10-18, #38)
+
+Relato do dono: **"ambas as distribuições não instalaram automaticamente se não
+tiver internet"**. Investigado por execução, numa VM numa rede local **com DHCP
+e sem internet** (`bridge` isolada, sem NAT).
+
+| # | Sintoma medido | Causa real | Correção |
+|---|---|---|---|
+| 1 | `[!] Please check the specified mirror` | `apt-setup` **sempre** tentava o espelho de rede | `d-i apt-setup/use_mirror boolean false` (a mídia é a fonte) |
+| 2 | `[!!] Select and install software — Installation step failed` | `pkgsel` → `aptfailed` → `exit $ret` quando `tasksel`/`apt-get install` falham | sem repo: `pkgsel/include` vazio + `run_tasksel false` + `upgrade none` |
+| 3 | `[!!] Configure the network` | `netcfg` reprova DHCP **sem gateway** (rede isolada) | cenário de teste; com DHCP real passa |
+| 4 | repo local na mídia **não** era usado | `Release` do repo trazia `Codename: ./`; o `late-command` recusava por "outra release" | `Suite`/`Codename` **reais** (`iso_base_codename`) |
+
+O nº 4 é o mais traiçoeiro: o repositório **estava** na mídia e era copiado
+para `/opt/apt-repo`, mas a fonte nunca era declarada — o 1º boot caía no
+`git clone` (rc=128) e o `apt` falhava (rc=100).
+
+**✅ PROVADO SEM INTERNET NENHUMA** (`--iso-repo auto --iso-source auto`,
+gerada num container `debian:13-slim`, VM em bridge isolada):
+
+```
+[ai-cpu-os/iso-late] reiniciando
+[ai-cpu-os/firstboot] aplicação concluída com sucesso (papel auto, família auto)
+
+.firstboot-status: status=ok
+AI-CPU-OS-BUILD.txt:
+  Família:   intel-haswell (Intel Xeon E5 v3)
+  llama.cpp: tarball local llama-src.tar.gz
+  Rede:      não usada (fonte local)
+```
+
+`verify-iso.sh`: **PASS=56 FAIL=0**. `sshd` e `sudo` presentes no alvo.
+
+> ⚠️ **Achado de processo:** `--iso-repo auto` **exige a mesma base/release**
+> da ISO. Num host Ubuntu gerando ISO Debian ele avisa e segue sem repositório
+> (proteção correta). Para a ISO que se basta: gere num container da mesma
+> distro/release — foi o que fiz aqui (`debian:13-slim`).
+>
+> ⚠️ **Não provado:** Ubuntu sem internet (só Debian), rede sem DHCP, e o
+> mesmo teste em hardware físico.
+
 ## 4. Problemas conhecidos no momento
 
 1. **Risco em hardware físico não medido.** O caminho ISO foi provado em VM; o
@@ -728,6 +769,7 @@ Ao terminar qualquer tarefa:
 
 | Data       | Mudança                                                    |
 |------------|------------------------------------------------------------|
+| 2026-10-18 | ⚡ **A ISO não instalava sem internet (sessão #38).** Três telas do d-i paravam a instalação (espelho inacessível, `pkgsel` falhando, DHCP sem gateway) + o `Release` do repositório local tinha `Codename: ./`, então o `late-command` **recusava** o repo da mídia e o alvo dependia de rede. Correções: `use_mirror false`, `pkgsel` esvaziado sem repo, `Codename` real. **PROVADO SEM INTERNET**: instalação + 1º boot `status=ok` + `Rede: não usada (fonte local)`. `ci-guards` 86 → **89**. |
 | 2026-10-18 | 🔌 **A máquina instalada não aceitava SSH (sessão #36).** Diagnóstico por rede: não havia DHCP no cabo (host em IP fixo) → subi `dnsmasq`; o alvo apareceu como `192.168.0.113`/`ai-cpu-os` e a varredura mostrou **65535 portas TCP fechadas** — **sem `sshd`**. Causa raiz: o `ssh: install-server`/`pkgsel` **falham em silêncio sem rede**. Correção: `late-command.sh` verifica/instala o SSH e avisa no `/etc/motd` + `/root/LEIA-SSH.md`; `build.sh` ganhou `ensure_ssh`; o build avisa quando a ISO sai sem repositório local. `ci-guards` 76 → **78**. § 3.5 + TROUBLESHOOTING. |
 | 2026-10-17 | 🌐 **Rede do sistema instalado na ISO (sessão #33).** Uma instalação real subia **sem DHCP** — o Subiquity não grava rede persistente no alvo quando o autoinstall não tem `network:`. Novo `--network auto\|dhcp\|static\|none` (+ `--network-ip`, `--network-gateway`, `--network-dns`, `--network-interface`); o **mesmo** netplan vai para o `autoinstall.yaml` e para `/preseed/ai-cpu-os-netplan.yaml`, e o `late-command.sh` o instala em `/etc/netplan/99-ai-cpu-os.yaml`, move o netplan do instalador/cloud-init e desliga a rede do cloud-init. No Debian as flags alimentam o `netcfg` da preseed (e o hostname da preseed passou a usar `@@HOSTNAME@@`). O verificador confere os três elos; a UI ganhou o seletor de rede. ✅ **PROVADO EM VM** (alvo pegou IP por DHCP sozinho e aceitou SSH). + **3 bugs reais** achados ao executar: arquivos de **0 byte** no 1º boot (unit vazio = `masked`), `--no-mmap` removido do llama.cpp e o `shell-ia.py` devolvendo a linha do protocolo. `ci-guards` 43 → **46**, `webui` 38 → **46**. |
 | 2026-10-16 | 🧷 **`validate` #57 vermelho: o teste da trava dependia do `exec` do bash (sessão #32).** O `tests/test-iso-lock.sh` matava o detentor da trava contando que o `bash -c '…; sleep 30'` **trocasse de identidade** pelo último comando; essa otimização **não é garantida** (um `BASH_ENV` com `trap` já a desliga) e então o `sleep`, como filho, herda o fd 9: a trava sobrevivia ao `kill` e a asserção final falhava com o gerador **correto** (sintoma no CI: `exit code 2`, passo de 6 s = 5 s de laço de espera estourando). Detentor reescrito (`sleep 300 9>&- &` + `wait` + `flock -w 20`), pré-voo que exige a trava livre e diz **quem** a segura, e todo `FALHOU` vira **anotação** `::error::`. Asserções 10 → **13**; `make validate` verde e `validate` **#58** (`0041c0e`) **verde** no CI (passo 17 em 0 s). Ver `JOURNAL.md` sessão #32. | O `main` local estava 7 commits atrás e com trabalho não commitado (preservado em `backup/local-sessao26-pre-sync`). A correção do #28 (`matrix.exec != 'false'` no `if:`) **nunca pulava o passo**: no GitHub, booleano × string vira número (`false`→0, `'false'`→NaN) e o `!=` dá sempre true — daí o `exit 132` (SIGILL) em icelake-sp/sapphirerapids-sp/emeraldrapids-sp/graniterapids-sp **no próprio commit da correção**. Agora o valor vai por `env:` e a decisão é no `bash`; guarda no `project-rules` + violação plantada. Recuperados do trabalho local de 14/10: `flock` de instância única + `download_to()` (confere o `.part`, `--speed-time`) no `build-iso.sh` (`make iso-lock-test`, 10 asserções) e `make avx512-test` (37 → **61** asserções, 14 famílias). `ci-guards` 35 → **40**. Ver `JOURNAL.md` sessão #29. |

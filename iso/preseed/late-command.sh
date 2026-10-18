@@ -230,10 +230,20 @@ if [ -d "${APT_REPO_SRC}" ]; then
                 ## `sed` em vez de `.` (source): o shellcheck não segue o arquivo
                 ## (SC1091) e não precisamos de mais nada além do codename.
                 _cn="$(sed -n 's/^VERSION_CODENAME=\(.*\)$/\1/p' /target/etc/os-release 2>/dev/null | tr -d '"' | head -1)"
-                if [ -n "${_cn}" ] && ! grep -qi "${_cn}" "/target${APT_REPO_DST}/Release"; then
-                    _repo_ok=0
-                    log "AVISO: repositório local é de OUTRA release (alvo=${_cn}); NÃO será usado"
-                fi
+                # `Release` gerado por versões ANTIGAS do build-iso.sh trazia
+                ## `Codename: ./` (sem release nenhuma). Não dá para afirmar que
+                # é de outra release — e o teste REAL do apt logo abaixo decide.
+                # Só reprovamos quando o Release DIZ uma release diferente.
+                _rel_cn="$(sed -n 's/^Codename:[[:space:]]*//p' "/target${APT_REPO_DST}/Release" 2>/dev/null | head -1)"
+                case "${_rel_cn}" in
+                    ""|"./"|"*") : ;;   # desconhecida -> o apt decide
+                    *)
+                        if [ -n "${_cn}" ] && [ "${_rel_cn}" != "${_cn}" ]; then
+                            _repo_ok=0
+                            log "AVISO: repositório local é de OUTRA release (${_rel_cn} != ${_cn}); NÃO será usado"
+                        fi
+                        ;;
+                esac
             fi
             if [ "${_repo_ok}" -eq 1 ]; then
                 mkdir -p /target/etc/apt/sources.list.d
@@ -440,6 +450,27 @@ fi
 ## montada e, se houver rede, o espelho oficial responde). Se mesmo assim
 ## falhar, o alvo recebe um aviso no `/etc/motd` e no `/root/LEIA-SSH.md` —
 ## quem chegar no console descobre o que fazer em 5 segundos.
+## ANTES do SSH: o `sudo`. Sem repositório local o `pkgsel` é esvaziado (para
+## não travar a instalação sem rede), então `sudo` — que o Debian NÃO traz por
+## padrão — pode não estar no alvo. Sem ele e com o root bloqueado, o usuário
+## do grupo `sudo` não administra NADA. Mesmo tratamento do SSH: tentar de
+## verdade e, se não der, avisar de forma impossível de não ver.
+if ! in_target sh -c 'command -v sudo >/dev/null 2>&1 || [ -x /target/usr/bin/sudo ]' 2>/dev/null \
+   && [ ! -x /target/usr/bin/sudo ]; then
+    log "AVISO: o alvo NÃO tem 'sudo'; tentando instalar agora"
+    if in_target apt-get install -y sudo >/dev/null 2>&1; then
+        log "sudo instalado no alvo"
+    else
+        log "ERRO: não foi possível instalar o sudo (sem rede e sem repositório local?)"
+        {
+            echo ''
+            echo ' ATENÇÃO: esta máquina foi instalada SEM o pacote sudo.'
+            echo ' Sem ele (e com o root bloqueado) não há acesso administrativo.'
+            echo ' No console, como root:  apt-get install -y sudo'
+        } >> /target/etc/motd 2>/dev/null || true
+    fi
+fi
+
 _ssh_ok=0
 ## `[ -x /target/usr/sbin/sshd ]` é o teste que NÃO depende de chroot: tanto o
 ## `in-target` do d-i quanto o `curtin in-target` podem não existir no PATH em

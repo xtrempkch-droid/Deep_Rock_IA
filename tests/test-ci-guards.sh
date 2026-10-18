@@ -348,6 +348,14 @@ planta "o verificador voltar a usar /tmp às cegas" iso/verify-iso.sh \
 planta "o llama-build voltar a dizer 'forçada' para família detectada" llama-build.sh \
   sed_ 's|detectada na CPU e repassada pela cadeia|forçada por --family|' llama-build.sh
 
+# --- A instalação não pode exigir internet (telas do d-i) ------------------
+planta "a preseed voltar a tentar o espelho de rede" iso/build-iso.sh \
+  sed_ 's|d-i apt-setup/use_mirror boolean false|d-i apt-setup/use_mirror boolean true|' iso/build-iso.sh
+planta "o pkgsel voltar a travar a instalação sem repo" iso/build-iso.sh \
+  sed_ 's|d-i pkgsel/run_tasksel boolean false|d-i pkgsel/run_tasksel boolean true|' iso/build-iso.sh
+planta "o Release do repo local voltar a dizer Codename: ./" iso/build-iso.sh \
+  sed_ "s|printf 'Codename: %s\\\\n' \"\${REPO_SUITE:-stable}\"|printf 'Codename: ./\\\\n'|" iso/build-iso.sh
+
 echo
 if [[ $FAIL -eq 0 ]]; then
   echo "ci-guards: PASS=${PASS} FAIL=0"

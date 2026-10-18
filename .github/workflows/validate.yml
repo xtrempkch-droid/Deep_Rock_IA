@@ -536,7 +536,7 @@ jobs:
           grep -q 'basename "\$INPUT_ISO"' iso/build-iso.sh
           grep -q 's#^ubuntu-' iso/build-iso.sh
           grep -q '^iso_base_codename()' iso/build-iso.sh
-          grep -q 'iso_base_codename)' iso/build-iso.sh
+          grep -qF 'want="$(iso_base_codename)"' iso/build-iso.sh
           grep -q '\.disk/info' iso/build-iso.sh
           grep -qE 'ISO_REPO_ALLOW_MISMATCH -eq 0 && "\$DISTRO" == "ubuntu"' iso/build-iso.sh
           grep -q 'iso-release-test' Makefile
@@ -565,6 +565,25 @@ jobs:
           # --- apenas DETECTADA e repassada pela cadeia (log enganoso).    ---
           grep -qF 'detectada na CPU e repassada pela cadeia' llama-build.sh
           grep -qF 'a CPU sugere' llama-build.sh
+          # --- A instalacao NAO pode PARAR quando nao ha internet ------------
+          # Tres telas interativas do d-i, medidas na sessao #38: espelho
+          # inacessivel, "Select and install software" falhando e DHCP sem
+          # gateway. A preseed tem de dispensar a rede.
+          grep -q '@@APT_OFFLINE_BLOCK@@' iso/preseed/ai-cpu-os.cfg
+          grep -q '@@PKGSEL_BLOCK@@' iso/preseed/ai-cpu-os.cfg
+          grep -q '^expand_apt_offline_block()' iso/build-iso.sh
+          grep -q 'apt-setup/use_mirror boolean false' iso/build-iso.sh
+          grep -q 'pkgsel/run_tasksel boolean false' iso/build-iso.sh
+          grep -q 'pkgsel/upgrade select none' iso/build-iso.sh
+          grep -q 'apt-setup/continue boolean true' iso/preseed/ai-cpu-os.cfg
+          # O repositório da mídia precisa de um CODENAME de verdade no Release:
+          # com './' o late-command recusava por "outra release" e o alvo
+          # ficava sem a fonte local (o 1º boot dependia de rede).
+          grep -q "printf 'Codename: %s" iso/build-iso.sh
+          if grep -q "printf 'Codename: ./" iso/build-iso.sh; then
+            echo "::error file=iso/build-iso.sh::o Release do repo local nao pode ter 'Codename: ./'"
+            exit 1
+          fi
           # O firstboot tem de SINCRONIZAR o disco antes de sair, e o teste de
           # VM tem de dar tempo ao qemu antes de encerrar. Sem isso, um
           # desligamento logo depois deixa arquivos com 0 byte — `llama-server`,

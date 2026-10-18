@@ -400,6 +400,35 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
 - **Lição:** o verificador tinha um viés de distro. Ao adicionar uma checagem,
   pergunte **em qual base** ela faz sentido — e cubra a outra.
 
+### A instalação PARA quando não há internet (telas do instalador)
+
+- **Sintoma:** numa rede local **sem internet** (o cabo funciona, o espelho não
+  responde), a instalação automática para em uma destas telas:
+  - `[!] Please check the specified mirror or try a different one`
+  - `[!!] Select and install software — Installation step failed`
+  - `[!!] Configure the network` (só em rede **sem gateway**)
+- **Causa (medida, sessão #38):** três mecanismos independentes do d-i tentam
+  a **rede** mesmo quando a resposta está toda na mídia:
+  1. `apt-setup` configura o espelho → sem internet, ele para e pede outro;
+  2. `pkgsel` chama `aptfailed` (que faz `exit $ret`) quando o `tasksel` ou o
+     `apt-get install` falham → o d-i mostra "Installation step failed" e
+     **espera um Enter**;
+  3. `netcfg` reprova o DHCP quando a rede não dá **gateway** (rede isolada).
+- **Correção (já no template, a partir da sessão #38):** sem repositório local
+  a preseed passa a dizer
+  `apt-setup/use_mirror false`, `pkgsel/include` **vazio**,
+  `pkgsel/run_tasksel false` e `pkgsel/upgrade none`. Com repositório local,
+  o espelho também é dispensado, mas o `pkgsel` **mantém** os pacotes (eles
+  vêm da mídia). A instalação completa; o que faltar é tratado pelo
+  `late-command`/1º boot, que **avisa** (`/etc/motd`, `/root/LEIA-SSH.md`) em
+  vez de falhar em silêncio.
+- **A ISO que se basta** (recomendada): `--iso-repo auto --iso-source auto`
+  numa máquina da **mesma release** da ISO base. Provado sem internet:
+  instalação + 1º boot `status=ok` e `Rede: não usada (fonte local)`.
+- ⚠️ **`--iso-repo auto` exige a mesma release** (Debian gera .deb Debian;
+  Ubuntu gera .deb Ubuntu). Em host de outra base/ release o build **avisa** e
+  segue sem repositório — é proteção, não defeito.
+
 ### A ISO Debian NÃO instala sozinha: para no `boot:` ou pede o idioma para sempre
 
 - **Sintoma:** a ISO Debian boota mas a instalação automática **nunca

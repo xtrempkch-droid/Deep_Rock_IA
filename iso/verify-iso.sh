@@ -1080,12 +1080,29 @@ else
   # `sudo` não vem na instalação padrão do Debian: sem ele, o usuário da ISO
   # (que é do grupo `sudo`) não administra nada, e com o root bloqueado o
   # sistema fica SEM acesso administrativo.
+  #
+  # ⚠️ SEM repositório local, o `pkgsel/include` fica VAZIO de propósito (ver
+  # `expand_apt_offline_block`): sem internet, pedir pacotes ao pkgsel faz a
+  # instalação PARAR em "[!!] Select and install software". Nesse caso o
+  # pacote tem de vir do `late-command`/1º boot — então o que se cobra aqui
+  # não é a linha do preseed, e sim que o late-command tenha o remédio.
   if [[ -z "$PRE_LOCAL" ]]; then
     skip "sem preseed para conferir o pacote sudo"
-  elif sed -nE 's|^d-i[[:space:]]+pkgsel/include[[:space:]]+string[[:space:]]+(.*)$|\1|p' "$PRE_LOCAL" | grep -qw 'sudo'; then
-    pass "preseed instala 'sudo' (o usuário da ISO consegue administrar)"
   else
-    fail "preseed NÃO instala 'sudo' (Debian não o traz; o usuário fica sem admin)"
+    pre_pkgs="$(sed -nE 's|^d-i[[:space:]]+pkgsel/include[[:space:]]+string[[:space:]]*(.*)$|\1|p' "$PRE_LOCAL" | head -1)"
+    pkgsel_off="$(sed -nE 's|^d-i[[:space:]]+pkgsel/run_tasksel[[:space:]]+boolean[[:space:]]+(.*)$|\1|p' "$PRE_LOCAL" | head -1)"
+    if [[ -z "${pre_pkgs// /}" && "$pkgsel_off" == "false" ]]; then
+      pass "sem repositório local: pkgsel esvaziado de propósito (não trava a instalação sem rede)"
+      if grep -qF 'sudo' "$LATE_LOCAL" 2>/dev/null; then
+        pass "late-command cobre o 'sudo' quando o pkgsel é esvaziado"
+      else
+        fail "pkgsel esvaziado e o late-command não instala 'sudo' (usuário sem admin)"
+      fi
+    elif grep -qw 'sudo' <<< "$pre_pkgs"; then
+      pass "preseed instala 'sudo' (o usuário da ISO consegue administrar)"
+    else
+      fail "preseed NÃO instala 'sudo' (Debian não o traz; o usuário fica sem admin)"
+    fi
   fi
 
   # Sem o preseed dentro do initrd, o `S30initrd-preseed` não acha nada: ele lê

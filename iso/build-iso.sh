@@ -1230,6 +1230,15 @@ iso_base_codename() {
   fi
   if [[ -n "$cn" ]]; then
     printf '%s' "$cn"
+  elif [[ "$DISTRO" == "debian" ]]; then
+    # Debian: 13 -> trixie, 12 -> bookworm, 11 -> bullseye. Reserva, caso o
+    # `/.disk/info` não exista (ISO remasterizada por terceiros).
+    case "$(printf '%s' "$(basename "${ISO_PATH:-}")" | sed -nE 's/^debian-([0-9]+)\..*/\1/p')" in
+      11) printf 'bullseye' ;;
+      12) printf 'bookworm' ;;
+      13) printf 'trixie' ;;
+      *)  printf 'stable' ;;
+    esac
   else
     ubuntu_codename_for_version "$(iso_release_version)"
   fi
@@ -1296,11 +1305,23 @@ build_repo_index() {
   # mídia nunca tinha sido exercitado; é o "aceite do instalador para o repo
   # local" que o JOURNAL § 5.2 marcava como suposição). Os checksums referem-se
   # ao índice na raiz (layout flat); `trusted=yes` na fonte dispensa assinatura.
+  # O codename da BASE: é ele que o alvo compara e que o apt espera ver.
+  if [[ -z "${REPO_SUITE:-}" ]]; then
+    REPO_SUITE="$(iso_base_codename)"
+    [[ -n "$REPO_SUITE" ]] || REPO_SUITE="stable"
+  fi
   {
     printf 'Origin: ai-cpu-os\n'
     printf 'Label: ai-cpu-os\n'
-    printf 'Suite: ./\n'
-    printf 'Codename: ./\n'
+    # `Suite`/`Codename` REAIS (não `./`). Dois motivos, ambos medidos:
+    #  * o `late-command` recusa um repositório de outra release comparando o
+    #    `Codename` com o do alvo — com `./` a comparação falhava SEMPRE e o
+    #    repositório da mídia era silenciosamente descartado (a ISO "air-gapped"
+    #    então dependia de rede no 1º boot e falhava com rc=100);
+    #  * ferramentas que auditam o repositório (`apt-get`, `reprepro`) esperam
+    #    um codename de verdade nesse campo.
+    printf 'Suite: %s\n' "${REPO_SUITE:-stable}"
+    printf 'Codename: %s\n' "${REPO_SUITE:-stable}"
     printf 'Date: %s\n' "$(date -Ru)"
     printf 'Architectures: amd64 all\n'
     printf 'Components: ./\n'
@@ -1689,6 +1710,69 @@ expand_apt_local_block() {
   ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
 }
 
+# Expande os marcadores do modo OFFLINE da preseed Debian.
+#
+# POR QUE (medido na sessão #38, com a ISO SEM repositório local e SEM internet):
+# a instalação automática **parava**. O `apt-setup` não conseguia configurar o
+# espelho, o udeb devolvia `apt-setup/continue` — pergunta de prioridade
+# CRÍTICA — e o d-i ficava esperando uma resposta que ninguém ia dar, com o
+# disco já particionado. Junto vinha o `pkgsel/upgrade full-upgrade`, que tenta
+# atualizar o sistema inteiro contra um espelho inacessível.
+#
+# Com repositório local na mídia nada disso acontece (o `apt` funciona). Sem
+# ele — e sem rede — a instalação tem de **completar mesmo assim** e deixar o
+# `late-command` registrar o que faltou (é ele que instala/verifica o SSH e
+# escreve /root/LEIA-SSH.md). Instalação que para no meio, sem mensagem, é o
+# pior resultado possível: a máquina fica inacessível e sem explicação.
+expand_apt_offline_block() {
+  local f="$1" have_repo="no" pkgs="$EXTRA_PACKAGES"
+  [[ -n "$APT_REPO_PATH" ]] && have_repo="yes"
+
+  awk -v have_repo="$have_repo" -v pkgs="$pkgs" '
+    /^## @@APT_OFFLINE_BLOCK@@$/ {
+      # O espelho de REDE nunca é obrigatório: a ISO air-gapped tem o que o
+      # alvo precisa na própria mídia, e um espelho inacessível (rede sem
+      # internet) faz o `apt-setup` PARAR em "[!] Please check the specified
+      # mirror" — medido na sessão #38, inclusive COM repositório local na
+      # mídia (o repo local não substitui o espelho: é fonte EXTRA).
+      # Quem quiser o espelho oficial liga depois (o target nasce com ele no
+      # sources.list via apt-setup normal). Aqui: instalar sem espelho.
+      print "d-i apt-setup/use_mirror boolean false"
+      if (have_repo == "no") {
+        print "d-i apt-setup/services-select multiselect"
+        print "# (sem repositório local: os pacotes ficam para o 1º boot)"
+      } else {
+        print "d-i apt-setup/services-select multiselect"
+        print "# (com repositório local: os pacotes vêm da mídia)"
+      }
+      next
+    }
+    /^## @@PKGSEL_BLOCK@@$/ {
+      if (have_repo == "no") {
+        # O pkgsel chama o `aptfailed` (que faz `exit $ret`) quando o tasksel
+        # ou o `apt-get install` falham — e aí o d-i mostra
+        # "[!!] Select and install software ... Installation step failed" e
+        # PARA esperando um Enter que ninguém vai dar. Medido na sessão #38,
+        # com rede local (DHCP ok) e sem internet. Por isso, sem repositório
+        # local, o pkgsel é esvaziado: a instalação COMPLETA e os pacotes
+        # ficam para o late-command / 1º boot, que avisam se não conseguirem.
+        print "# SEM repositório local: pkgsel mínimo (não há de onde baixar)"
+        print "tasksel tasksel/first multiselect"
+        print "d-i pkgsel/include string"
+        print "d-i pkgsel/run_tasksel boolean false"
+        print "d-i pkgsel/upgrade select none"
+      } else {
+        print "tasksel tasksel/first multiselect standard, ssh-server"
+        print "d-i pkgsel/include string " pkgs
+        print "d-i pkgsel/run_tasksel boolean true"
+        print "d-i pkgsel/upgrade select full-upgrade"
+      }
+      next
+    }
+    { print }
+  ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+}
+
 # Expande o marcador @@ROOT_PRESEED@@ na preseed Debian: com hash de root, o
 # login de root é habilitado (root-login true + senha crypt); sem hash, o root
 # fica BLOQUEADO (comportamento padrão). No caminho Ubuntu o root é habilitado
@@ -1992,6 +2076,7 @@ inject_templates() {
   mkdir -p "$dest"
   subst_template "${ISO_DIR}/preseed/ai-cpu-os.cfg" "${dest}/ai-cpu-os.cfg"
   expand_apt_local_block "${dest}/ai-cpu-os.cfg"
+  expand_apt_offline_block "${dest}/ai-cpu-os.cfg"
   expand_root_preseed_block "${dest}/ai-cpu-os.cfg"
   expand_network_preseed_block "${dest}/ai-cpu-os.cfg"
   chmod 0644 "${dest}/ai-cpu-os.cfg"
@@ -2697,6 +2782,7 @@ check_templates() {
       subst_template "${ISO_DIR}/preseed/firstboot.sh"          "${dir}/firstboot.sh"
       subst_template "${ISO_DIR}/preseed/ai-cpu-os.cfg"         "${dir}/ai-cpu-os.cfg"
       expand_apt_local_block "${dir}/ai-cpu-os.cfg"
+      expand_apt_offline_block "${dir}/ai-cpu-os.cfg"
       expand_root_preseed_block "${dir}/ai-cpu-os.cfg"
       expand_network_preseed_block "${dir}/ai-cpu-os.cfg"
       if [[ "$NETWORK_MODE" != "none" ]]; then
