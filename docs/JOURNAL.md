@@ -2437,9 +2437,13 @@ garante os arquivos íntegros acima.
   internet. Um **flap de link** (`ip link set … down/up`) faz o cliente
   renovar o lease e receber as opções novas — foi assim que o alvo passou a
   ter gateway/DNS sem tocar nele.
-- **Estado no fim da sessão:** a máquina segue **sem SSH** (só o console
-  resolve); o monitor de porta 22 ficou rodando. A correção é para as
-  **próximas** instalações.
+- **Prova em VM (Debian 13.7, depois da correção):** ISO gerada
+  (`verify-iso` **PASS=52**), `test-vm.sh` **OK** nos dois marcadores e, ao
+  subir o disco instalado com a porta encaminhada, **a 22 estava aberta**:
+  login por SSH feito e `systemctl is-enabled ssh` = **enabled**.
+- **Estado no fim da sessão:** a máquina **Ubuntu** do dono segue **sem SSH**
+  (só o console resolve); o monitor de porta 22 ficou rodando. A correção é
+  para as **próximas** instalações — e está provada em VM.
 - **Lição registrada (TROUBLESHOOTING):** "responde a ping mas não aceita SSH"
   → **varra as portas** antes de culpar firewall: `RST` em tudo = sem
   listener; e cabo direto **não tem DHCP**.

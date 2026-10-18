@@ -241,10 +241,15 @@ o `late-command.sh` verifica/instala o `sshd` no alvo (e avisa em
 `ensure_ssh` em todo 1º boot. Guardas: `verify-iso.sh` (nos dois instaladores)
 e `ci-guards` 76 → **78**.
 
+> ✅ **PROVADO EM VM (Debian 13.7, 2026-10-18):** ISO com a garantia de SSH →
+> instalação automática → 1º boot → **porta 22 aberta**, login por SSH feito e
+> `systemctl is-enabled ssh` = **enabled** (`test-vm.sh` OK nos dois
+> marcadores, `verify-iso.sh` **PASS=52**).
+>
 > ⚠️ **Não provado:** que o `late-command` instale o SSH com sucesso num alvo
-> **sem rede** (é impossível por definição — nesse caso ele só avisa); o
-> caminho "com rede" foi provado em VM em testes anteriores. A máquina desta
-> sessão **continua sem SSH** (só o console resolve) e não foi reinstalada.
+> **sem rede** (é impossível por definição — nesse caso ele só avisa, no
+> `/etc/motd` e em `/root/LEIA-SSH.md`). A máquina **Ubuntu** desta sessão
+> **continua sem SSH** (só o console resolve) e não foi reinstalada.
 
 ## 4. Problemas conhecidos no momento
 
