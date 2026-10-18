@@ -468,6 +468,10 @@ foi medida a **primeira performance de inferência do projeto** (`pp64 17,05
 t/s` · `tg32 10,40 t/s`). Ver **§ 3.6** e o **Bloco Q** de
 `docs/VALIDATION.md`.
 
+**📘 Regra 9 cumprida:** o `docs/TUTORIAL.md` foi atualizado com os primeiros
+**números reais** de `llama-bench` (e com o aviso de que são de uma cobaia e de
+que não há "antes").
+
 **▶️ Próximo passo:** levar a ISO às **máquinas de referência** (Xeon E5-2680
 v4 e Ryzen 5 3500X) — o *fluxo* já foi validado em metal, o que falta é o
 **desempenho** delas. E medir o **ganho** do tuning (falta o "antes" na mesma

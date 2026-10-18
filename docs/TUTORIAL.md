@@ -30,6 +30,25 @@
 > segue `pendente`:** medições de `llama-bench` (seções 7.6/8), o caminho
 > **Debian** da ISO, o **boot UEFI** e tudo em **hardware físico**.
 >
+> 🎉 **Atualização de 2026-10-18 (sessão #37) — PRIMEIRA VALIDAÇÃO EM
+> HARDWARE FÍSICO.** O ciclo completo foi executado numa máquina **real**
+> (AMD A8-9600, Debian 13): ISO instalada sozinha, 1º boot aplicando o
+> ai-cpu-os, llama.cpp compilado **do tarball da mídia sem rede**, **SSH
+> funcionando (e sobrevivendo ao reboot)** e esta é a **primeira vez que este
+> tutorial pode mostrar números reais de `llama-bench`**:
+>
+> | Medida | Valor (A8-9600, 4 threads, 1.5B Q4_K_M) |
+> |---|---|
+> | Prefill (`pp64`) | **17,05 ± 0,36 t/s** |
+> | Geração (`tg32`) | **10,40 ± 0,03 t/s** |
+> | `smoke-test` no alvo | **PASS=12 FAIL=0 SKIP=1** |
+>
+> ⚠️ **Leia com cuidado:** esses números são de uma **máquina cobaia**, não do
+> Xeon E5-2680 v4 nem do Ryzen 5 3500X — e **não há medição "antes"**, então
+> eles **não** dizem qual é o ganho do tuning. O registro completo (com o que
+> **não** foi provado) está no **Bloco Q** de
+> [`docs/VALIDATION.md`](VALIDATION.md) e em [`docs/STATE.md`](STATE.md) § 3.6.
+>
 > 🆕 **Atualização de 2026-10-17 (sessão #28):** a **rede do sistema
 > instalado** passou a ser parte da preparação da ISO. Motivo: uma instalação
 > real subiu **sem DHCP** (a placa ficava DOWN até configurar à mão), porque o
@@ -896,7 +915,9 @@ continua sendo a seção 7.6 deste tutorial, no hardware de verdade.
 > validado, release) ou **versão**, este tutorial **DEVE** ser revisado e
 > atualizado para refletir o estado real — especialmente:
 >
-> - ✅ marcar o que passou a ser **testado em hardware** (hoje nada é);
+> - ✅ marcar o que passou a ser **testado em hardware** — desde 2026-10-18
+>   (sessão #37) o fluxo completo **é** validado em metal numa máquina cobaia
+>   (A8-9600); as **duas máquinas de referência** seguem pendentes;
 > - ✅ substituir números `pendente` por medições reais de `llama-bench`;
 > - ✅ corrigir comandos/saídas que mudaram;
 > - ✅ remover seções obsoletas (e explicar em `docs/ARCHITECTURE.md` se
