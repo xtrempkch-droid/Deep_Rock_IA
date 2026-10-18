@@ -524,11 +524,15 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
 - **Sintoma:** a instalação termina e o sistema instalado sobe, mas o console
   serial fica **em silêncio** e o `test-vm.sh` falha com *"timeout esperando o
   firstboot"*. O disco parece parado (`stat -c %b` no qcow2 não muda).
-- **Causa (medida):** **não está travado — está compilando o llama.cpp.** Com
-  **4 vCPU** o build completo leva **~40 min** (o log
-  `/var/log/ai-cpu-os-firstboot.log` mostra os `[ NN%] Building CXX…`); o
-  padrão do `test-vm.sh` é `--timeout-min 60`, apertado quando o host está
-  ocupado. O qcow2 não cresce porque o build reusa clusters já alocados.
+- **Causa 1 (a que custou duas sessões):** até a sessão #35 a espera por rede
+  do `firstboot.sh` fazia `getent hosts …` **sem teto**: com DNS que não
+  responde, cada sonda bloqueia dezenas de segundos e o laço de 24 tentativas
+  passava de **40 min** — imóvel, sem log e com `%CPU` do qemu em **0**.
+  Correção: `timeout 5` em cada sonda (teto total ~2 min).
+- **Causa 2:** se o log **mostra** `[ NN%] Building CXX…`, aí é só compilação
+  (com **8 vCPU** são ~4 min; com 2–4 vCPU e cache frio, muito mais). O
+  `test-vm.sh` tem `--timeout-min 60` por padrão. O qcow2 não cresce durante o
+  build (clusters já alocados), então `stat -c %b` engana.
 - **Como confirmar em 10 s** (sem esperar): boote o disco à mão com a porta
   encaminhada e olhe o processo:
   ```bash
@@ -540,8 +544,8 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
   ssh -p 2222 ai-cpu-os@127.0.0.1 'ps -eo pid,etimes,%cpu,args --sort=-%cpu | head -3'
   # cc1plus a 99% = build em andamento; 0% e sem filho = travado de verdade
   ```
-- **Solução:** `--timeout-min 120` (ou `--cpus 8`), e **`--keep`** — sem ele o
-  script **apaga o disco** ao abortar e você perde a evidência. Para encurtar o
+- **Solução:** `--cpus 8` e **`--keep`** — sem ele o script **apaga o disco**
+  ao abortar e você perde a evidência (aconteceu no t6). Para encurtar o
   1º boot, gere a ISO com `--iso-source` apontando para um `.tar.gz` do
   llama.cpp (não clona do GitHub) ou use `--role builder` (não compila nada).
 

@@ -173,18 +173,19 @@ erro, o sintoma é sempre "a máquina fica parada" ou "o 1º boot não aplica".
 | Item | Resultado |
 |------|-----------|
 | Build (`--distro debian`) | ✅ **exit 0** |
-| `verify-iso.sh` (conteúdo) | ✅ **PASS=50 FAIL=0** |
-| `test-vm.sh` (boot + instalação + 1º boot) | ✅ **exit 0** (VM qemu/KVM, 4 vCPU, 6 GB) |
+| `verify-iso.sh` (conteúdo) | ✅ **PASS=51 FAIL=0** |
+| `test-vm.sh` (boot + instalação + 1º boot) | ✅ **OK** — os dois marcadores no console serial (VM qemu/KVM, 8 vCPU, 6 GB) |
 | Instalação automática (sem uma única pergunta) | ✅ |
 | **Reinício automático** ao fim da instalação | ✅ `[ai-cpu-os/iso-late] reiniciando` |
-| 1º boot aplicou o ai-cpu-os | ✅ `aplicação concluída com sucesso` |
+| 1º boot aplicou o ai-cpu-os | ✅ `.firstboot-status: status=ok` + marcador no serial |
 | Família detectada no alvo | ✅ `intel-haswell` (a VM expõe a CPU do host) |
 | llama.cpp compilado **no alvo** | ✅ `/opt/llama.cpp/build/bin/` |
 | `apt` do alvo sem fonte `cdrom:` | ✅ `deb http://deb.debian.org/debian trixie main non-free-firmware` |
 | Acesso administrativo | ✅ `sudo` instalado (root segue bloqueado por padrão) |
 | Base usada | `debian-13.7.0-amd64-netinst.iso` |
+| Tempo (8 vCPU, cache frio) | instalação **~8 min** · 1º boot **~4,5 min** (llama.cpp em ~4 min) |
 
-**8 travas, todas invisíveis fora da execução** (detalhe em `JOURNAL.md` § 4,
+**10 travas, todas invisíveis fora da execução** (detalhe em `JOURNAL.md` § 4,
 sessão #35 e em `docs/TROUBLESHOOTING.md`):
 
 1. O `verify-iso.sh` reprovava a ISO Debian **correta** (exigia netplan).
@@ -202,6 +203,17 @@ sessão #35 e em `docs/TROUBLESHOOTING.md`):
    todo `apt-get update` falha e o papel `inference` aborta com **rc=100**.
 8. `sudo` não vem no Debian padrão → usuário sem admin e root bloqueado =
    **sistema sem acesso administrativo**.
+9. O marcador do 1º boot **nunca chegava ao console serial**: no sistema
+   instalado `/dev/console` é o **último** `console=` da cmdline, e o d-i grava
+   `console=ttyS0,115200 console=tty1` → o `journal+console` do unit ia para o
+   `tty1`. O `test-vm.sh` esperava para sempre com o trabalho **concluído**
+   (`/var/log/ai-cpu-os-firstboot.log` cheio). Agora o `firstboot.sh` escreve
+   **os marcadores** em `/dev/ttyS0` (espelhar o build inteiro **trava** o
+   console da VM — testado e descartado).
+10. A espera por rede do 1º boot **não tinha teto por sonda**: um `getent hosts`
+   com DNS que não responde bloqueia dezenas de segundos, e o laço de 24
+   tentativas passava de 40 min em silêncio (o `%CPU` do qemu em 0) — foi o que
+   estourou o `test-vm.sh` duas vezes. Agora cada sonda tem `timeout 5`.
 
 > ⚠️ **O que isto NÃO prova (Debian):** o modo **air-gapped** (modelo, fonte do
 > llama.cpp e repositório apt na mídia — provado só no Ubuntu), o **boot UEFI**,
@@ -291,10 +303,10 @@ Tempo de build do llama.cpp: *(pendente em hardware real)*
 **✅ Recém-fechado (sessão #35, 2026-10-18) — a ISO Debian funciona.** O pedido
 "a criação de ISO Debian está apresentando falhas, corrija" foi fechado **por
 execução**: a ISO instala sozinha, **reinicia sozinha** e o 1º boot aplica o
-ai-cpu-os numa VM Debian 13. Foram **8 travas mudas** (nenhuma dava mensagem de
+ai-cpu-os numa VM Debian 13. Foram **10 travas mudas** (nenhuma dava mensagem de
 erro) — resumo em § 3.4, detalhe em `docs/TROUBLESHOOTING.md` e `JOURNAL.md`
-sessão #35. `verify-iso.sh` na ISO real: **PASS=50 FAIL=0**; `ci-guards`
-63 → **75**; a favor de não repetir: a instalação Debian **não** se anuncia
+sessão #35. `verify-iso.sh` na ISO real: **PASS=51 FAIL=0**; `ci-guards`
+63 → **76**; a favor de não repetir: a instalação Debian **não** se anuncia
 quando falha, então **sempre** rode `bash iso/test-vm.sh` depois de mexer no
 `iso/preseed/`.
 

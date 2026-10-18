@@ -2394,7 +2394,7 @@ garante os arquivos íntegros acima.
   (basta rodar na máquina de teste).
 - **Commits:** *(ver `git log`)*.
 
-### Sessão #35 — 2026-10-18 · 🐧 A ISO Debian: 8 travas, todas mudas
+### Sessão #35 — 2026-10-18 · 🐧 A ISO Debian: 10 travas, todas mudas
 
 - **Objetivo:** "a criação de ISO Debian está apresentando falhas, corrija". O
   caminho Debian (preseed + isolinux) **nunca havia sido bootado** — só o
@@ -2482,16 +2482,45 @@ journal e no arquivo de log:
   único ponto do fluxo que depende só de nós; o patch do hook fica como cinto
   de segurança caso o reboot falhe.
 
+#### Parte 3 — o 1º boot aplicava, mas o teste não via
+
+- **Bug 9 — o marcador não chegava ao console serial.** Instalado de verdade com
+  todas as correções, o `test-vm.sh` **ainda** estourava o timeout — e o sistema
+  estava **pronto** (`/opt/llama.cpp/build/bin/` cheio, `.firstboot-status` com
+  `status=ok`, log completo). A saída do unit (`journal+console`) escreve em
+  `/dev/console`, e no sistema **instalado** esse device aponta para o **último**
+  `console=` da cmdline: o d-i grava `console=ttyS0,115200 console=tty1`, então
+  tudo ia para o `tty1` (invisível numa VM sem vídeo). Quem apontou a causa foi
+  o `cat /proc/cmdline` no alvo, não o log.
+  **Primeira tentativa, descartada por medição:** espelhar a saída inteira em
+  `/dev/ttyS0` (`exec > >(tee -a "$LOG" > /dev/ttyS0)`). Funcionou por ~8
+  linhas e **travou o console da VM de vez** — nem as mensagens do kernel saíam
+  mais, `%CPU` do qemu em 0, com o build parado no meio. Correção final: só os
+  **marcadores** vão ao `/dev/ttyS0` (`serial_marker()`), escritas raras e
+  curtas, como o `late-command.sh` já fazia.
+- **Bug 10 — a espera por rede do 1º boot não tinha teto por sonda.** Cada
+  `getent hosts` com DNS que não responde bloqueia por dezenas de segundos; o
+  laço de 24 tentativas passava de **40 min** em silêncio (idle, sem log) — foi
+  isso, e não a compilação, que estourou o `test-vm.sh` no t6 e no t8. Agora
+  cada sonda tem `timeout 5` (teto total ~2 min, como a mensagem promete).
+- **A lição de tempo (medida, não estimada):** com **8 vCPU** o 1º boot inteiro
+  leva **~4,5 min** (instalação ~8 min, llama.cpp ~4 min com `-j8`); com **4
+  vCPU** e DNS lento a coisa muda de ordem. E o qcow2 **não** cresce durante o
+  build (clusters já alocados): medir `stat -c %b` dá a impressão falsa de que a
+  VM travou — o jeito de saber em 10 s é entrar por SSH e olhar `ps` (cc1plus a
+  99% = compilando).
+
 #### Testes e guardas
 
-- `verify-iso.sh` ganhou 9 checagens Debian (`prompt 0`, `language=`/`keymap=`
+- `verify-iso.sh` ganhou 11 checagens Debian (as 9 primeiras + o marcador no
+  `/dev/ttyS0` + a proibição de espelhar o build inteiro) (`prompt 0`, `language=`/`keymap=`
   na cmdline, `localechooser/languagelist`, `grub-installer/bootdev`,
   `/preseed.cfg` **dentro** do initrd — com `grep -c`, nunca `grep -q |
   pipefail`, que morre por SIGPIPE —, limpeza do `cdrom:`, troca do
-  `20final-message` e `sudo` no `pkgsel/include`). Na ISO final: **PASS=49
-  FAIL=0**.
+  `20final-message`, reinício explícito, espelho no `ttyS0` e `sudo` no
+  `pkgsel/include`). Na ISO final: **PASS=51 FAIL=0**.
 - Guardas novos no `validate.yml`, cada um provado por violação plantada:
-  `ci-guards` 63 → **74**.
+  `ci-guards` 63 → **76**.
 - Incremento de robustez do build: o temporário do `inject_preseed_initrd` saiu
   do `/tmp` (tmpfs que enchia e fazia o gzip falhar com uma mensagem que
   mentia: "formato inesperado?") e os backups (`.orig`) saíram de dentro da
@@ -2550,7 +2579,7 @@ journal e no arquivo de log:
 | 🎯 **Instalar de verdade em OUTRO PC** | ⚠️ O Modo 1 (disco fixado inexistente) foi **corrigido e testado** na sessão #31 — mas **por teste**, não por uma instalação. Falta: gerar com `--disk auto`, gravar o pendrive e **bootar na outra máquina**. Roteiro pronto em `docs/IMPLANTAR-EM-OUTRO-PC.md`. |
 | 🖥️ **A interface web num NAVEGADOR de verdade** | ⚠️ **nunca foi aberta** — nem por quem escreveu (sessão #24). Os **34** casos de `make ui-test` exercitam a **API**: lista branca, validadores, SSE, recusa sem `xorriso`, ausência de rota de escrita, bind em `127.0.0.1`. **Tudo que for visual** (layout, um botão que não responde, contraste) é afirmação não verificada. Abrir `make ui` numa máquina com browser e clicar em **Simular** resolveria. |
 | 🖥️ **A UI numa máquina COM `xorriso`** | ⚠️ O caminho "gerar a ISO" pelo navegador só foi provado **recusando** (esta máquina não tem `xorriso`). O caminho feliz (job roda, SSE mostra o progresso real até o fim, a ISO nova aparece na lista) **não** foi exercitado ponta a ponta. |
-| ⚠️ **Gatilho do autoinstall (sinalizado, sessão #30)** | **Auditado, nenhum defeito novo confirmado**, mas a automação pode falhar em 3 modos: **(1)** `--disk` fixado que não existe no alvo (default do CI = `/dev/vda`); **(2)** **UEFI nunca bootado**; **(3)** **Debian/preseed nunca executado**. Detalhes e evidência em `docs/TROUBLESHOOTING.md` § "SINALIZADO". |
+| ⚠️ **Gatilho do autoinstall (sinalizado, sessão #30)** | Dos 3 modos sinalizados: **(1)** `--disk` fixado inexistente — corrigido na #31 (`--disk auto`); **(3)** **Debian/preseed** — ✅ **executado na #35** (instala, reinicia e aplica em VM). Resta **(2)** o **UEFI nunca bootado**. Ver `docs/TROUBLESHOOTING.md`. |
 | 🔬 **Quem avisa quando o `iso` falha?** | ⚠️ O workflow `iso` roda **manualmente** (`workflow_dispatch`) ou por tag. O run **#16** (2026-10-14) falhou e eu **só descobri de passagem**, numa sessão seguinte, olhando a lista de runs por outro motivo — ninguém foi notificado. Enquanto for assim, uma ISO que não gera pode ficar dias sem ninguém notar. Ideias: um lembrete em `docs/STATE.md`, ou disparar o `iso` no `main` com `air_gapped=false` (a ISO leve, ~1 GB) para usar o CI como sinal. |
 | 🔬 **O run #16 depois do fix (confirmar)** | ⚠️ A 2ª tentativa agora roda `apt-get update` e loga a resposta do `apt`, mas **nenhum run novo rodou ainda**: a correção é hipótese informada pela medição (4 s + erro idêntico ⇒ lista inválida/404), não fato observado. **Disparar o `iso` com `air_gapped=true` e conferir as anotações.** |
 | 🌐 **Rede do alvo (sessão #33)** | A configuração agora vai na ISO (bloco `network:` + netplan na mídia + `99-ai-cpu-os.yaml` no alvo). ✅ **PROVADO EM VM**: o alvo pegou IP por DHCP sozinho e o SSH funcionou. **Falta** o modo `static`, o hardware físico e o reboot de persistência. |

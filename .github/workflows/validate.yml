@@ -548,6 +548,17 @@ jobs:
           #       fica parada no menu principal com a instalacao pronta.
           grep -qE '^[[:space:]]*reboot -f' iso/preseed/late-command.sh
           grep -q 'reinicia explicitamente' iso/verify-iso.sh
+          #  (g3) no sistema instalado /dev/console e o ULTIMO `console=` da
+          #       cmdline (o d-i grava `console=ttyS0 console=tty1`), entao o
+          #       marcador do 1o boot nunca chegava ao serial: o test-vm.sh
+          #       esperava para sempre. O firstboot.sh tem de espelhar no ttyS0.
+          grep -q '/dev/ttyS0' iso/preseed/firstboot.sh
+          grep -q 'escreve o marcador no console serial' iso/verify-iso.sh
+          #       Espelhar o build INTEIRO no ttyS0 trava o console da VM (medido).
+          if grep -qF 'tee -a "$LOG" > /dev/ttyS0' iso/preseed/firstboot.sh; then
+            echo "::error file=iso/preseed/firstboot.sh::nao espelhe o build inteiro no ttyS0 (trava o console)"
+            exit 1
+          fi
           #  (h) `sudo` NAO vem na instalacao padrao do Debian: sem ele o
           #      usuario da ISO (grupo sudo) nao administra nada, e com o root
           #      bloqueado o sistema fica sem acesso administrativo.

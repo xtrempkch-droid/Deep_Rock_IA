@@ -962,6 +962,26 @@ else
     fi
   fi
 
+  # O marcador do 1º boot tem de chegar ao console SERIAL: no sistema
+  # instalado `/dev/console` aponta para o ÚLTIMO `console=` da cmdline, e o
+  # d-i grava `console=ttyS0,115200 console=tty1` (ou seja: tty1). Sem escrever
+  # no ttyS0, o `test-vm.sh` fica esperando para sempre — medido na sessão #35,
+  # com o trabalho JÁ concluído. Só os MARCADORES vão ao serial: espelhar o
+  # build inteiro travou o console da VM.
+  FIRSTBOOT_LOCAL="$(fetch "/preseed/firstboot.sh" 2>/dev/null || true)"
+  if [[ -z "$FIRSTBOOT_LOCAL" ]]; then
+    skip "sem /preseed/firstboot.sh para conferir o marcador no console serial"
+  elif grep -qF '/dev/ttyS0' "$FIRSTBOOT_LOCAL"; then
+    pass "firstboot.sh escreve o marcador no console serial (o teste de VM o vê)"
+  else
+    fail "firstboot.sh NÃO escreve no console serial (o teste de VM nunca vê o marcador)"
+  fi
+  # E o espelho do build INTEIRO no serial não pode voltar: megabytes no tty
+  # travam o console da VM (nem as mensagens do kernel saem mais).
+  if [[ -n "$FIRSTBOOT_LOCAL" ]] && grep -qF 'tee -a "$LOG" > /dev/ttyS0' "$FIRSTBOOT_LOCAL"; then
+    fail "firstboot.sh espelha TODO o build no serial (trava o console da VM)"
+  fi
+
   # `sudo` não vem na instalação padrão do Debian: sem ele, o usuário da ISO
   # (que é do grupo `sudo`) não administra nada, e com o root bloqueado o
   # sistema fica SEM acesso administrativo.

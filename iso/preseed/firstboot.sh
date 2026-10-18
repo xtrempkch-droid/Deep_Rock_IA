@@ -36,6 +36,20 @@ log() { printf '[%s] [firstboot] %s\n' "$(_ts)" "$*"; }
 # Espelha tudo em arquivo, além do journal.
 exec > >(tee -a "$LOG") 2>&1
 
+# O `iso/test-vm.sh` julga pelo CONSOLE SERIAL, e aqui há uma pegadinha do
+# Debian: no sistema INSTALADO `/dev/console` é o ÚLTIMO `console=` da cmdline,
+# e o d-i grava `console=ttyS0,115200 console=tty1` — ou seja, o
+# `journal+console` do unit cai no tty1 (invisível numa VM sem vídeo) e o teste
+# esperava para sempre com o trabalho JÁ concluído (sessão #35).
+#
+# A tentação é espelhar a saída inteira no /dev/ttyS0 — NÃO FAÇA: o build do
+# llama.cpp escreve megabytes e o console serial da VM **travou** de vez (nem
+# as mensagens do kernel saíam mais, `%CPU` do qemu em 0). Vão ao serial só os
+# MARCADORES, escritas raras e curtas — o mesmo padrão do late-command.sh.
+serial_marker() {
+  printf '%s\n' "$*" > /dev/ttyS0 2>/dev/null || true
+}
+
 log "=== ai-cpu-os: primeiro boot ==="
 
 # ---------------------------------------------------------------------------
@@ -121,13 +135,16 @@ fi
 # ---------------------------------------------------------------------------
 # Esperar pela rede (best-effort): o papel 'inference' clona o llama.cpp.
 # ---------------------------------------------------------------------------
+# Cada sonda tem teto PRÓPRIO (`timeout`): sem ele, um `getent hosts` com DNS
+# que não responde bloqueia por dezenas de segundos e o laço inteiro passa de
+# 25 min — a mensagem "até ~2 min" viraria mentira (medido na sessão #35: a VM
+# ficou 15 min parada aqui, com `%CPU` do qemu em 0). Teto total: 24 × 10 s.
 wait_for_network() {
   local i
   log "aguardando conectividade com a internet (até ~2 min)..."
   for i in $(seq 1 24); do
-    if getent hosts archive.ubuntu.com >/dev/null 2>&1 \
-       || getent hosts deb.debian.org >/dev/null 2>&1 \
-       || curl -fsS --max-time 5 -o /dev/null https://github.com 2>/dev/null; then
+    if timeout 5 getent hosts deb.debian.org >/dev/null 2>&1 \
+       || timeout 5 curl -fsS --max-time 4 -o /dev/null https://github.com 2>/dev/null; then
       log "rede disponível (tentativa ${i})."
       return 0
     fi
@@ -150,6 +167,7 @@ set -e
 if [[ $rc -ne 0 ]]; then
   log "ERRO: build.sh falhou (código ${rc})."
   log "Consulte /var/log/ai-cpu-os-build.log e docs/TROUBLESHOOTING.md."
+  serial_marker "[ai-cpu-os/firstboot] FALHOU (rc=${rc}) — veja /var/log/ai-cpu-os-firstboot.log"
   cat > "$STATUS" <<EOF
 status=failed
 rc=${rc}
@@ -168,6 +186,9 @@ fi
 # Sucesso: registrar, desarmar o serviço e (opcional) reiniciar.
 # ---------------------------------------------------------------------------
 log "aplicação concluída com sucesso (papel ${ROLE}, família ${FAMILY})."
+# Este é O marcador que o iso/test-vm.sh procura no console serial. O `log()`
+# vai para arquivo+journal; o serial recebe a via curta (ver serial_marker).
+serial_marker "[ai-cpu-os/firstboot] aplicação concluída com sucesso (papel ${ROLE}, família ${FAMILY})"
 
 cat > "$STATUS" <<EOF
 status=ok

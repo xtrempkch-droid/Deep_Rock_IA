@@ -311,6 +311,8 @@ planta "o late-command deixar de trocar o hook final do d-i" iso/preseed/late-co
   sed_ 's|20final-message|nota-final|g' iso/preseed/late-command.sh
 planta "o late-command deixar de reiniciar o d-i (para no menu)" iso/preseed/late-command.sh \
   sed_ 's|^\([[:space:]]*\)reboot -f|\1: reboot -f|' iso/preseed/late-command.sh
+planta "o firstboot deixar de espelhar no console serial" iso/preseed/firstboot.sh \
+  sed_ 's|/dev/ttyS0|/dev/ttyS1|g' iso/preseed/firstboot.sh
 planta "o EXTRA_PACKAGES perder o sudo (Debian não o traz)" iso/build-iso.sh \
   sed_ 's|^EXTRA_PACKAGES="sudo |EXTRA_PACKAGES="|' iso/build-iso.sh
 
