@@ -99,6 +99,8 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | 🐧 **A ISO DEBIAN FUNCIONA** (`--distro debian`, preseed + isolinux) — **instalada e bootada em VM pela primeira vez**: instala sozinha, **reinicia sozinha** e o 1º boot aplica o ai-cpu-os (`status=ok`, família `intel-haswell`, llama.cpp compilado no alvo). **10 travas, todas mudas** (netplan exigido no verificador; `prompt 1` no isolinux; preseed fora do initrd; `localechooser/languagelist`; `grub-installer/bootdev`; hash crypt em aspas duplas; `deb cdrom:` no alvo; `sudo` ausente; marcador fora do serial; espera por rede sem teto). `verify-iso` **PASS=51**, `ci-guards` 63 → **76** | 2026-10-18 | 2026-10-18 |
 | 🔧 **Mod `network` — reparo da máquina JÁ instalada** (`mods/network/`): grava o netplan persistente no sistema em execução, move o do instalador/cloud-init para `.bak`, desliga a rede do cloud-init e valida com `netplan generate` antes de aplicar; `revert.sh` restaura os backups. Resolve o caso "já instalei com a ISO antiga e a placa sobe DOWN" sem reinstalar — `make network-test` (41), `make network-fix`, `ci-guards` 54 → **63** | 2026-10-18 | 2026-10-18 |
 
+| 🖥️ **PRIMEIRA validação em HARDWARE FÍSICO** — AMD A8-9600 (Excavator), Debian 13: ISO instalada sozinha, 1º boot `status=ok`, llama.cpp compilado do tarball **sem rede**, tuning persistente após reboot, **SSH funcionando (inclusive depois de reiniciar)** e a **primeira medição de `llama-bench`** do projeto (pp64 17,05 · tg32 10,40 t/s). `verify-iso` PASS=56, `smoke-test` 12/12 | 2026-10-18 | 2026-10-18 |
+
 > ⚠️ **"Concluído" aqui significa "escrito e revisado", NÃO "testado em
 > hardware".** Ver a seção de testes reais em `docs/STATE.md`. A validação em
 > hardware físico é o principal item de "Em Progresso". A **exceção** é a linha
@@ -111,9 +113,9 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 
 | Item                                                        | Início     | Nota                                                        |
 |-------------------------------------------------------------|------------|-------------------------------------------------------------|
-| Validação em hardware real (Xeon E5-2680 v4, família `intel-broadwell`)      | 2026-10-07 | Aguardando acesso ao servidor físico para rodar o smoke-test |
+| Validação em hardware real (Xeon E5-2680 v4, família `intel-broadwell`)      | 2026-10-07 | Aguardando acesso ao servidor físico para rodar o smoke-test. **Parcial:** o fluxo já foi validado em metal numa 3ª máquina (A8-9600) — ver `STATE.md` § 3.6 |
 | Validação em hardware real (Ryzen 5 3500X, família `amd-zen2`)              | 2026-10-07 | Aguardando build da imagem + teste do registry/Gitea        |
-| Medição de baseline vs. pós-tuning com `llama-bench`        | 2026-10-07 | Depende dos dois itens acima para preencher `docs/STATE.md` |
+| Medição de baseline vs. pós-tuning com `llama-bench`        | 2026-10-07 | ✅ **Primeira medição feita em metal** (A8-9600: pp64 17,05 · tg32 10,40 t/s). Falta o **antes × depois** para medir o ganho do tuning e as máquinas de referência |
 | Validar a Release `v0.2.0` (binários) e a imagem do GHCR no hardware alvo | 2026-10-07 | Primeiro uso real dos artefatos do CI |
 | Executar o protocolo `docs/VALIDATION.md` (blocos A–L) | 2026-10-07 | Roteiro preenchível pronto; **resultados pendentes** |
 | ~~🎯 Construir e bootar a ISO de instalação numa VM~~ (Bloco M, Ubuntu) | 2026-10-07 | ✅ **FEITO na sessão #21** (2026-10-13): ISO gerada + `verify-iso` PASS=41 + `test-vm.sh` exit 0 (instalou + 1º boot aplicou). Ver `STATE.md` § 3.3 |
@@ -204,6 +206,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | Data       | Mudança                                                        |
 |------------|----------------------------------------------------------------|
 | 2026-10-16 | 🧬 **14 famílias** (Xeon Scalable v5–v9/Xeon 6 P + `amd-zen5`) e **AVX-512 como padrão** nas famílias que o têm (política `auto`, decisão do dono; `--no-avx512` para comparar com AVX2). |
+| 2026-10-18 | 🖥️ **Primeira validação em hardware físico** (sessão #37): A8-9600 + Debian 13, instalação automática, 1º boot sem rede (tarball local), tuning persistente, **SSH sobrevivendo ao reboot** e o **primeiro `llama-bench`** do projeto. As máquinas de referência seguem pendentes. |
 | 2026-10-18 | 🐧 **A ISO Debian é executada pela primeira vez** (sessão #35): moveu "ISO em base Debian" de Em Progresso para Concluído, com **10 travas mudas** corrigidas e `test-vm.sh` **OK** em VM. O que continua aberto na ISO: **UEFI**, **air-gapped no Debian** e **hardware físico**. |
 | 2026-10-13 | 🎉 **A ISO é gerada e bootada** (Ubuntu, VM com KVM, sessão #21): moveu "Em Progresso" → "Concluído". O que fica em aberto na ISO: caminho **Debian**, **UEFI** e **hardware físico**; e o resíduo air-gapped do UI do llama.cpp. |
 | 2026-10-07 | Criação inicial do roadmap junto com o repositório `0.1.0-alpha`. |

@@ -113,8 +113,26 @@ resolve_family() {
   if [[ "$FORCE_FAMILY" == "auto" ]]; then
     pick_family "$CPU_MODEL"
   else
+    # A família chega pela CADEIA (build.sh → install.sh → aqui) depois de já
+    # ter sido detectada. Dizer só "forçada por --family" é ENGANOSO: numa
+    # execução real (A8-9600, sessão #37) o log dizia "forçada" para uma
+    # família que o próprio projeto havia DETECTADO. Aqui detectamos também e
+    # somos honestos sobre o que aconteceu.
+    local _detected_id="" _detected_reason=""
+    # Um subshell só, devolvendo os DOIS valores (o `pick_family` grava em
+    # variáveis globais, e num subshell elas não voltam para cá).
+    {
+      read -r _detected_id <<< "$( pick_family "$CPU_MODEL"; printf '%s' "${FAMILY_ID:-}" )"
+      _detected_reason="$( pick_family "$CPU_MODEL" >/dev/null 2>&1; printf '%s' "${FAMILY_MATCH_REASON:-}" )"
+    }
     FAMILY_ID="$FORCE_FAMILY"
-    FAMILY_MATCH_REASON="forçada por --family"
+    if [[ -n "$_detected_id" && "$_detected_id" == "$FAMILY_ID" ]]; then
+      FAMILY_MATCH_REASON="detectada na CPU e repassada pela cadeia (mesma família)"
+    elif [[ -n "$_detected_id" ]]; then
+      FAMILY_MATCH_REASON="forçada por --family (a CPU sugere '${_detected_id}': ${_detected_reason})"
+    else
+      FAMILY_MATCH_REASON="forçada por --family (detecção indisponível)"
+    fi
   fi
   load_family "$FAMILY_ID"
   compute_isa

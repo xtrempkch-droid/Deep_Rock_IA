@@ -561,6 +561,10 @@ jobs:
           grep -q 'iso-space-test' Makefile
           grep -q 'validate:.*iso-space-test' Makefile
           grep -q 'make iso-space-test' .github/workflows/validate.yml
+          # --- A familia NAO pode ser reportada como "forcada" quando foi ---
+          # --- apenas DETECTADA e repassada pela cadeia (log enganoso).    ---
+          grep -qF 'detectada na CPU e repassada pela cadeia' llama-build.sh
+          grep -qF 'a CPU sugere' llama-build.sh
           # O firstboot tem de SINCRONIZAR o disco antes de sair, e o teste de
           # VM tem de dar tempo ao qemu antes de encerrar. Sem isso, um
           # desligamento logo depois deixa arquivos com 0 byte — `llama-server`,

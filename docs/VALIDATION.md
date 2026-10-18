@@ -1343,6 +1343,102 @@ Cole aqui (ou anexe o arquivo):
 
 ---
 
+## Bloco Q — ✅ PRIMEIRA EXECUÇÃO EM HARDWARE FÍSICO (2026-10-18, sessão #37)
+
+> **Este é o primeiro registro de hardware REAL neste documento** (todo o resto
+> tinha sido VM). A máquina **não** é uma das duas de referência: é uma cobaia
+> (AMD A8-9600, Excavator). O que ela prova é o **fluxo completo em metal**,
+> não o desempenho do Xeon/Ryzen.
+
+### Q.1 Identificação da máquina
+
+| Campo | Valor |
+|-------|-------|
+| CPU | **AMD A8-9600 RADEON R7, 10 Compute Cores 4C+6G** (Excavator, família 15h) |
+| Núcleos/threads | 4C/4T (2 módulos) |
+| RAM | 6,7 GiB |
+| SO instalado | **Debian GNU/Linux 13 (trixie)**, kernel `6.12.113+deb13-amd64` |
+| Família do ai-cpu-os | **`generic`** — fallback **correto** (Excavator é anterior ao Zen) |
+| ISO | `ai-cpu-os-debian.iso` (2,14 GB), gerada em 2026-10-18 |
+
+### Q.2 Instalação (Bloco M executado em metal)
+
+| Passo | Resultado |
+|-------|-----------|
+| `verify-iso.sh --distro debian` sobre a ISO real | ✅ **PASS=56 FAIL=0** |
+| Boot pelo pendrive/ISO | ✅ |
+| Instalação automática (sem interação) | ✅ |
+| Reinício automático | ✅ |
+| Tempo de instalação | ~10 min (pacotes vieram da rede: a ISO não levava `--iso-repo`) |
+
+### Q.3 Primeiro boot
+
+| Passo | Resultado |
+|-------|-----------|
+| `.firstboot-status` | ✅ **`status=ok`** (`role=auto`, `family=auto`) |
+| Família detectada | ✅ `generic` |
+| llama.cpp **do tarball da mídia, sem rede** | ✅ **`Rede: não usada (fonte local)`** |
+| Tempo de compilação (4 threads, sem cache) | ~11 min |
+| Modelo da mídia em `/opt/models` | ✅ 1,1 GB |
+| `firstboot` na 2ª inicialização | ✅ **não** repetiu (sentinela removida) |
+
+### Q.4 Tuning aplicado e PERSISTENTE (Blocos A–D, parcial)
+
+| Ajuste | Valor após reboot | OK |
+|--------|-------------------|----|
+| `vm.swappiness` | **10** | ✅ |
+| `vm.vfs_cache_pressure` | **50** | ✅ |
+| `kernel.numa_balancing` | **0** | ✅ |
+| `transparent_hugepage/enabled` | **[always]** madvise never | ✅ |
+| `scaling_governor` (cpu0) | **performance** | ✅ |
+| `kernel.io_uring` | disponível (kernel ≥ 5.1) | ✅ |
+| `intel_idle.max_cstate` na cmdline | **n/a** — CPU AMD (o mod só age em Intel) | ✅ correto |
+
+`smoke-test.sh` no alvo: **PASS=12 FAIL=0 SKIP=1** (o SKIP é `llama-server` não
+iniciado no momento do teste; foi iniciado logo depois e respondeu).
+
+### Q.5 Acesso remoto (SSH) — o que faltava provar
+
+| Passo | Resultado |
+|-------|-----------|
+| Porta 22 | ✅ aberta (`OpenSSH_10.0p2 Debian-7+deb13u4`) |
+| Login | ✅ com senha do usuário `ai-cpu-os` |
+| `systemctl is-enabled ssh` | ✅ **enabled** (e `active`) |
+| Rede do alvo | ✅ DHCP sozinho: `enp8s0` com `192.168.0.115/24` + default route |
+| **Após REBOOT** | ✅ máquina voltou, **SSH voltou a aceitar login**, tuning persistiu |
+| Host keys | RSA 3072 · ECDSA 256 · ED25519 256 (`ssh-keyscan` OK) |
+
+### Q.6 Inferência real (Bloco F — primeira medição do projeto)
+
+`ai-server` → `active` e `/health` → `{"status":"ok"}`.
+Requisição `/v1/chat/completions` devolveu `OK` (34 tokens de prompt, 2 gerados).
+
+```text
+llama-bench -m Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf -p 64 -n 32 -t 4
+
+| qwen2 1.5B Q4_K - Medium | 1.04 GiB | 1.78 B | BLAS | 4 | pp64 | 17,05 ± 0,36 t/s |
+| qwen2 1.5B Q4_K - Medium | 1.04 GiB | 1.78 B | BLAS | 4 | tg32 | 10,40 ± 0,03 t/s |
+```
+
+> ⚠️ **Sem "antes".** Não houve medição pré-tuning nesta máquina, então estes
+> números **não** medem o ganho do ai-cpu-os — são linha de base. Para medir o
+> ganho: `llama-bench` → `sudo bash mods/apply.sh revert --set system` →
+> reboot → `llama-bench` → `apply` → reboot → `llama-bench`.
+
+### Q.7 O que este bloco NÃO cobre
+
+- ❌ **Xeon E5-2680 v4** e **Ryzen 5 3500X** (as duas máquinas de referência).
+- ❌ **Boot UEFI** (a instalação foi BIOS/legacy).
+- ❌ **`--network static`** e **`--distro ubuntu` em metal** (só Debian).
+- ❌ **Air-gapped completo:** a ISO levava modelo + fonte do llama.cpp, mas
+  **não** o repositório apt — `openssh-server`, `git` e o toolchain vieram da
+  rede (havia NAT). Numa rede sem internet, esta ISO **não** instalaria os
+  pacotes.
+- ❌ Ganho real do tuning (falta o "antes").
+- ❌ `llama-bench` com mais threads que núcleos físicos, modelos maiores, GPU.
+
+---
+
 ## Histórico
 
 | Data | Mudança |
@@ -1350,4 +1446,5 @@ Cole aqui (ou anexe o arquivo):
 | 2026-10-07 | Criação do protocolo (blocos A–L) para a versão `v0.2.0`; nenhum resultado preenchido ainda. |
 | 2026-10-07 | Adicionado o **Bloco M** — geração e boot da ISO de instalação (entregável final do projeto). |
 | 2026-10-12 | Adicionados os **Blocos N e O** — famílias de CPU/papéis (casamento, `-march`, política de AVX-512) e mods portáveis (apply/idempotência/revert em Ubuntu e Debian). Nenhum resultado preenchido ainda. |
+| 2026-10-18 | **Bloco Q** — primeira execução em **hardware físico** (AMD A8-9600, Debian 13): instalação automática, 1º boot `status=ok`, llama.cpp compilado do tarball **sem rede**, tuning persistente após reboot, **SSH** funcionando (inclusive após reboot) e a **primeira medição de `llama-bench` do projeto** (pp64 17,05 t/s · tg32 10,40 t/s). Não cobre as máquinas de referência nem UEFI. |
 | 2026-10-12 | **N.6** — casamento CPU → família pelo corpus (`make families-test`), que é como Zen 3/Zen 4 são exercitados sem hardware. Novo **Bloco P** — GPU opcional: diagnóstico, build explícito, medição **rotulada** e a proibição de misturar com os números de CPU. |

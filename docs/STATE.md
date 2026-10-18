@@ -30,14 +30,18 @@
 | A       | Intel Xeon E5-2680 v4, 16 GB    | `intel-broadwell` / `inference` | ❌ **NÃO** |
 | B       | AMD Ryzen 5 3500X, 64 GB        | `amd-zen2` / `builder` | ❌ **NÃO** |
 | VM      | qemu/KVM, Xeon E5-2676 v3 (host) | `intel-haswell` / `inference` (auto) | ✅ **SIM** (2026-10-13) |
+| **C**   | **AMD A8-9600 (Excavator), 6,7 GiB, Debian 13** | **`generic`** (fallback) / `inference` | ✅ **SIM** (2026-10-18) — **física** |
 
-> **Nada foi executado em hardware físico ainda** (Xeon E5-2680 v4 e Ryzen 5
-> 3500X). O que mudou: a **ISO foi bootada e instalada numa VM** (qemu+KVM) e o
-> **1º boot aplicou o ai-cpu-os** com a família `intel-haswell` detectada
-> corretamente (a CPU do host é um E5-2676 v3, Haswell-EP). O caminho
-> build → ISO → instalação offline → 1º boot está **provado**; o que falta é
-> rodar os Blocos A–O do `VALIDATION.md` **no hardware alvo** (medir desempenho,
-> confirmar o efeito dos ajustes).
+> ✅ **A primeira máquina FÍSICA foi validada em 2026-10-18** (sessão #37):
+> instalação automática, 1º boot `status=ok`, llama.cpp do tarball **sem rede**,
+> **SSH sobrevivendo ao reboot**, tuning persistente e a **primeira medição de
+> `llama-bench`** do projeto (**pp64 17,05 · tg32 10,40 t/s**). Detalhes em
+> **§ 3.6** e no **Bloco Q** de `VALIDATION.md`.
+>
+> ⚠️ **Mas não é a máquina alvo:** o **Xeon E5-2680 v4 (A)** e o **Ryzen 5
+> 3500X (B)** continuam **sem validação** — e é o desempenho *deles* que o
+> projeto quer (o A8-9600 é uma cobaia: Excavator, 4C/4T, 6,7 GiB). Falta
+> também o **"antes"** para medir o ganho do tuning.
 
 ---
 
@@ -294,6 +298,49 @@ Duas correções:
 > `/etc/motd` e em `/root/LEIA-SSH.md`). A máquina **Ubuntu** desta sessão
 > **continua sem SSH** (só o console resolve) e não foi reinstalada.
 
+### 3.6 🖥️ PRIMEIRA VALIDAÇÃO EM HARDWARE FÍSICO (2026-10-18, sessão #37)
+
+Até aqui **tudo** tinha sido provado em VM. Esta é a primeira máquina física
+instalada de ponta a ponta com a ISO do projeto — e o primeiro `llama-bench`
+real do repositório.
+
+| Item | Resultado |
+|------|-----------|
+| Máquina | **AMD A8-9600 RADEON R7, 10 Compute Cores 4C+6G** (Excavator, família 15h), 6,7 GiB RAM |
+| ISO usada | `ai-cpu-os-debian.iso` (2,14 GB, `--distro debian`) |
+| Conteúdo da ISO | ✅ `verify-iso.sh --distro debian` → **PASS=56 FAIL=0** |
+| Boot + instalação automática | ✅ sem uma única pergunta |
+| Reinício automático | ✅ |
+| 1º boot | ✅ **`.firstboot-status: status=ok`** |
+| Família detectada | ✅ **`generic`** (fallback correto: Excavator é anterior ao Zen) |
+| llama.cpp **sem rede** | ✅ `llama.cpp: tarball local llama-src.tar.gz` · **`Rede: não usada`** |
+| Modelo embutido | ✅ `/opt/models/Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf` (1,1 GB) |
+| **SSH** | ✅ porta 22, **login com senha**, `ssh` `active`+`enabled`, **sobrevive ao reboot** |
+| Rede do alvo | ✅ DHCP sozinho (`192.168.0.115`, gateway aprendido) e **persistiu** após reboot |
+| `smoke-test.sh` no alvo | ✅ **PASS=12 FAIL=0 SKIP=1** (o SKIP é o `llama-server` ainda não iniciado) |
+| `ai-server` | ✅ `active` e `/health` → `{"status":"ok"}` |
+| Inferência de verdade | ✅ `/v1/chat/completions` devolveu `OK` (34 tokens de prompt, 2 gerados) |
+| Tuning persistiu no reboot | ✅ `swappiness=10` · `vfs_cache_pressure=50` · `numa_balancing=0` · THP `[always]` · governor `performance` |
+| `firstboot` não repetiu | ✅ sentinela removida, unit `inactive` |
+
+**Métricas (`llama-bench`, 4 threads, backend BLAS, Qwen2.5-Coder-1.5B Q4_K_M):**
+
+| Teste | Resultado |
+|-------|-----------|
+| `pp64` (prefill) | **17,05 ± 0,36 t/s** |
+| `tg32` (geração) | **10,40 ± 0,03 t/s** |
+
+> ⚠️ **Esta NÃO é a máquina alvo do projeto.** É uma terceira máquina
+> (Excavator, 2 núcleos reais + GPU integrada), usada como cobaia. **O Xeon
+> E5-2680 v4 e o Ryzen 5 3500X continuam sem validação** — e os números acima
+> **não** valem para eles. O que esta execução prova é o **fluxo** em hardware
+> real (boot → instalação → 1º boot → tuning → inferência), não o desempenho
+> das máquinas de referência.
+>
+> ⚠️ **Ainda não provado em hardware:** boot **UEFI**, `--network static`,
+> air-gapped **completo** (esta ISO levou modelo + fonte, mas **não** os
+> pacotes apt: instalou `openssh-server`/`git`/toolchain pela rede).
+
 ## 4. Problemas conhecidos no momento
 
 1. **Risco em hardware físico não medido.** O caminho ISO foi provado em VM; o
@@ -350,13 +397,20 @@ Duas correções:
 
 ## 5. Métricas de performance medidas
 
-> Nenhuma métrica de **inferência** real ainda (tokens/s). Preencher após rodar
-> `llama-bench` nos dois sistemas. Formato sugerido:
+> **Primeira medição de inferência do projeto (2026-10-18, hardware FÍSICO).**
+> As duas máquinas de referência continuam pendentes (não houve acesso a elas).
 
-| Sistema | Modelo                                | Threads | Antes (tok/s) | Depois (tok/s) | Δ     |
-|---------|---------------------------------------|---------|---------------|----------------|-------|
-| xeon    | Qwen2.5-Coder-1.5B-Q4_K_M             | 24      | *(pendente)*  | *(pendente)*   | —     |
-| ryzen   | Qwen2.5-Coder-1.5B-Q4_K_M             | 6       | *(pendente)*  | *(pendente)*   | —     |
+| Sistema | Modelo | Threads | pp (prefill) | tg (geração) | Nota |
+|---------|--------|---------|--------------|--------------|------|
+| **A8-9600 (cobaia física)** | Qwen2.5-Coder-1.5B-Q4_K_M | 4 | **17,05 ± 0,36 t/s** | **10,40 ± 0,03 t/s** | `llama-bench` pós-`firstboot`, backend BLAS |
+| xeon E5-2680 v4 | Qwen2.5-Coder-1.5B-Q4_K_M | 24 | *(pendente)* | *(pendente)* | sem acesso ao hardware |
+| ryzen 5 3500X | Qwen2.5-Coder-1.5B-Q4_K_M | 6 | *(pendente)* | *(pendente)* | sem acesso ao hardware |
+
+> ⚠️ **Não há "antes" para comparar.** Esta máquina não foi medida sem o
+> tuning, então a tabela **não** diz qual é o ganho do ai-cpu-os — ela só
+> estabelece a linha de base de uma máquina. Para medir o ganho de verdade é
+> preciso rodar `llama-bench` antes e depois de `mods/apply.sh revert`/`apply`
+> na **mesma** máquina. Ver `docs/VALIDATION.md` Bloco H.
 
 ### Métricas da ISO (2026-10-13, VM qemu/KVM)
 
@@ -372,7 +426,10 @@ Duas correções:
 | Modelo embutido | `Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf` (1,1 GB) |
 | Compilação do llama.cpp no alvo (do tarball, sem rede) | ✅ `/opt/llama.cpp/build/bin/llama-server` |
 
-Tempo de build do llama.cpp: *(pendente em hardware real)*
+Tempo de build do llama.cpp: **~11 min** numa A8-9600 (4 threads, sem cache),
+do tarball local e **sem rede** (2026-10-18). Instalação Debian em hardware
+físico: **~10 min** (a ISO não levava repositório apt, então os pacotes vieram
+da rede).
 
 ---
 
@@ -403,9 +460,18 @@ ip -4 addr show
 Depois disso, validar o caminho novo numa VM (`--distro ubuntu`, com rede) para
 provar que o `late-command` conserta sozinho quando o SSH não veio.
 
-**▶️ Próximo passo (o mesmo de antes, agora sem a dívida do Debian):** levar a
-ISO ao **hardware físico** (Xeon E5-2680 v4 e Ryzen 5 3500X) e preencher os
-Blocos A–O de `docs/VALIDATION.md`. Antes disso, os dois itens de menor esforço
+**✅ Recém-fechado (sessão #37, 2026-10-18) — a primeira validação em METAL.**
+A ISO Debian foi instalada numa máquina **física** (AMD A8-9600), o 1º boot
+aplicou o ai-cpu-os (`status=ok`), o llama.cpp compilou **do tarball da mídia,
+sem rede**, o **SSH funcionou e sobreviveu ao reboot**, o tuning persistiu e
+foi medida a **primeira performance de inferência do projeto** (`pp64 17,05
+t/s` · `tg32 10,40 t/s`). Ver **§ 3.6** e o **Bloco Q** de
+`docs/VALIDATION.md`.
+
+**▶️ Próximo passo:** levar a ISO às **máquinas de referência** (Xeon E5-2680
+v4 e Ryzen 5 3500X) — o *fluxo* já foi validado em metal, o que falta é o
+**desempenho** delas. E medir o **ganho** do tuning (falta o "antes" na mesma
+máquina: `llama-bench` → `mods/apply.sh revert` → reboot → `llama-bench`). Antes disso, os dois itens de menor esforço
 e maior retorno:
 
 1. **Debian air-gapped** — gerar `--distro debian` com `--iso-model auto

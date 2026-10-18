@@ -431,7 +431,22 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-18 (sessão #35)
+- **Data:** 2026-10-18 (sessão #37)
+- **O que mudou:** 🖥️ **Primeira validação em HARDWARE FÍSICO** (não é mais só
+  VM). Uma máquina real — **AMD A8-9600** (Excavator), Debian 13 — instalou a
+  ISO sozinha, o 1º boot aplicou o ai-cpu-os (`status=ok`, família `generic`,
+  que é o **fallback correto**), o llama.cpp compilou **do tarball da mídia sem
+  rede**, o **SSH funcionou e sobreviveu ao reboot**, o tuning persistiu
+  (swappiness 10, numa_balancing 0, THP always, governor performance) e foi
+  medida a **primeira inferência do projeto**: `pp64 17,05 t/s` · `tg32 10,40
+  t/s` (4 threads, BLAS, 1.5B Q4_K_M). `smoke-test` **12/12**;
+  `verify-iso` da ISO usada **PASS=56**. Também corrigido um log enganoso: o
+  `llama-build.sh` dizia "forçada por --family" para uma família que o projeto
+  havia **detectado** (agora diz "detectada e repassada pela cadeia").
+  **Bloco Q** em `docs/VALIDATION.md`, § 3.6 em `STATE.md`, sessão #37 no
+  `JOURNAL.md`. ⚠️ **As duas máquinas de referência (Xeon E5-2680 v4 e Ryzen 5
+  3500X) continuam sem validação** — e não há "antes" para medir o ganho.
+- **Data anterior:** 2026-10-18 (sessão #35)
 - **O que mudou:** **A ISO Debian passou a funcionar — instalada e bootada em
   VM.** O caminho `--distro debian` (preseed + isolinux) **nunca havia sido
   executado**; agora ele instala sozinho, **reinicia sozinho** e o 1º boot

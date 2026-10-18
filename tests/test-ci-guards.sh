@@ -344,6 +344,10 @@ planta "o verificador voltar a extrair o modelo INTEIRO" iso/verify-iso.sh \
 planta "o verificador voltar a usar /tmp às cegas" iso/verify-iso.sh \
   sed_ 's|df -Pk|true|g' iso/verify-iso.sh
 
+# --- Log honesto da família (visto numa execução real, sessão #37) ---------
+planta "o llama-build voltar a dizer 'forçada' para família detectada" llama-build.sh \
+  sed_ 's|detectada na CPU e repassada pela cadeia|forçada por --family|' llama-build.sh
+
 echo
 if [[ $FAIL -eq 0 ]]; then
   echo "ci-guards: PASS=${PASS} FAIL=0"

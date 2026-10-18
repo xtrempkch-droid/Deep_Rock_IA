@@ -2394,6 +2394,51 @@ garante os arquivos íntegros acima.
   (basta rodar na máquina de teste).
 - **Commits:** *(ver `git log`)*.
 
+### Sessão #37 — 2026-10-18 · 🖥️ A PRIMEIRA validação em hardware FÍSICO (e o primeiro `llama-bench`)
+
+- **Objetivo:** "teste debian, boot ok e auto install ok. agora só falta testar
+  o ssh e fazer a validação".
+- **O que se fez, por medição:**
+  - Encontrei o alvo pelo meu DHCP (lease novo): **`192.168.0.115`**,
+    OpenSSH 10.0p2 — ou seja, **o `sshd` existia desta vez**. A correção da
+    sessão #36 (garantir o SSH no `late-command`) funcionou em metal.
+  - Sem a senha eu não podia entrar, então validei o **conteúdo** das duas ISOs
+    do dono: `ai-cpu-os-debian.iso` **PASS=56 FAIL=0**;
+    `ai-cpu-os-ubuntu.iso` **PASS=47** (com `--disk /dev/sda`, que é o que ela
+    fixa — sem isso o verificador reprova, corretamente). Nenhuma das duas
+    levava repositório apt: os pacotes vieram da rede (havia NAT).
+  - Com a senha, entrei por SSH e acompanhei o 1º boot (que ainda estava
+    compilando): **`status=ok`** ao final.
+- **A máquina é HARDWARE FÍSICO REAL, e não é uma das de referência:**
+  **AMD A8-9600** (Excavator, 4C/4T), 6,7 GiB, Debian 13 trixie. Família
+  detectada: **`generic`** — fallback **correto**, porque Excavator é anterior
+  ao Zen e o projeto não tem (nem precisa ter) família para ele.
+- **Provas coletadas (Bloco Q do `VALIDATION.md`):**
+  - llama.cpp compilado **do tarball da mídia, sem rede**: o
+    `AI-CPU-OS-BUILD.txt` diz literalmente `Rede: não usada (fonte local)`;
+  - `smoke-test.sh` **PASS=12 FAIL=0 SKIP=1** (o SKIP é o `llama-server` não
+    iniciado na hora; depois subiu e respondeu `{"status":"ok"}`);
+  - tuning **persistiu após reboot**: swappiness 10, vfs_cache_pressure 50,
+    numa_balancing 0, THP `[always]`, governor `performance`;
+  - **SSH sobreviveu ao reboot** (login feito de novo, `ssh` enabled+active) e
+    a rede também (DHCP sozinho, com default route);
+  - `firstboot` **não** repetiu (sentinela removida);
+  - **primeira medição de inferência do projeto**:
+    `pp64 17,05 ± 0,36 t/s` · `tg32 10,40 ± 0,03 t/s` (4 threads, BLAS,
+    Qwen2.5-Coder-1.5B Q4_K_M) — e uma requisição real devolveu `OK`.
+- **Bug de log encontrado na execução:** o `llama-build.sh` dizia
+  **"Seleção: forçada por --family"** para uma família que o próprio projeto
+  havia **detectado** e apenas repassado pela cadeia (build → install →
+  llama-build). Confunde quem lê o log procurando o que foi forçado. Agora ele
+  detecta também e diz a verdade: *"detectada na CPU e repassada pela cadeia
+  (mesma família)"* ou *"forçada por --family (a CPU sugere 'X': motivo)"*.
+  Guarda nova (`ci-guards` 85 → **86**).
+- **O que NÃO foi provado:** o **Xeon E5-2680 v4** e o **Ryzen 5 3500X** (sem
+  acesso), **UEFI**, `--network static`, Ubuntu em metal, air-gapped completo
+  (faltaram os pacotes apt) e o **ganho** do tuning (não houve medição "antes"
+  nesta máquina).
+- **Commits:** *(ver `git log`)*.
+
 ### Sessão #36 — 2026-10-18 · 🔌 "A máquina instalada não aceita SSH" (e a causa era o próprio projeto)
 
 - **Objetivo:** "instalei a versão ubuntu e preciso que você tente acessar via
