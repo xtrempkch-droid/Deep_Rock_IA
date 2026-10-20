@@ -158,6 +158,24 @@ jobs:
           set -euo pipefail
           make talk-test
 
+      # O INSTALADOR do chat (talk/install.sh) e o elo que transforma "existe um
+      # daemon" em "a maquina tem o servico". Ele roda com --root: escreve num
+      # diretorio temporario, sem useradd/systemctl. Os dois modos de falha que
+      # ele existe para impedir sao silenciosos: subir SEM chave e a chave por
+      # no nao entrar na config (o no cairia na chave global).
+      - name: "ai-talk (instalador: config, chaves e unit; sem root)"
+        run: |
+          set -euo pipefail
+          make talk-install-test
+
+      # O CHAT DENTRO DA ISO: --chat-*, payload na midia (0640), os tres elos
+      # (late-command -> .iso-config -> firstboot -> build.sh etapa 2.5) e o
+      # teto de 15 nos. Sem gerar ISO: --dry-run e --check-templates.
+      - name: "ai-talk (chat dentro da ISO: payload e elos)"
+        run: |
+          set -euo pipefail
+          make iso-chat-test
+
       # A trava de instância única do gerador de ISO, provada com `flock` de
       # verdade (dois processos). Existe porque um sintoma real ("mv: cannot
       # stat … .part") veio de DOIS builds ao mesmo tempo no mesmo --work-dir:
@@ -339,8 +357,9 @@ jobs:
             tests/test-iso-lock.sh
             tests/test-iso-disk.sh
             tests/test-role-identity.sh
-            talk/ai_talk.py
-            tests/test-ai-talk.sh
+            talk/ai_talk.py talk/install.sh talk/ai-talk.service
+            tests/test-ai-talk.sh tests/test-ai-talk-install.sh
+            tests/test-iso-chat.sh
             webui/server.py webui/index.html
             tests/fixtures/SHA256SUMS.ubuntu-24.04
             tests/fixtures/apt-cache-policy.txt
@@ -852,6 +871,52 @@ jobs:
           grep -q 'make talk-test' .github/workflows/validate.yml
           # Invariantes do ADR-003/005 que nao podem sumir do codigo:
           grep -q 'MAX_PEERS = 15' talk/ai_talk.py
+          # --- F2: o chat tem de CHEGAR na maquina (ADR-003) ----------------
+          # Um teste que roda so no make = regressao invisivel no CI.
+          grep -q 'talk-install-test' Makefile
+          grep -q 'validate:.*talk-install-test' Makefile
+          grep -q 'make talk-install-test' .github/workflows/validate.yml
+          grep -q 'iso-chat-test' Makefile
+          grep -q 'validate:.*iso-chat-test' Makefile
+          grep -q 'make iso-chat-test' .github/workflows/validate.yml
+          # O instalador existe e NAO pode baixar nada (ISO air-gapped).
+          test -f talk/install.sh
+          test -f talk/ai-talk.service
+          if grep -qE '^[[:space:]]*(curl|wget|pip3?[[:space:]]+install)' talk/install.sh; then
+            echo "::error file=talk/install.sh::o instalador do chat baixa algo (a ISO e air-gapped)"
+            exit 1
+          fi
+          # Sem chave = servico DESABILITADO (um canal sem HMAC nao autentica).
+          # Ancorado na LINHA do ramo sem chave: `ENABLE_SERVICE=0` tambem
+          # aparece em `--no-service`, entao o nome solto passaria mesmo com o
+          # ramo sem chave trocado por 1.
+          grep -qE '^  ENABLE_SERVICE=0$' talk/install.sh
+          # Chave legivel por "outros" e RECUSADA nos dois lados (install e ISO).
+          # Ancorado na CONDICAO: o teste de bit (8#004) e o que precisa existir.
+          grep -qF '(( (8#$perms & 8#004) != 0 ))' talk/install.sh
+          grep -qF '(( (8#$perms & 8#004) != 0 ))' iso/build-iso.sh
+          # A chave POR NO tem de ser passada explicitamente (nome + caminho).
+          grep -q -- '--peer-key' talk/install.sh
+          # Teto de 15 tambem na geracao da ISO (ADR-005), nao so no daemon.
+          grep -q 'teto de 15' iso/build-iso.sh
+          # Os tres elos da corrente ISO -> alvo tem de existir.
+          # Ancorado na CHAMADA (a definicao continuaria la mesmo sem ninguem
+          # chamar — o payload nao entraria na midia e o teste passaria).
+          grep -qF 'stage_chat_payload "${dest}/chat"' iso/build-iso.sh
+          grep -q 'AI_CHAT_INSTALL' iso/common/firstboot.sh
+          grep -q 'CHAT_KEY=%s' iso/common/late-command.sh
+          grep -qE '^  run_chat_install$' build.sh
+          # e o chat tem de rodar ANTES do papel (para relatar falha do papel).
+          grep -q '=== Etapa 2/5: Chat da frota' build.sh
+          # A unit do systemd endurecida (CHAT.md §9): sem isso o daemon roda
+          # como root com o sistema inteiro gravavel.
+          # ProtectSystem=strict (nao `yes`): o modo estrito e o que torna o
+          # resto do sistema somente leitura. `yes` deixaria /usr gravavel.
+          grep -q '^NoNewPrivileges=yes$'  talk/ai-talk.service
+          grep -q '^ProtectSystem=strict$' talk/ai-talk.service
+          grep -q '^ProtectHome=yes$'      talk/ai-talk.service
+          grep -q '^PrivateTmp=yes$'       talk/ai-talk.service
+          grep -qE '^RestrictAddressFamilies=.*AF_INET.*AF_UNIX' talk/ai-talk.service
           grep -q 'compare_digest' talk/ai_talk.py
           grep -q 'TCP_NODELAY' talk/ai_talk.py
           grep -q 'os.fsync' talk/ai_talk.py

@@ -22,7 +22,7 @@
 |-----|--------|--------|--------|
 | [ADR-001](#adr-001--uma-única-base-de-iso-ubuntu-server) | Uma única base de ISO: Ubuntu Server | ✅ **Implementada** | `iso/preseed/` apagado; scripts em `iso/common/`; `--distro debian` → exit 2; guardas no CI |
 | [ADR-002](#adr-002--identidade-do-sistema-derivada-do-papel) | Identidade do sistema derivada do papel | ✅ **Implementada** | `resolve_identity()` no `build-iso.sh` + `make identity-test` (22 asserções) |
-| [ADR-003](#adr-003--chat-de-frota-ai-talk) | Chat de frota `ai-talk` | ✅ **F1 implementada** | `talk/ai_talk.py` + `make talk-test`; F2/F3 pendentes — ver [`docs/CHAT.md`](CHAT.md) |
+| [ADR-003](#adr-003--chat-de-frota-ai-talk) | Chat de frota `ai-talk` | ✅ **F1 + F2 implementadas** | `talk/` (transporte + `install.sh` + unit) + `--chat-*` na ISO + 3 testes; F3 e duas VMs pendentes — ver [`docs/CHAT.md`](CHAT.md) |
 | [ADR-004](#adr-004--latência-espaçamento-e-durabilidade-do-ai-talk) | Latência, espaçamento e durabilidade do `ai-talk` | ✅ **F1 implementada** | `CHAT.md` §6.7/§6.8 + 30 asserções em loopback |
 | [ADR-005](#adr-005--teto-de-15-nós-em-malha-completa) | Teto de **15 nós** em malha completa | ✅ **F1 implementada** (teto validado por teste; falta a bancada) | `CHAT.md` §5.2 |
 
@@ -316,7 +316,9 @@ identidade nunca foi vista num sistema instalado. É a mesma dívida **P5** do
 ## ADR-003 — Chat de frota `ai-talk`
 
 - **Data:** 2026-10-20
-- **Status:** ✅ **Aceita** (decisão de arquitetura); **não implementada**.
+- **Status:** ✅ **IMPLEMENTADA (F1 + F2)** — F1 na sessão #41 (transporte + CLI),
+  F2 na #44 (instalador, unit, ISO, `--chat-*` e verificação). **F3 (ponte com o
+  modelo) e a medição em duas VMs continuam pendentes.**
 - **Decisor:** dono do projeto (*“precisamos de um chat pela rede para que as
   IAs possam se comunicar entre si de forma rápida (pensei no talk ou algo do
   tipo)”*).
@@ -396,7 +398,9 @@ criptografia, e não é adequado para mensagens máquina-a-máquina.
 ## ADR-004 — Latência, espaçamento e durabilidade do `ai-talk`
 
 - **Data:** 2026-10-20 (sessão #40)
-- **Status:** ✅ **Aceita** (contrato); **não implementada**.
+- **Status:** ✅ **Implementada no transporte** (F1, sessão #41) — provada por
+  `make talk-test` em loopback. A **medição** de p50/p99 numa LAN real segue
+  pendente (Bloco R, duas VMs).
 - **Refina:** ADR-003. Contrato em [`docs/CHAT.md`](CHAT.md) §6.7 e §6.8.
 - **Decisor:** dono do projeto (pergunta *“como fica o delay entre as
   mensagens?”*).
@@ -488,7 +492,11 @@ O ADR-003 deixou três tempos implícitos e um deles contraditório:
 ## ADR-005 — Teto de 15 nós em malha completa
 
 - **Data:** 2026-10-20 (sessão #40)
-- **Status:** ✅ **Aceita** (contrato); **não implementada**.
+- **Status:** ✅ **Implementado no código e nos testes** (F1 #41 + F2 #44): o
+  teto de 15 é recusado em **três** lugares — `MAX_PEERS` no daemon, no
+  `talk/install.sh` e na geração da ISO. ⚠️ **A medição** da bancada de 15 nós
+  (CHAT.md §13.5) continua pendente: o que existe é o teto **aplicado**, não a
+  prova de que 280 msg/s cabem.
 - **Refina:** ADR-003 (que falava em “2–8 nós”).
 - **Contrato em:** [`docs/CHAT.md`](CHAT.md) §5.2, §6.4, §7, §13.5.
 - **Decisor:** dono do projeto (*“imagino umas 30 máquinas conversando entre

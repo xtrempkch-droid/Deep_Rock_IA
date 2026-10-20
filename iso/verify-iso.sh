@@ -870,6 +870,88 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 5-c. Chat da frota (ADR-003, docs/CHAT.md §13.2)
+# ---------------------------------------------------------------------------
+# O que se pode provar AQUI (conteúdo, sem bootar):
+#   * o código do chat foi para a mídia (senão o alvo não tem o que instalar);
+#   * as chaves foram com modo restrito (uma chave 0644 numa ISO é pública);
+#   * a lista de peers respeita o teto de 15 (ADR-005);
+#   * o late-command sabe copiar tudo isso (é o elo que já quebrou 2× no
+#     projeto: a corrente ISO → alvo).
+# O que NÃO se prova aqui: que dois nós conversam. Isso é o Bloco R (duas VMs).
+section "Chat da frota (ADR-003)"
+# ATENÇÃO: `fetch` imprime o CAMINHO local do arquivo extraído, não o
+# conteúdo. Comparar/contar o caminho como se fosse o arquivo foi um bug real
+# da primeira versão desta seção (dava "1 nó" para uma frota de 2 e "chave
+# inválida" para uma chave correta).
+TALK_SRC="$(fetch "/ai-cpu-os/talk/ai_talk.py" 2>/dev/null || true)"
+if [[ -n "$TALK_SRC" ]]; then
+  pass "código do chat na mídia (/ai-cpu-os/talk/ai_talk.py)"
+else
+  # Não é falha: uma ISO com --chat-disable é legítima. Mas, se o instalador
+  # estiver lá e o código não, a promessa não se cumpre.
+  if grep -q '2-f. Chat da frota' "$LATE_LOCAL" 2>/dev/null; then
+    fail "late-command tem a etapa do chat mas /ai-cpu-os/talk/ai_talk.py está AUSENTE"
+  else
+    skip "chat da frota não embarcado nesta ISO"
+  fi
+fi
+
+if [[ -n "$LATE_LOCAL" ]] && grep -q '2-f. Chat da frota' "$LATE_LOCAL" 2>/dev/null; then
+  pass "late-command.sh tem a etapa de cópia do chat para o alvo (2-f)"
+  # Os destinos têm de ser os do CONTRATO (§10.1); um caminho diferente faria o
+  # 1º boot procurar o arquivo no lugar errado.
+  if grep -q '/target/etc/ai-talk' "$LATE_LOCAL"; then
+    pass "late-command copia o chat para /etc/ai-talk do alvo"
+  else
+    fail "late-command não grava em /target/etc/ai-talk"
+  fi
+  if grep -q 'CHAT_KEY=%s' "$LATE_LOCAL" && grep -q 'CHAT_PEERS=%s' "$LATE_LOCAL"; then
+    pass "late-command registra os caminhos do chat no .iso-config"
+  else
+    fail "late-command não registra CHAT_KEY/CHAT_PEERS no .iso-config (o 1º boot não saberia dos arquivos)"
+  fi
+  # A cópia tem de fixar 0640: o ai-talk RECUSA chave legível por "outros".
+  if grep -q 'chmod 0640 /target/etc/ai-talk/fleet.key' "$LATE_LOCAL"; then
+    pass "chave do chat vai para o alvo com modo 0640"
+  else
+    fail "chave do chat sem chmod 0640 (o ai-talk recusaria a chave no alvo)"
+  fi
+else
+  skip "sem late-command.sh para conferir a cópia do chat"
+fi
+
+CHAT_PEERS_FILE_LOCAL="$(fetch "/ai-cpu-os-boot/chat/peers.txt" 2>/dev/null || true)"
+CHAT_PEERS_LOCAL=""
+[[ -n "$CHAT_PEERS_FILE_LOCAL" ]] && CHAT_PEERS_LOCAL="$(cat "$CHAT_PEERS_FILE_LOCAL" 2>/dev/null || true)"
+if [[ -n "$CHAT_PEERS_LOCAL" ]]; then
+  n_peers="$(printf '%s\n' "$CHAT_PEERS_LOCAL" | grep -c '[^[:space:]]' || true)"
+  if (( n_peers <= 15 )); then
+    pass "frota com ${n_peers} nó(s) — dentro do teto de 15 (ADR-005)"
+  else
+    fail "frota com ${n_peers} nós EXCEDE o teto de 15 (ADR-005): acima disso é relay/hub"
+  fi
+  # O formato é o que o install.sh consome: sem ele, o nó não vira peer.
+  if printf '%s\n' "$CHAT_PEERS_LOCAL" | grep '[^[:space:]]' | grep -qvE '^[a-z0-9][a-z0-9-]*='; then
+    fail "peers.txt tem linha fora do formato nome=ip"
+  else
+    pass "peers.txt no formato nome=ip"
+  fi
+fi
+
+CHAT_KEY_FILE_LOCAL="$(fetch "/ai-cpu-os-boot/chat/fleet.key" 2>/dev/null || true)"
+CHAT_KEY_LOCAL=""
+[[ -n "$CHAT_KEY_FILE_LOCAL" ]] && CHAT_KEY_LOCAL="$(cat "$CHAT_KEY_FILE_LOCAL" 2>/dev/null || true)"
+if [[ -n "$CHAT_KEY_LOCAL" ]]; then
+  hex="$(printf '%s' "$CHAT_KEY_LOCAL" | tr -d '[:space:]')"
+  if [[ "$hex" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    pass "chave global do chat presente e com 32 bytes"
+  else
+    fail "chave global do chat com tamanho/conteúdo inválido (esperado 64 hex)"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # 6. Entrada de boot automática
 # ---------------------------------------------------------------------------
 section "Boot"

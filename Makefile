@@ -42,11 +42,11 @@ SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
         build mods mods-check mods-test families families-test avx512-test gpu-check \
         iso iso-dry-run iso-lint iso-yaml iso-verify iso-vm \
         iso-select-test iso-repo-test iso-verify-test iso-release-test \
-        iso-space-test identity-test ci-guards-test \
+        iso-space-test identity-test iso-chat-test talk-install-test ci-guards-test \
         iso-lock-test \
         pendrives pendrive pendrive-test iso-check iso-check-test \
         ui ui-test network-fix network-test apt-fix apt-test \
-        talk-test \
+        talk-test talk-install-test iso-chat-test \
         docker docker-check ci clean
 
 help: ## Lista os alvos disponíveis
@@ -88,7 +88,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test identity-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test talk-test iso-dry-run ## Lint + docs + famílias + AVX-512 + identidade + testes de ISO + rede + UI + chat + guardas + dry-run
+validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test identity-test iso-chat-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test talk-test talk-install-test iso-dry-run ## Lint + docs + famílias + AVX-512 + identidade + testes de ISO + rede + UI + chat + guardas + dry-run
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -214,6 +214,12 @@ ui-test: ## Prova a interface web (API + salvaguardas; sem navegador, sem rede)
 
 talk-test: ## Prova o contrato do ai-talk (loopback, sem rede externa, sem root)
 	@bash tests/test-ai-talk.sh
+
+talk-install-test: ## Prova o talk/install.sh (config, chaves, unit; via --root)
+	@bash tests/test-ai-talk-install.sh
+
+iso-chat-test: ## Prova o chat DENTRO da ISO (--chat-*, payload, os 3 elos)
+	@bash tests/test-iso-chat.sh
 
 iso-lock-test: ## Prova a trava de instância única do gerador de ISO (flock real)
 	@bash tests/test-iso-lock.sh

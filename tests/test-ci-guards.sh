@@ -347,6 +347,31 @@ planta "o verificador deixar de conferir a derivacao do papel" iso/verify-iso.sh
 planta "tirar identity-test do validate" Makefile \
   sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test talk-test iso-dry-run|' Makefile
 
+# --- F2 do chat: o `ai-talk` tem de CHEGAR na máquina (ADR-003) ------------
+# Os dois modos de falha são silenciosos: o serviço sobe sem chave (promete
+# autenticação e não entrega) e a chave por nó não entra na config (o nó cai na
+# chave global e qualquer um assina como outro).
+planta "o instalador do chat deixar de recusar chave legível por outros" talk/install.sh \
+  sed_ 's|(8#$perms & 8#004) != 0|(8#$perms \& 8#004) == 99|g' talk/install.sh
+planta "o instalador do chat deixar o serviço ativo SEM chave" talk/install.sh \
+  sed_ 's|^  ENABLE_SERVICE=0$|  ENABLE_SERVICE=1|' talk/install.sh
+planta "o instalador do chat perder a chave POR NÓ" talk/install.sh \
+  sed_ 's|--peer-key|--ignorado|g' talk/install.sh
+planta "a ISO deixar de embarcar o payload do chat" iso/build-iso.sh \
+  sed_ 's|^  stage_chat_payload "${dest}/chat"$|  true|' iso/build-iso.sh
+planta "o firstboot deixar de repassar a intenção do chat ao build.sh" iso/common/firstboot.sh \
+  sed_ 's|^  export AI_CHAT_INSTALL=1$|  true|' iso/common/firstboot.sh
+planta "o late-command deixar de registrar os caminhos do chat" iso/common/late-command.sh \
+  sed_ 's|^printf .CHAT_KEY=%s|printf "CHAT_X=%s|' iso/common/late-command.sh
+planta "o build.sh deixar de instalar o chat (etapa 2.5)" build.sh \
+  sed_ 's|^  run_chat_install$|  : run_chat_install|' build.sh
+planta "a unit do chat perder o endurecimento (NoNewPrivileges)" talk/ai-talk.service \
+  sed_ 's|^NoNewPrivileges=yes|NoNewPrivileges=no|' talk/ai-talk.service
+planta "tirar talk-install-test do validate" Makefile \
+  sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test identity-test iso-chat-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test talk-test iso-dry-run|' Makefile
+planta "tirar iso-chat-test do validate" Makefile \
+  sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test identity-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test talk-test talk-install-test iso-dry-run|' Makefile
+
 # --- Acesso remoto: sem sshd a máquina instalada é um tijolo ---------------
 # Medido numa instalação real (sessão #36): o alvo subiu, pegou IP e não tinha
 # NENHUM listener (65535 portas em RST). Sem teclado/tela, não há conserto.

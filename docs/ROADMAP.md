@@ -115,7 +115,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 
 | Item                                                        | Início     | Nota                                                        |
 |-------------------------------------------------------------|------------|-------------------------------------------------------------|
-| 🧭 **Simplificação: uma ISO Ubuntu + identidade por papel + `ai-talk`** | 2026-10-20 | Decisões em [`DECISIONS.md`](DECISIONS.md) (ADR-001 a ADR-005) e contrato em [`CHAT.md`](CHAT.md). ✅ **P2 (F1 do chat) feito**: `talk/ai_talk.py` + `make talk-test` (30 asserções). Pendem P0 (Debian), P1 (identidade), P3 (ISO/duas VMs) e P4 (bancada de 15 nós). |
+| 🧭 **Simplificação: uma ISO Ubuntu + identidade por papel + `ai-talk`** | 2026-10-20 | Decisões em [`DECISIONS.md`](DECISIONS.md) (ADR-001 a ADR-005) e contrato em [`CHAT.md`](CHAT.md). ✅ **P0** (Debian removido, #42), **P1** (identidade por papel, #43), **P2/F1** (transporte, #41) e **P3/F2** (chat na máquina, #44). Pendem **P5** (boot de uma ISO), **Bloco R** (duas VMs) e **P4** (bancada de 15 nós) — o teto é aplicado, não medido. |
 | Validação em hardware real (Xeon E5-2680 v4, família `intel-broadwell`)      | 2026-10-07 | Aguardando acesso ao servidor físico para rodar o smoke-test. **Parcial:** o fluxo já foi validado em metal numa 3ª máquina (A8-9600) — ver `STATE.md` § 3.6 |
 | Validação em hardware real (Ryzen 5 3500X, família `amd-zen2`)              | 2026-10-07 | Aguardando build da imagem + teste do registry/Gitea        |
 | Medição de baseline vs. pós-tuning com `llama-bench`        | 2026-10-07 | ✅ **Primeira medição feita em metal** (A8-9600: pp64 17,05 · tg32 10,40 t/s). Falta o **antes × depois** para medir o ganho do tuning e as máquinas de referência |
@@ -155,9 +155,17 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
       asserções** em loopback (`make talk-test`, no `validate` e no CI).
       HMAC por nó, `ack` após `fsync`, espaçamento de 50 ms, fila 256 com
       exit 5, dedupe 8.192 e teto de 15 peers.
-- [ ] **P3 — `ai-talk` fase 2/3** — ISO + unit + etapa 2.5 do `build.sh` +
-      teste de duas VMs + ponte opcional com o `llama-server` (sem executar
-      comandos remotos). *(início previsto: a definir)*
+- [x] **P3 — `ai-talk` fase 2 (F2): o chat chega à máquina** — ✅ **FEITO
+      (sessão #44):** `talk/install.sh` (idempotente, `--dry-run`, `--root`),
+      unit endurecida, etapa **2/5** do `build.sh` (chat antes do papel),
+      flags `--chat-*` na ISO, payload em `/ai-cpu-os-boot/chat/`,
+      `late-command` copiando para `/etc/ai-talk`, seção do `verify-iso.sh`.
+      Provas: `talk-install-test` (**39**) e `iso-chat-test` (**31**);
+      `ci-guards` 100 → **110**. Ver `STATE.md` § 3.11.
+- [ ] **P3-b — Bloco R: duas VMs e a F3** — duas VMs trocando mensagens de
+      verdade (é o **único** teste que mede latência real; o loopback é mais
+      rápido que qualquer LAN) e a ponte opcional com o `llama-server`, que
+      **não** executa comandos recebidos. *(próximo depois do boot da ISO)*
 - [ ] **P4 — validar o teto de 15 nós** — bancada de 15 containers
       (`CHAT.md` §13.5): 14 conexões por nó, broadcast em ~2 RTTs, p99 ≤ 10 ms
       com 280 msg/s de fundo. Se não couber, entra **relay/hub** (ADR-005).

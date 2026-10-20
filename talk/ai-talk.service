@@ -1,0 +1,31 @@
+[Unit]
+Description=ai-talk — chat da frota ai-cpu-os (TCP 7331)
+Documentation=file:/opt/ai-cpu-os/docs/CHAT.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ai-talk
+Group=ai-talk
+StateDirectory=ai-talk
+RuntimeDirectory=ai-talk
+ExecStart=/usr/local/bin/ai-talk serve --config /etc/ai-talk/config.json
+Restart=on-failure
+RestartSec=2
+
+# Endurecimento (docs/CHAT.md §9). O serviço só precisa de:
+#   - ler /etc/ai-talk (config e chaves)
+#   - escrever em /var/lib/ai-talk (log) e /run/ai-talk (socket de controle)
+#   - abrir sockets INET/INET6 (transporte) e UNIX (CLI local)
+# Tudo o mais é negado. `ProtectSystem=strict` deixa o resto do sistema
+# somente leitura — por isso ReadWritePaths é explícito.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/ai-talk
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

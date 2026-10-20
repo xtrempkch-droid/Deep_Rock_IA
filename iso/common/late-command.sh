@@ -69,6 +69,16 @@ UNIT="/etc/systemd/system/ai-cpu-os-firstboot.service"
 ISO_MODEL_NAME='@@ISO_MODEL@@'
 MODEL_DST_DIR="/opt/models"
 
+## Chat da frota (ADR-003). `0` significa "nem instalar". Com `1`, o serviço é
+## instalado e fica habilitado **somente se houver chave** — quem decide e avisa
+## é o `talk/install.sh` no 1º boot; a ISO não inventa chave.
+## Ficam AQUI (topo), e não junto da seção 2-f, porque o `.iso-config` — escrito
+## na seção 2 — já os usa; sob `set -u`, usar antes de definir derruba o script.
+CHAT_INSTALL='@@CHAT_INSTALL@@'
+CHAT_NODE='@@CHAT_NODE@@'
+CHAT_PORT='@@CHAT_PORT@@'
+CHAT_BIND='@@CHAT_BIND@@'
+
 ## Nome do tarball da fonte do llama.cpp embutido na midia (vazio = sem fonte).
 ## O arquivo e copiado para o alvo e o 1o boot usa `--source` com ele: assim o
 ## passo mais demorado do 1o boot (compilar o llama.cpp) roda SEM rede, e o que
@@ -129,9 +139,10 @@ fi
 ## (`papel` = derivada da função; `explicito` = --username venceu; `padrao-auto`
 ## = --role auto, sem derivação). Prefixo ISO_ para não colidir com variáveis
 ## que o shell já define (HOSTNAME é uma delas).
-printf 'ROLE=%s\nFAMILY=%s\nFIRSTBOOT_REBOOT=%s\nDISTRO=%s\nISO_BUILD=%s\nMODEL_FILE=%s\nLLAMA_SRC=%s\nISO_USERNAME=%s\nISO_HOSTNAME=%s\nIDENTITY_SOURCE=%s\n' \
+printf 'ROLE=%s\nFAMILY=%s\nFIRSTBOOT_REBOOT=%s\nDISTRO=%s\nISO_BUILD=%s\nMODEL_FILE=%s\nLLAMA_SRC=%s\nISO_USERNAME=%s\nISO_HOSTNAME=%s\nIDENTITY_SOURCE=%s\nCHAT_INSTALL=%s\nCHAT_NODE=%s\nCHAT_PORT=%s\nCHAT_BIND=%s\n' \
     '@@ROLE@@' '@@FAMILY@@' '@@FIRSTBOOT_REBOOT@@' '@@DISTRO@@' '@@ISO_BUILD@@' "${MODEL_FILE}" "${LLAMA_SRC}" \
     '@@USERNAME@@' '@@HOSTNAME@@' '@@IDENTITY_SOURCE@@' \
+    "${CHAT_INSTALL}" "${CHAT_NODE}" "${CHAT_PORT}" "${CHAT_BIND}" \
     > "${DST}/.iso-config"
 
 ## ---------------------------------------------------------------------------
@@ -320,6 +331,65 @@ CFG
         log "AVISO: ${NETPLAN_SRC} ausente na midia; o alvo pode subir sem rede"
     fi
 fi
+
+## ---------------------------------------------------------------------------
+## 2-f. Chat da frota: chaves e lista de peers -> /etc/ai-talk do alvo
+## ---------------------------------------------------------------------------
+## Por que copiar as chaves AQUI (e nao no 1o boot): a midia ja esta montada e o
+## alvo ja esta sendo escrito. Alem disso, um erro de copia aparece no log da
+## instalacao, com a maquina ainda acessivel — no 1o boot ele viraria um
+## servico que nao sobe sem ninguem saber por que.
+##
+## O modo 0640 e obrigatorio: o proprio ai-talk RECUSA chave legivel por
+## "outros" (docs/CHAT.md §9). O dono definitivo (root:ai-talk) e acertado no
+## 1o boot, quando o usuario de sistema passa a existir.
+CHAT_KEY_DST=""
+CHAT_KEYDIR_DST=""
+CHAT_PEERS_DST=""
+
+if [ "${CHAT_INSTALL}" = "1" ]; then
+    if [ -d "${SRC}/ai-cpu-os-boot/chat" ]; then
+        mkdir -p /target/etc/ai-talk
+        chmod 0750 /target/etc/ai-talk
+        if [ -f "${SRC}/ai-cpu-os-boot/chat/fleet.key" ]; then
+            cp "${SRC}/ai-cpu-os-boot/chat/fleet.key" /target/etc/ai-talk/fleet.key
+            chmod 0640 /target/etc/ai-talk/fleet.key
+            CHAT_KEY_DST="/etc/ai-talk/fleet.key"
+            log "chat: chave global copiada para ${CHAT_KEY_DST} (0640)"
+        fi
+        if [ -d "${SRC}/ai-cpu-os-boot/chat/keys" ]; then
+            mkdir -p /target/etc/ai-talk/keys
+            chmod 0750 /target/etc/ai-talk/keys
+            for k in "${SRC}/ai-cpu-os-boot/chat/keys"/*.key; do
+                [ -f "$k" ] || continue
+                cp "$k" "/target/etc/ai-talk/keys/$(basename "$k")"
+                chmod 0640 "/target/etc/ai-talk/keys/$(basename "$k")"
+            done
+            CHAT_KEYDIR_DST="/etc/ai-talk/keys"
+            log "chat: chaves por no copiadas para ${CHAT_KEYDIR_DST}/"
+        fi
+        if [ -f "${SRC}/ai-cpu-os-boot/chat/peers.txt" ]; then
+            cp "${SRC}/ai-cpu-os-boot/chat/peers.txt" /target/etc/ai-talk/peers.txt
+            chmod 0644 /target/etc/ai-talk/peers.txt
+            CHAT_PEERS_DST="/etc/ai-talk/peers.txt"
+            log "chat: lista de peers copiada para ${CHAT_PEERS_DST}"
+        fi
+        if [ -z "${CHAT_KEY_DST}" ] && [ -z "${CHAT_KEYDIR_DST}" ]; then
+            log "chat: SEM chave na midia — o servico sera instalado desabilitado"
+        fi
+    else
+        log "chat: payload ausente na midia (o servico nasce desabilitado)"
+    fi
+else
+    log "chat: --chat-disable — nada sera instalado"
+fi
+
+## Os caminhos só são conhecidos DEPOIS da cópia (2-f). Em vez de adiar o
+## .iso-config inteiro, acrescentamos as três linhas — o firstboot.sh dá
+## `source` no arquivo e usa ${VAR:-}, então a ordem não importa.
+printf 'CHAT_KEY=%s\nCHAT_KEYDIR=%s\nCHAT_PEERS=%s\n' \
+    "${CHAT_KEY_DST}" "${CHAT_KEYDIR_DST}" "${CHAT_PEERS_DST}" \
+    >> "${DST}/.iso-config"
 
 ## ---------------------------------------------------------------------------
 ## 3. Serviço de primeiro boot

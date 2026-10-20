@@ -25,8 +25,13 @@
 > `--username`/`--hostname` explícitos vencem. A mídia registra a origem em
 > `.iso-config` (`IDENTITY_SOURCE`) e o `verify-iso.sh` confere a coerência.
 >
-> ⚠️ **Planejado, ainda não implementado:** chat da frota **`ai-talk`**
-> (ADR-003, contrato em [`docs/CHAT.md`](CHAT.md)) — só a F1 (transporte/CLI).
+> ✅ **Chat da frota (ADR-003, F2 na sessão #44):** flags `--chat-*`
+> (node/port/bind/peer/peers-file/key-file/keydir/disable), payload em
+> `/ai-cpu-os-boot/chat/` com chaves **0640**, o `late-command` copiando para
+> `/etc/ai-talk` e a etapa **2/5** do `build.sh` instalando o serviço. **Sem
+> chave** o serviço nasce **desabilitado** (nunca canal sem HMAC). Contrato em
+> [`docs/CHAT.md`](CHAT.md); ⚠️ duas VMs e a ponte com o modelo não foram
+> testadas.
 > ⚠️ **Após a remoção do caminho Debian, nenhuma ISO foi gerada nem bootada** —
 > as provas de comportamento (#21/#35/#37) são anteriores a ela.
 
@@ -316,6 +321,12 @@ Opções mais usadas:
 | `--password-hash '$6$…'` | Senha do usuário (gere com `mkpasswd -m sha-512`). Se omitido, gera e **mostra** uma. |
 | `--root-password-hash '$6$…'` | Senha do **root** (hash crypt). Se omitido, o root fica **bloqueado** (padrão). |
 | `--username NOME` | Usuário administrativo. Sem ele, **deriva do papel** (ADR-002): `inference`→`ai-inference`, `builder`→`ai-builder`, `auto`→`ai-cpu-os`. |
+| `--chat-key-file PATH` | Chave **global** do chat (32 bytes em hex, modo 0640). Sem chave, o serviço nasce desabilitado. |
+| `--chat-keydir DIR` | Um `<nome>.key` por nó (modo recomendado para frota). |
+| `--chat-peers-file FILE` | A frota: uma linha `nome=ip` por nó (até **15**, ADR-005). |
+| `--chat-peer NAME=IP` | Um nó individual (repetível). **Vence** o arquivo da frota. |
+| `--chat-node/-port/-bind` | Nome do nó (padrão: hostname do alvo), porta (7331) e endereço de escuta. |
+| `--chat-disable` | Não instala o chat nesta ISO. |
 | `--network auto` | Rede do sistema **instalado**: `auto`/`dhcp` (padrão = DHCP), `static` ou `none`. Ver a subseção "Rede do sistema instalado" em § 4.3. |
 | `--network-ip`, `--network-gateway`, `--network-dns`, `--network-interface` | Valores do modo `static` (IP aceita `192.168.1.50/24`; DNS padrão `1.1.1.1,8.8.8.8`). |
 | `--iso PATH` | Usa uma ISO local (trabalhar offline). |
@@ -881,7 +892,8 @@ tudo por script, idempotente, auditável.
 | ✅ **FEITO** | **Os 5 requisitos do § 3.1:** fonte, modelo e repositório na mídia; o 1º boot roda **sem rede** (provado). |
 | ✅ **FEITO** | **Remover o caminho Debian** (`--distro debian`/preseed) — ADR-001, **sessão #42**: scripts compartilhados movidos para `iso/common/`, `iso/preseed/` apagado, `verify-iso.sh`/`Makefile`/CI/`webui/`/testes limpos, `--distro debian` **aborta** com `exit 2` citando o ADR. |
 | ✅ **FEITO** | **Identidade derivada do papel** — ADR-002, **sessão #43**: `resolve_identity()` no `build-iso.sh`, `ai-inference`/`ai-builder`, `auto` mantém `ai-cpu-os` + aviso, identidade no `.iso-config`, coerência cobrada pelo `verify-iso.sh`, `make identity-test` (22 asserções) e a UI sugerindo o nome. |
-| 🔴 Alta (P2/P3) | **`ai-talk`** — ADR-003/`docs/CHAT.md`: transporte + CLI + teste offline; depois ISO/duas VMs + ponte opcional com o `llama-server`. |
+| ✅ **FEITO** | **`ai-talk` na ISO (F2)** — ADR-003, **sessão #44**: flags `--chat-*`, payload na mídia, `late-command` § 2-f, etapa 2/5 do `build.sh` e seção do verificador. |
+| 🔴 Alta (P3-b) | **`ai-talk` em duas VMs + F3** — o teste que mede latência real (Bloco R) e a ponte opcional com o `llama-server` (que **não** executa comandos recebidos). |
 | 🔴 Alta | **Validar a ISO em HARDWARE FÍSICO** (Xeon E5-2680 v4 e Ryzen 5 3500X): repetir instalação + 1º boot e medir (`llama-bench`). Blocos A–O do `VALIDATION.md`. |
 | 🟡 Média | **Fechar o resíduo air-gapped:** confirmar/desligar o download do **UI** do llama.cpp no build (ver § 6). |
 | 🟡 Média | **Testar o boot UEFI** (`make iso-vm VM_ARGS="--boot-mode uefi"`). |
@@ -1013,6 +1025,7 @@ config) e `aplicação concluída com sucesso` (o 1º boot **aplicou**).
 
 | Data | Mudança |
 |------|---------|
+| 2026-10-20 | 💬 **O chat da frota chega à máquina (ADR-003 F2, sessão #44).** Flags `--chat-*` (node/port/bind/peer/peers-file/key-file/keydir/disable); payload em `/ai-cpu-os-boot/chat/` (chaves **0640** na mídia também); `late-command.sh` § 2-f copia para `/etc/ai-talk` e registra `CHAT_KEY`/`CHAT_KEYDIR`/`CHAT_PEERS` no `.iso-config`; `firstboot.sh` repassa `AI_CHAT_*`; `build.sh` ganhou a **etapa 2/5** (chat **antes** do papel; falha é aviso). Sem chave o serviço nasce **desabilitado**. `verify-iso.sh` ganhou a seção "Chat da frota"; `talk-install-test` (39) e `iso-chat-test` (31). ⚠️ Nenhuma ISO gerada; duas VMs não testadas. |
 | 2026-10-20 | 🧑‍🔧 **Identidade derivada do papel (ADR-002, sessão #43).** `--role inference` → usuário/hostname `ai-inference`; `builder` → `ai-builder`; `auto` mantém `ai-cpu-os` + aviso (o papel só é conhecido no 1º boot). `--username`/`--hostname` explícitos vencem. A identidade vai também para o `.iso-config` (`ISO_USERNAME`/`ISO_HOSTNAME`/`IDENTITY_SOURCE`), o `verify-iso.sh` confere a **derivação** (não só a presença do campo) e a UI sugere o nome ao escolher o papel. `make identity-test` (22 asserções). Nenhuma ISO gerada — só `--check-templates`/`--dir`. |
 | 2026-10-20 | 🗑️ **O caminho Debian foi REMOVIDO (ADR-001, sessão #42).** `iso/preseed/` deixou de existir (scripts compartilhados foram para `iso/common/`), `--distro debian` **aborta** com exit 2 citando o ADR, `verify-iso.sh` ficou com uma base só e o layout da mídia passou a ser **`/ai-cpu-os-boot/`**. O CI reprova se `preseed/` voltar. `make validate` verde (ci-guards 93). ⚠️ Nenhuma ISO gerada/bootada depois da remoção. |
 | 2026-10-20 | 🧭 **Base única: Ubuntu Server (ADR-001).** O caminho Debian/preseed passou a **DEPRECADO**; `--distro debian` emitia aviso. Planejados: identidade pelo papel (ADR-002) e chat da frota `ai-talk` (ADR-003, `docs/CHAT.md`). O topo e o roadmap foram atualizados para refletir o que já foi executado (#21 Ubuntu em VM; #35/#37 Debian em VM/metal) e o que **não** foi (hardware Ubuntu, UEFI). |

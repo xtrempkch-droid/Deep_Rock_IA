@@ -29,6 +29,12 @@ readonly LOG="/var/log/ai-cpu-os-firstboot.log"
 ROLE="@@ROLE@@"
 FAMILY="@@FAMILY@@"
 FIRSTBOOT_REBOOT="@@FIRSTBOOT_REBOOT@@"
+# Chat da frota (ADR-003). Defaults seguros: sem o .iso-config o passo do chat
+# simplesmente não roda (e nada quebra).
+CHAT_INSTALL="@@CHAT_INSTALL@@"
+CHAT_NODE="@@CHAT_NODE@@"
+CHAT_PORT="@@CHAT_PORT@@"
+CHAT_BIND="@@CHAT_BIND@@"
 
 _ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { printf '[%s] [firstboot] %s\n' "$(_ts)" "$*"; }
@@ -80,6 +86,16 @@ if [[ -r "$CONFIG" ]]; then
   # Fonte do llama.cpp já copiada para /opt/llama-src.tar.gz pelo late-command.
   # Vazio = a ISO não trouxe fonte; nesse caso o build vai precisar de rede.
   LLAMA_SRC="${LLAMA_SRC:-}"
+  # Chat da frota: o late-command copiou as chaves/lista para /etc/ai-talk e
+  # registrou aqui QUAIS caminhos existem. Vazio = a ISO não trouxe chave, e o
+  # talk/install.sh instala o serviço desabilitado (nunca canal sem HMAC).
+  CHAT_INSTALL="${CHAT_INSTALL:-0}"
+  CHAT_NODE="${CHAT_NODE:-}"
+  CHAT_PORT="${CHAT_PORT:-7331}"
+  CHAT_BIND="${CHAT_BIND:-0.0.0.0}"
+  CHAT_KEY="${CHAT_KEY:-}"
+  CHAT_KEYDIR="${CHAT_KEYDIR:-}"
+  CHAT_PEERS="${CHAT_PEERS:-}"
 fi
 
 case "$ROLE" in
@@ -129,6 +145,27 @@ if [[ -n "$LLAMA_SRC" ]]; then
   fi
 else
   log "nenhuma fonte embutida nesta ISO: o build vai clonar o llama.cpp (precisa de rede)."
+fi
+
+# ---------------------------------------------------------------------------
+# Chat da frota: variáveis para a etapa 2.5 do build.sh (ADR-003)
+# ---------------------------------------------------------------------------
+# Mesmo padrão de AI_MODEL_FILE/AI_LLAMA_SOURCE: o `firstboot.sh` NÃO instala o
+# chat (quem instala é o `talk/install.sh`, chamado pelo build.sh). Ele só
+# repassa a intenção gravada na ISO. Exportar em vez de passar por flag porque
+# o `sudo` do build.sh limparia o ambiente de qualquer outro jeito.
+if [[ "$CHAT_INSTALL" == "1" ]]; then
+  export AI_CHAT_INSTALL=1
+  [[ -n "$CHAT_NODE" ]]  && export AI_CHAT_NODE="$CHAT_NODE"
+  [[ -n "$CHAT_PORT" ]]  && export AI_CHAT_PORT="$CHAT_PORT"
+  [[ -n "$CHAT_BIND" ]]  && export AI_CHAT_BIND="$CHAT_BIND"
+  [[ -n "$CHAT_KEY" ]]   && export AI_CHAT_KEY_FILE="$CHAT_KEY"
+  [[ -n "$CHAT_KEYDIR" ]]&& export AI_CHAT_KEYDIR="$CHAT_KEYDIR"
+  [[ -n "$CHAT_PEERS" ]] && export AI_CHAT_PEERS_FILE="$CHAT_PEERS"
+  log "chat da frota: ${CHAT_NODE:-<hostname>}:${CHAT_PORT} \
+(chave=${CHAT_KEY:-nenhuma} keydir=${CHAT_KEYDIR:-nenhum} peers=${CHAT_PEERS:-nenhum})"
+else
+  log "chat da frota: não será instalado (ISO gerada com --chat-disable)."
 fi
 
 # ---------------------------------------------------------------------------

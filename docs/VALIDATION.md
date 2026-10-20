@@ -1464,11 +1464,13 @@ llama-bench -m Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf -p 64 -n 32 -t 4
 
 ---
 
-## Bloco R — 💬 Chat da frota `ai-talk` (PLANEJADO — executar na fase F2)
+## Bloco R — 💬 Chat da frota `ai-talk` (roteiro — F2 pronta, execução pendente)
 
-> **Status:** ❌ **não executado.** Só existe o desenho (ADR-003/004/005 em
-> [`docs/DECISIONS.md`](DECISIONS.md) e contrato em [`docs/CHAT.md`](CHAT.md)).
-> Este bloco é o roteiro para quando o `talk/` existir.
+> **Status:** ❌ **não executado.** A **F1** e a **F2** estão prontas e
+> provadas offline (`make talk-test` 30, `talk-install-test` 39,
+> `iso-chat-test` 31); o que falta é a execução **em duas máquinas de verdade**
+> — o único teste que mede latência real. Contrato em
+> [`docs/CHAT.md`](CHAT.md); decisões em [`docs/DECISIONS.md`](DECISIONS.md).
 
 **Objetivo:** provar que dois nós da frota trocam mensagens, recebem `ack`,
 recusam assinatura inválida, respeitam o espaçamento de 50 ms e não derrubam a
@@ -1480,9 +1482,15 @@ inferência quando o chat falha.
 
 **Pré-requisitos**
 
-- [ ] Fase F1 concluída (`talk/` + CLI + `tests/test-ai-talk.sh` verdes).
-- [ ] Fase F2 concluída (unit, `talk/install.sh`, etapa 2.5 do `build.sh`,
-      flags `--chat-*` na ISO).
+- [x] Fase F1 concluída (`talk/` + CLI + `tests/test-ai-talk.sh` verdes).
+- [x] Fase F2 concluída (unit, `talk/install.sh`, etapa **2/5** do `build.sh`,
+      flags `--chat-*` na ISO) — provada offline por `make iso-chat-test`.
+
+> ⚠️ **O que já está provado offline (não substitui este bloco):** o
+> `install.sh` gera config/chaves/unit coerentes (`--root`), a ISO embarca o
+> payload com modo 0640 e os três elos existem. O que **só** duas máquinas
+> provam: entrega real, `ack` pela rede, latência p50/p99 e recuperação depois
+> de derrubar um nó.
 - [ ] Duas VMs na **mesma bridge** (ou duas máquinas na mesma LAN), cada uma
       com uma ISO e a **sua** chave (ADR-005) — o peer correspondente precisa
       ter a chave do outro.

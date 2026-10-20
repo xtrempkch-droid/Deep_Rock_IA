@@ -325,7 +325,7 @@ run_system_mods() {
     log_warn "Mods do conjunto 'system' puladas (--skip-mods)."
     return 0
   fi
-  log_info "=== Etapa 1/4: Mods do conjunto 'system' ==="
+  log_info "=== Etapa 1/5: Mods do conjunto 'system' ==="
   local engine="${MODS_DIR}/apply.sh"
   require_file "$engine"
   local -a flags=()
@@ -333,8 +333,52 @@ run_system_mods() {
   run "Aplicando conjunto 'system'" bash "$engine" apply --set system "${flags[@]}"
 }
 
+# ---------------------------------------------------------------------------
+# Etapa 2/5 — Chat da frota (`ai-talk`, ADR-003)
+# ---------------------------------------------------------------------------
+# POR QUE ANTES DO PAPEL: se a instalação do papel falhar, a máquina precisa
+# poder CONTAR isso pela rede. O chat é o canal de relato da frota; instalá-lo
+# depois da inferência inverteria a ordem de utilidade.
+#
+# POR QUE DEGRADA: o chat não pode impedir a inferência de subir (Regra 13-a).
+# Falha aqui vira AVISO; o `set -e` do build continua valendo para o resto.
+run_chat_install() {
+  local installer="${SCRIPT_DIR}/talk/install.sh"
+  if [[ ! -f "$installer" ]]; then
+    log_warn "talk/install.sh não encontrado; chat da frota NÃO será instalado."
+    return 0
+  fi
+
+  # `AI_CHAT_INSTALL` vem do firstboot.sh (ISO com --chat-*). Numa execução
+  # manual sem a variável, o padrão é NÃO instalar: quem quer o chat numa
+  # máquina já instalada roda o talk/install.sh explícito (com a chave na mão).
+  if [[ "${AI_CHAT_INSTALL:-0}" != "1" ]]; then
+    log_info "=== Etapa 2/5: Chat da frota: não solicitado (sem AI_CHAT_INSTALL=1) ==="
+    return 0
+  fi
+
+  log_info "=== Etapa 2/5: Chat da frota (ai-talk) ==="
+  local -a args=(--node "${AI_CHAT_NODE:-$(hostname -s 2>/dev/null || echo ai-cpu-os)}")
+  args+=(--role "$ROLE")
+  [[ -n "${AI_CHAT_PORT:-}" ]]      && args+=(--port "$AI_CHAT_PORT")
+  [[ -n "${AI_CHAT_BIND:-}" ]]      && args+=(--bind "$AI_CHAT_BIND")
+  [[ -n "${AI_CHAT_KEY_FILE:-}" ]]  && args+=(--key-file "$AI_CHAT_KEY_FILE")
+  [[ -n "${AI_CHAT_KEYDIR:-}" ]]    && args+=(--keydir "$AI_CHAT_KEYDIR")
+  [[ -n "${AI_CHAT_PEERS_FILE:-}" ]] && args+=(--peers-file "$AI_CHAT_PEERS_FILE")
+  [[ $DRY_RUN -eq 1 ]] && args+=(--dry-run)
+  [[ $ASSUME_YES -eq 1 ]] && args+=(--yes)
+
+  if bash "$installer" "${args[@]}"; then
+    log_ok "chat da frota instalado."
+  else
+    # AVISO, não erro: a inferência é o objetivo do projeto; o chat é o canal.
+    log_warn "o chat da frota NÃO foi instalado (rc=$?). Seguindo com o papel."
+    log_warn "  Conserte depois com: sudo bash ${installer} --help"
+  fi
+}
+
 run_role_install() {
-  log_info "=== Etapa 2/4: Instalação do papel '${ROLE}' (família ${FAMILY}) ==="
+  log_info "=== Etapa 3/5: Instalação do papel '${ROLE}' (família ${FAMILY}) ==="
   local installer="${ROLES_DIR}/${ROLE}/install.sh"
   require_file "$installer"
   local -a flags=()
@@ -357,7 +401,7 @@ run_role_install() {
 }
 
 run_verification() {
-  log_info "=== Etapa 3/4: Verificação do tuning ==="
+  log_info "=== Etapa 4/5: Verificação do tuning ==="
   if [[ $DRY_RUN -eq 1 ]]; then
     log_info "[dry-run] Pularia verificação de sysctl/governor/THP."
     return 0
@@ -432,7 +476,7 @@ run_tests() {
     log_warn "Smoke-test pulado (--skip-tests)."
     return 0
   fi
-  log_info "=== Etapa 4/4: Smoke-test ==="
+  log_info "=== Etapa 5/5: Smoke-test ==="
   local t="${TESTS_DIR}/smoke-test.sh"
   if [[ ! -f "$t" ]]; then
     log_warn "smoke-test.sh não encontrado; pulando."
@@ -483,6 +527,7 @@ main() {
   fi
 
   run_system_mods
+  run_chat_install
   run_role_install
   run_verification
   ensure_ssh

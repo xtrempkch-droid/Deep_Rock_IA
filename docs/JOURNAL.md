@@ -2402,6 +2402,68 @@ garante os arquivos íntegros acima.
   (basta rodar na máquina de teste).
 - **Commits:** *(ver `git log`)*.
 
+### Sessão #44 — 2026-10-20 · 💬 ADR-003 F2: o chat da frota chega à máquina
+
+- **Objetivo:** o dono pediu o ADR-003. A F1 (transporte) já existia desde a
+  #41; o que faltava era tudo o que transforma "existe um daemon" em "a máquina
+  tem o serviço": instalador, unit, ISO e a corrente até o primeiro boot.
+- **O que foi feito:**
+  - `talk/install.sh` (idempotente, `--dry-run`, `--yes`, `--root`,
+    `--status`): cria o usuário de sistema `ai-talk`, escreve o config
+    (`0640`), copia as chaves (`0640`), gera a unit e habilita o serviço —
+    **só se houver chave**. Sem chave: instala **desabilitado** e avisa.
+  - `talk/ai-talk.service` com o endurecimento do §9 (`NoNewPrivileges`,
+    `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`,
+    `RestrictAddressFamilies`).
+  - `iso/build-iso.sh`: flags `--chat-node/-port/-bind/-peer/-peers-file/
+    -key-file/-keydir/-disable` + `validate_chat` + `stage_chat_payload`
+    (payload em `/ai-cpu-os-boot/chat/`, chaves `0640` na mídia também).
+  - `iso/common/late-command.sh`: seção **2-f** copia o payload para
+    `/target/etc/ai-talk` e registra `CHAT_KEY`/`CHAT_KEYDIR`/`CHAT_PEERS` no
+    `.iso-config`.
+  - `iso/common/firstboot.sh`: exporta `AI_CHAT_*` (mesmo padrão de
+    `AI_MODEL_FILE`/`AI_LLAMA_SOURCE`).
+  - `build.sh`: **etapa 2/5** (`run_chat_install`) — o chat vem **antes** do
+    papel, para a máquina poder relatar uma falha da inferência por ele; falha
+    do chat é **aviso**, nunca derruba o build (Regra 13-a).
+  - `iso/verify-iso.sh`: seção "Chat da frota (ADR-003)".
+  - Testes novos: `tests/test-ai-talk-install.sh` (**39**) e
+    `tests/test-iso-chat.sh` (**31**); `make talk-install-test` e
+    `make iso-chat-test` no `validate` e no CI; `ci-guards` 100 → **110**.
+- **Decisões:**
+  - **`--chat-peer` vence o `--chat-peers-file`** independente da ordem ("a
+    exceção explícita manda" é previsível; "o último vence" não é).
+  - O gerador de config passou a emitir **sempre** a forma objeto
+    (`{"addr": …}`) para os peers: o contrato aceita a string como atalho, mas
+    uma config gerada pelo projeto não deve ter dois formatos.
+  - O teto de 15 é cobrado em **três** lugares (daemon, instalador, ISO).
+- **Bugs reais encontrados por execução (cinco, todos meus):**
+  1. **`fetch` devolve o CAMINHO, não o conteúdo** — a primeira versão da seção
+     do verificador contava/comparava o caminho e reprovava uma ISO correta
+     ("1 nó" para 2 peers, "chave inválida" para uma chave boa).
+  2. **Chave por nó não entrava na config com `--root`**: o gerador testava
+     `os.path.isfile(keys/<nome>.key)` no caminho **prefixado**. O peer saía
+     sem `key_file` e cairia na chave global — exatamente o que o ADR-005
+     existe para evitar. Agora a chave é explícita (`--peer-key`).
+  3. **Caminho prefixado indo para a config do alvo** (`/tmp/…/etc/ai-talk`):
+     no alvo o daemon morreria. Agora a config grava `/etc/ai-talk/…`.
+  4. **`--peers-file` vencia o `--peer`** (ordem de leitura invertida),
+     ao contrário do documentado.
+  5. **Seis guardas decorativos meus**, pegos pelo `ci-guards-test`:
+     `ENABLE_SERVICE=0` (aparece em `--no-service`), `stage_chat_payload`
+     (a definição sobra), `run_chat_install` (idem), `NoNewPrivileges`
+     (`=no` casa `^NoNewPrivileges=`), `8#004` e `--peer-key` (sem guarda).
+     Todos reancorados na **condição/valor**.
+- **Resultado:** `make validate` **verde** — `ai-talk-install` **39**,
+  `iso-chat` **31**, `ci-guards` **110**, `ai-talk` 30, `webui` 51,
+  `role-identity` 22, `iso-lint` OK, `docs` OK.
+- **O que NÃO foi provado:** **duas VMs trocando mensagens** (Bloco R) — o
+  único teste que mede latência real; o **serviço rodando sob systemd** de
+  verdade (o teste usa `--root`, sem `useradd`/`systemctl`); a **bancada de 15
+  nós** (o teto é aplicado, não medido); e **nenhuma ISO** foi gerada ou
+  bootada depois de todas as mudanças.
+- **Commits:** *(ver `git log`)*.
+
 ### Sessão #43 — 2026-10-20 · 🧑‍🔧 ADR-002: a identidade do sistema segue a FUNÇÃO
 
 - **Objetivo:** o dono pediu *"o usuário será definido pela função (builder ou
@@ -3137,17 +3199,18 @@ journal e no arquivo de log:
 |--------|---------|--------|
 | **Uma ISO Ubuntu** | Debian/preseed **removido**. O runtime Debian continua suportado. | ✅ **FEITO (#42)** — `iso/common/`, `--distro debian` aborta |
 | **Identidade por papel** | `inference`→`ai-inference`; `builder`→`ai-builder`; `auto`→`ai-cpu-os` + aviso; flags explícitas vencem. | ✅ **FEITO (#43)** — `resolve_identity()` + `make identity-test` (22). **Falta** ver num sistema instalado (P5) |
-| **Chat da frota** | `ai-talk`: TCP 7331, JSON lines, HMAC, stdlib; fases F1/F2/F3. | ⚠️ **F1 no código** (`talk/ai_talk.py` + `make talk-test`); F2/F3 pendentes |
+| **Chat da frota** | `ai-talk`: TCP 7331, JSON lines, HMAC, stdlib; fases F1/F2/F3. | ✅ **F1 + F2** (#41/#44): transporte, instalador, unit e ISO. ⚠️ **F3** e **duas VMs** pendentes |
 | **Delay entre mensagens** | Intervalo mínimo de **50 ms** entre `msg` do mesmo par (20 msg/s); `ack`/`hello` isentos; fila **256** com **exit 5** no overflow; p99 ≤ 10 ms; `fsync` por mensagem. | ✅ **no código e provado** (`make talk-test`) |
 | **Teto de nós** | **15 nós** em malha completa (14 conexões/nó); acima disso, **relay/hub obrigatório**. Chave por nó, `dedupe_window=8192`, `max_out_per_sec=120`. | ⚠️ **no código**, mas **nunca medido** com 15 nós (P4) |
-| **Ordem** | P0 (Debian) ✅ → P1 (identidade) ✅ → **P5 (boot de uma ISO)** ← agora → P3 (ISO/duas VMs/ponte) → P4 (bancada). | `docs/STATE.md` § 6 |
+| **Ordem** | P0 ✅ → P1 ✅ → F2 do chat ✅ → **P5 (boot de uma ISO)** ← agora → Bloco R (duas VMs) → P4 (bancada de 15). | `docs/STATE.md` § 6 |
 
-> ⚠️ **Não confunda plano com fato.** A identidade por papel está no código,
-> mas **nunca foi vista num sistema instalado**; o `ai-talk` não está na ISO e
-> não tem unit systemd; e **não há medição** de latência nem do teto de 15 nós
-> — os números são cálculo.
-> ⚠️ E, desde a remoção do caminho Debian (#42) e a identidade por papel (#43),
-> **nenhuma ISO foi gerada nem bootada**.
+> ⚠️ **Não confunda plano com fato.** A identidade por papel e o chat estão no
+> código e na ISO, mas **nunca foram vistos num sistema instalado**; o
+> `ai-talk` tem unit, mas **nunca rodou sob systemd** nos testes (que usam
+> `--root`); e **não há medição** de latência nem do teto de 15 nós — os
+> números são cálculo.
+> ⚠️ E, desde a remoção do caminho Debian (#42), **nenhuma ISO foi gerada nem
+> bootada**.
 
 ---
 
@@ -3161,6 +3224,8 @@ journal e no arquivo de log:
 | **Apagar um diretório da mídia** (`iso/preseed/`) sem varrer os guardas | Guardas que fazem `grep` num arquivo inexistente **derrubam o job com rc 2** — e o `test-ci-guards` acusa "o job falha numa árvore LIMPA". Pior: ao substituir um bloco grande do workflow, você leva guardas embora **sem perceber** (foi o caso do `--no-mmap`), e o único sinal é uma violação plantada que **para de reprovar** | Depois de mover/apagar arquivo da mídia: rode `make ci-guards-test` **antes** de olhar o `validate`. Ele é o detector de guarda quebrado **e** de guarda ausente |
 | Trocar o **nome** de um invariante e deixar o guarda ancorado no texto antigo | `grep -q 'late_command'` passou a apontar para um arquivo que tem `late-commands:` — o guarda nunca reprovava e ainda assim "passava" | Ancore no **valor** que importa (`-map … /autoinstall.yaml`, `geoip: false`, `dedupe_window": 8192`), nunca num nome solto |
 | **Guarda que só "passa" porque o valor aparece num comentário** | `grep -q 'ai-inference' iso/build-iso.sh` continuava verde mesmo trocando a derivação por `ai-cpu-os` — o nome está nos comentários e na mensagem de log | Ancore na **estrutura** que executa: braço do `case` (`^    inference) printf 'ai-inference'`), condição (`^  if \[\[ $USERNAME_EXPLICIT -eq 1 \]\]`). Se o `ci-guards-test` disser "NÃO reprova", o guarda é decorativo — não insista nele |
+| **Confundir o retorno de um helper com o CONTEÚDO do arquivo** | `fetch` do `verify-iso.sh` imprime o **caminho** do arquivo extraído. Tratar esse caminho como o arquivo fez o verificador contar "1 nó" numa frota de 2, dizer que a chave de 32 bytes era inválida e reprovar uma ISO correta | Ou o helper imprime o caminho e quem chama faz `cat`, ou imprime o conteúdo. Nunca os dois na mesma função — e, ao escrever a checagem, imprima o valor antes de julgar |
+| **Testar um caminho de arquivo com `os.path.isfile` quando há prefixo (`--root`)** | O gerador de config decidia a chave por nó com `isfile(keys/<nome>.key)` no caminho **prefixado** pelo `--root`; o arquivo não existia, o peer saía sem `key_file` e cairia na chave global (falha silenciosa de autenticação) | Passe a decisão de fora para dentro (`--peer-key nome=/caminho/do/ALVO`). Um teste com `--root` pega isso; um teste no sistema real não pegaria |
 | **Código que nunca é exercitado porque o default não o alcança** | O `verify-iso.sh` cobrava `ROLE`/`FAMILY` procurando **aspas duplas** num template que usa **simples**. Como `make iso-yaml` sempre rodou com `--role auto`, o ramo jamais rodou — e o primeiro teste com papel concreto reprovou uma árvore correta | Todo ramo condicional precisa de **um teste com o valor que o ativa**. Se só existe teste do default, o ramo é código morto até o dia em que alguém o usa |
 | Usar **uma chave** para a frota inteira | Qualquer nó assina como outro (`from` é só um campo) | Chave **por nó** (`peers[nome].key_file`) quando a frota passa de 2–3 máquinas; o receptor verifica com a chave do `from` |
 | Derivar o **usuário do papel** com `--role auto` | O papel `auto` só é conhecido no **1º boot**; nessa hora o usuário do instalador já foi criado | Identidade derivada exige `--role inference|builder` (ADR-002); `auto` mantém `ai-cpu-os` + aviso |

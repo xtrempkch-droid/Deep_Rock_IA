@@ -1,7 +1,8 @@
 # `talk/` — o chat da frota (`ai-talk`)
 
-> **Fase F1 implementada** (transporte + CLI + testes offline). A integração com
-> a ISO é a **F2**. Contrato completo: [`docs/CHAT.md`](../docs/CHAT.md).
+> **F1 e F2 implementadas**: transporte + CLI (F1) e instalador + unit +
+> integração na ISO (F2). Falta a **F3** (ponte com o modelo) e o teste com
+> duas VMs. Contrato completo: [`docs/CHAT.md`](../docs/CHAT.md).
 > Decisões: ADR-003/004/005 em [`docs/DECISIONS.md`](../docs/DECISIONS.md).
 
 ## O que é
@@ -20,9 +21,32 @@ fora da biblioteca padrão do Python 3.
 ## Testar (o que a F1 prova)
 
 ```bash
-make talk-test          # 30 asserções, loopback, sem rede externa e sem root
-bash tests/test-ai-talk.sh -v
+make talk-test           # 30 asserções: transporte (loopback, sem root)
+make talk-install-test   # 39 asserções: instalador (--root, sem systemd)
+make iso-chat-test       # 31 asserções: chat dentro da ISO (--chat-*)
 ```
+
+## Instalar (numa máquina já instalada, ou pelo 1º boot da ISO)
+
+```bash
+# Sem chave, o serviço é instalado DESABILITADO (um canal sem HMAC não
+# autentica ninguém) — o script avisa e diz o comando para completar depois.
+sudo bash talk/install.sh --node ai-inference \
+     --peer ai-builder=192.168.0.20 --key-file /etc/ai-talk/fleet.key
+
+# Frota maior: a lista num arquivo + uma chave por nó (até 15 nós, ADR-005)
+sudo bash talk/install.sh --node ai-inference \
+     --peers-file frota.txt --keydir keys/
+
+sudo bash talk/install.sh --status     # relata sem alterar
+sudo bash talk/install.sh --dry-run    # mostra o que faria
+```
+
+Na ISO, tudo isso é decidido na geração: `--chat-key-file`, `--chat-keydir`,
+`--chat-peers-file`, `--chat-peer`, `--chat-port`, `--chat-bind`,
+`--chat-node` e `--chat-disable` (ver [`docs/ISO.md`](../docs/ISO.md) § 4.3).
+O `build.sh` instala o chat na **etapa 2/5** — antes do papel, para a máquina
+poder relatar uma falha da inferência pelo próprio chat.
 
 Cobre: entrega + `ack` + `fsync`, espaçamento de 50 ms por par, `hello` isento,
 `ping` throttled, fila com **exit 5** no overflow, dedupe de `id`, assinatura

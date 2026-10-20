@@ -405,9 +405,11 @@ cd .. && rm -rf Deep_Rock_IA
 > **A identidade segue a FUNÇÃO da máquina** (ADR-002): `--role inference` cria
 > o usuário/hostname **`ai-inference`**, `--role builder` cria **`ai-builder`**.
 > Sem papel concreto (`auto`) fica `ai-cpu-os` — com aviso, porque o papel só é
-> conhecido no primeiro boot. O **chat da frota `ai-talk`** está **planejado**
-> (só o transporte existe hoje); veja [`docs/DECISIONS.md`](docs/DECISIONS.md)
-> e [`docs/CHAT.md`](docs/CHAT.md).
+> conhecido no primeiro boot. O **chat da frota `ai-talk`** já vai na ISO
+> (flags `--chat-*`): ele instala o serviço, as chaves e a lista de peers —
+> **sem chave ele nasce desabilitado**, porque um canal sem HMAC não autentica
+> ninguém. Veja [`docs/DECISIONS.md`](docs/DECISIONS.md) e
+> [`docs/CHAT.md`](docs/CHAT.md).
 
 ```bash
 # Gerar a ISO (precisa de xorriso: sudo apt install -y xorriso curl)

@@ -90,19 +90,21 @@ lá que `detect-hardware.sh` vê o SMBIOS completo e escolhe a família e o pape
 > - **ADR-002 — identidade pelo papel.** ✅ **CONCLUÍDO (P1)** em 2026-10-20:
 >   `inference` → `ai-inference`; `builder` → `ai-builder`; `auto` →
 >   `ai-cpu-os` + aviso; `--username` e `--hostname` explícitos vencem.
-> - **ADR-003 — chat de frota `ai-talk`.** TCP 7331 na LAN, JSON lines,
->   HMAC-SHA256, Python stdlib; contrato em [`docs/CHAT.md`](docs/CHAT.md).
->   ⚠️ **Só a F1** (transporte + CLI + teste offline); F2/F3 pendentes.
+> - **ADR-003 — chat de frota `ai-talk`.** ✅ **F1 + F2 CONCLUÍDAS** (2026-10-20):
+>   transporte + CLI (#41) e **instalador + unit + ISO** (#44) — flags
+>   `--chat-*`, payload em `/ai-cpu-os-boot/chat/`, etapa **2/5** do
+>   `build.sh`. ⚠️ **F3** (ponte com o modelo) e a **medição em duas VMs**
+>   continuam pendentes.
 > - **ADR-004 — latência, espaçamento e durabilidade.** 50 ms entre `msg` do
 >   mesmo par (20 msg/s), fila de 256 com exit 5, p99 ≤ 10 ms e `fsync` por
 >   mensagem (§6.7/§6.8 do `CHAT.md`).
 > - **ADR-005 — teto de 15 nós** em malha completa; acima disso, relay/hub é
 >   obrigatório (`CHAT.md` §5.2).
 >
-> ⚠️ **Decisão não é fato:** o `talk/` existe só em **F1**
-> (transporte/CLI/loopback): não há serviço, ISO nem teste com duas VMs. O
-> próximo passo é **P3 (ISO/duas VMs)** e a dívida **P5** (gerar e bootar uma
-> ISO depois das mudanças) — ver `docs/STATE.md` § 6.
+> ⚠️ **Decisão não é fato:** o chat tem instalador, unit e caminho na ISO, mas
+> **nunca rodou sob systemd** nos testes (que usam `--root`) nem entre duas
+> VMs. O próximo passo é a dívida **P5** (gerar e bootar uma ISO depois de
+> todas as mudanças) e depois o **Bloco R** — ver `docs/STATE.md` § 6.
 
 ---
 
@@ -247,10 +249,14 @@ ai-cpu-os/
     ├── test-iso-lock.sh    # Trava de instância única do gerador (flock real)
     ├── test-webui.sh       # Interface web: API + salvaguardas (sem navegador)
     ├── test-ai-talk.sh     # Contrato do chat da frota (loopback, sem rede)
+    ├── test-ai-talk-install.sh # Instalador do chat (--root; config/chaves/unit)
+    ├── test-iso-chat.sh    # Chat na ISO: --chat-*, payload e os 3 elos
     └── fixtures/           # SHA256SUMS REAIS + saída REAL do apt-cache policy
-├── talk/                   # 💬 `ai-talk` — chat da frota (F1 pronta; F2 = ISO)
+├── talk/                   # 💬 `ai-talk` — chat da frota (F1 + F2 prontas)
 │   ├── ai_talk.py          # daemon + CLI (stdlib; TCP 7331, JSON lines, HMAC)
-│   └── README.md           # uso, `make talk-test` e o que ainda NÃO existe
+│   ├── install.sh          # instalador idempotente (--root/--dry-run/--status)
+│   ├── ai-talk.service     # unit endurecida (NoNewPrivileges, ProtectSystem)
+│   └── README.md           # uso, os três testes e o que ainda NÃO existe
 └── webui/                  # 🖥️ Interface web local (criar/conferir a ISO)
     ├── server.py           # Servidor só-stdlib: lista branca de ações + SSE
     └── index.html          # Página única, sem CDN (funciona offline)
@@ -476,6 +482,11 @@ Estas regras são **obrigatórias**:
     presença do campo. Mexeu na tabela? Atualize **três** lugares: o
     `resolve_identity()`, a tabela `ROLE_IDENTITY` da `webui/` e o teste.
 18. **`ai-talk` é transporte, não orquestrador (ADR-003, `docs/CHAT.md`).**
+    ✅ **Implementado até a F2** (sessão #44): `talk/install.sh`, unit
+    endurecida, `--chat-*` na ISO e etapa 2/5 do `build.sh`. Mexeu em qualquer
+    elo? Rode `make talk-test talk-install-test iso-chat-test` (30+39+31) — os
+    testes cobrem a corrente inteira, e `ci-guards-test` prova que os guardas
+    reprovam.
     Invariantes obrigatórios:
     - **Não é o `talk` do netkit.** Nada de `talkd`, UDP 517/518 ou protocolo
       antigo; o componente é `talk/` + binário `ai-talk` (TCP 7331, JSON lines,
@@ -507,7 +518,21 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-20 (sessão #43)
+- **Data:** 2026-10-20 (sessão #44)
+- **O que mudou:** 💬 **ADR-003 F2: o chat da frota chega à máquina.** O
+  transporte existia (#41); faltava tudo o que faz dele um serviço.
+  Entraram `talk/install.sh` (idempotente, `--dry-run`, `--root`, `--status`;
+  **sem chave instala DESABILITADO** — canal sem HMAC não autentica),
+  `talk/ai-talk.service` endurecida, as flags `--chat-*` no `build-iso.sh`
+  (payload em `/ai-cpu-os-boot/chat/` com chaves **0640**), a seção **2-f** do
+  `late-command.sh` (copia para `/etc/ai-talk` e registra os caminhos no
+  `.iso-config`), o repasse `AI_CHAT_*` do `firstboot.sh` e a **etapa 2/5** do
+  `build.sh` (chat **antes** do papel; falha é aviso). Provas:
+  `talk-install-test` (**39**), `iso-chat-test` (**31**) e a seção do
+  `verify-iso.sh`; `ci-guards` 100 → **110**.
+  ⚠️ **Não provado:** duas VMs, serviço real sob systemd e bancada de 15 nós.
+  Nenhuma ISO gerada/bootada desde a #21.
+- **Data anterior:** 2026-10-20 (sessão #43)
 - **O que mudou:** 🧑‍🔧 **ADR-002 executado: a identidade do sistema segue a
   FUNÇÃO.** `resolve_identity()` no `iso/build-iso.sh` mapeia `--role inference`
   → **`ai-inference`**, `builder` → **`ai-builder`** (usuário e hostname);

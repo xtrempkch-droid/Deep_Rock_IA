@@ -179,6 +179,19 @@ GENERATED_PASSWORD=""
 #   static          → IP fixo (exige --network-ip e --network-gateway)
 #   none            → não grava configuração de rede (comportamento antigo)
 NETWORK_MODE="auto"
+
+# --- chat da frota (ADR-003, docs/CHAT.md) ---------------------------------
+# O `ai-talk` vai NA ISO (é runtime da frota), com a configuração decidida aqui
+# e aplicada no 1º boot. Sem chave, o serviço é instalado DESABILITADO — um
+# canal sem HMAC não autentica ninguém e não existe chave default.
+CHAT_INSTALL=1
+CHAT_NODE=""            # padrão: o hostname do alvo (ADR-002 já dá ai-*)
+CHAT_PORT=7331
+CHAT_BIND="0.0.0.0"
+CHAT_KEY_FILE=""
+CHAT_KEYDIR=""
+CHAT_PEERS_FILE=""
+CHAT_PEERS=()           # pares NOME=IP de --chat-peer
 NET_IFACE=""          # vazio = casa en*/eth* por glob (netplan) / auto (d-i)
 NET_IP=""             # aceita 192.168.1.50 ou 192.168.1.50/24
 NET_GATEWAY=""
@@ -375,6 +388,18 @@ Opções principais:
                         root fica BLOQUEADO (padrão). Com ele, o root é
                         habilitado: no Ubuntu via late-command (chpasswd -e);
                         e o root fica habilitado no alvo.
+  --chat-node NAME      Nome do nó no chat da frota (padrão: hostname do alvo;
+                        com ADR-002 já é ai-inference/ai-builder).
+  --chat-port N         Porta TCP do chat (padrão: 7331).
+  --chat-bind ADDR      Endereço de escuta (padrão: 0.0.0.0). Numa máquina
+                        exposta, use o IP da LAN.
+  --chat-peer NAME=IP   Um nó da frota (repetível). Vence o arquivo da frota.
+  --chat-peers-file P   Arquivo da frota: uma linha "nome=ip" por nó (até 15).
+  --chat-key-file PATH  Chave GLOBAL de fallback (32 bytes em hex, modo 0640).
+  --chat-keydir DIR     Um <nome>.key por nó (modo recomendado; até 15).
+  --chat-disable        Não instala o chat nesta ISO.
+                        Sem chave, o serviço é instalado DESABILITADO (nunca
+                        canal sem HMAC). Contrato: docs/CHAT.md §7.1.
   --network MODE        Rede do sistema INSTALADO (gravada na ISO):
                           auto (padrão) — DHCP em todas as interfaces Ethernet
                           dhcp          — igual a auto, mas explícito
@@ -621,6 +646,124 @@ validate_network() {
 }
 
 # ---------------------------------------------------------------------------
+# Chat da frota — validação (ADR-003, docs/CHAT.md §7.1)
+# ---------------------------------------------------------------------------
+# Regra 13-a aplicada com cuidado: o DEFAULT (`--chat-*` ausente) NÃO pode
+# derrubar o build. Sem chave, apenas avisamos que o serviço vai nascer
+# desabilitado. Erro fatal só para ENTRADA do usuário — caminho que não existe,
+# chave com tamanho errado, peer mal formado, frota acima do teto.
+RE_PEER_NAME='^[a-z0-9][a-z0-9-]*$'
+
+validate_chat() {
+  if [[ $CHAT_INSTALL -eq 0 ]]; then
+    log_info "chat da frota: NÃO será instalado (--chat-disable)."
+    return 0
+  fi
+
+  if ! [[ "$CHAT_PORT" =~ ^[0-9]+$ ]] || (( CHAT_PORT < 1 || CHAT_PORT > 65535 )); then
+    log_error "--chat-port ${CHAT_PORT}: porta inválida (1-65535)."
+    exit 2
+  fi
+  if ! [[ "$CHAT_BIND" =~ ^[0-9.]+$ || "$CHAT_BIND" == "::" ]]; then
+    log_error "--chat-bind ${CHAT_BIND}: esperado um IP (ex.: 192.168.0.10) ou 0.0.0.0."
+    exit 2
+  fi
+  if [[ "$CHAT_BIND" == "0.0.0.0" ]]; then
+    log_warn "--chat-bind 0.0.0.0: o chat escuta em TODAS as interfaces."
+    log_warn "  Numa máquina exposta, use --chat-bind com o IP da LAN (CHAT.md §7)."
+  fi
+
+  local name addr p
+  for p in "${CHAT_PEERS[@]:-}"; do
+    [[ -n "$p" ]] || continue
+    if [[ "$p" != *=* ]]; then
+      log_error "--chat-peer espera NOME=IP (recebi '${p}')."
+      exit 2
+    fi
+    name="${p%%=*}"; addr="${p#*=}"
+    [[ "$name" =~ $RE_PEER_NAME ]] \
+      || { log_error "--chat-peer com nome inválido: '${name}' (minúsculas, dígitos e '-')."; exit 2; }
+    [[ -n "$addr" ]] || { log_error "--chat-peer ${name}: IP vazio."; exit 2; }
+  done
+
+  # Chave global: existe, é legível e tem 32 bytes em hex. O `chmod` é cobrado
+  # porque uma chave 0644 numa ISO é uma chave pública.
+  if [[ -n "$CHAT_KEY_FILE" ]]; then
+    [[ -f "$CHAT_KEY_FILE" ]] \
+      || { log_error "--chat-key-file ${CHAT_KEY_FILE}: não existe."; exit 2; }
+    local hex perms
+    hex="$(tr -d '[:space:]' < "$CHAT_KEY_FILE")"
+    [[ "$hex" =~ ^[0-9a-fA-F]{64}$ ]] \
+      || { log_error "--chat-key-file: esperado 64 caracteres hex (32 bytes)."; exit 2; }
+    perms="$(stat -c '%a' "$CHAT_KEY_FILE" 2>/dev/null || echo 000)"
+    if (( (8#$perms & 8#004) != 0 )); then
+      log_error "--chat-key-file com modo ${perms}: legível por 'outros'. Use chmod 640."
+      exit 2
+    fi
+  fi
+
+  if [[ -n "$CHAT_KEYDIR" ]]; then
+    [[ -d "$CHAT_KEYDIR" ]] \
+      || { log_error "--chat-keydir ${CHAT_KEYDIR}: não é um diretório."; exit 2; }
+    shopt -s nullglob
+    local -a keys=("$CHAT_KEYDIR"/*.key)
+    shopt -u nullglob
+    (( ${#keys[@]} > 0 )) \
+      || { log_error "--chat-keydir ${CHAT_KEYDIR}: nenhum <nome>.key encontrado."; exit 2; }
+    local k
+    for k in "${keys[@]}"; do
+      hex="$(tr -d '[:space:]' < "$k")"
+      [[ "$hex" =~ ^[0-9a-fA-F]{64}$ ]] \
+        || { log_error "${k}: esperado 64 caracteres hex (32 bytes)."; exit 2; }
+      perms="$(stat -c '%a' "$k" 2>/dev/null || echo 000)"
+      if (( (8#$perms & 8#004) != 0 )); then
+        log_error "${k} com modo ${perms}: legível por 'outros'. Use chmod 640."
+        exit 2
+      fi
+    done
+  fi
+
+  if [[ -n "$CHAT_PEERS_FILE" ]]; then
+    [[ -f "$CHAT_PEERS_FILE" ]] \
+      || { log_error "--chat-peers-file ${CHAT_PEERS_FILE}: não existe."; exit 2; }
+    # Contamos os peers SEM repetir nome (o arquivo pode listar um nó duas
+    # vezes) e conferimos o formato AQUI: descobrir no 1º boot é tarde.
+    local line n=0 seen=" "
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%%#*}"
+      line="$(printf '%s' "$line" | tr -d '[:space:]')"
+      [[ -z "$line" ]] && continue
+      if [[ "$line" != *=* ]]; then
+        log_error "${CHAT_PEERS_FILE}: linha inválida '${line}' (esperado nome=ip)."
+        exit 2
+      fi
+      name="${line%%=*}"
+      [[ "$name" =~ $RE_PEER_NAME ]] \
+        || { log_error "${CHAT_PEERS_FILE}: nome de peer inválido '${name}'."; exit 2; }
+      case "$seen" in
+        *" ${name} "*) ;;
+        *) seen+="${name} "; n=$((n + 1)) ;;
+      esac
+    done < "$CHAT_PEERS_FILE"
+    (( n <= 15 )) || {
+      log_error "${CHAT_PEERS_FILE}: ${n} nós excedem o teto de 15 (ADR-005)."
+      log_error "Acima disso é preciso relay/hub — ver docs/CHAT.md §5.2."
+      exit 2
+    }
+    log_info "Frota em ${CHAT_PEERS_FILE}: ${n} nó(s)."
+  fi
+
+  if [[ -z "$CHAT_KEY_FILE" && -z "$CHAT_KEYDIR" ]]; then
+    log_warn "chat sem chave (nem --chat-key-file nem --chat-keydir)."
+    log_warn "  O serviço será instalado DESABILITADO no alvo: sem HMAC o canal"
+    log_warn "  não autentica ninguém (CHAT.md §9). Para ativar, gere a chave e"
+    log_warn "  refaça a ISO, ou rode o talk/install.sh na máquina depois."
+  else
+    log_info "Chat da frota: porta ${CHAT_PORT}, bind ${CHAT_BIND}."
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Argumentos
 # ---------------------------------------------------------------------------
 parse_args() {
@@ -668,6 +811,14 @@ parse_args() {
       --iso-repo)        [[ $# -ge 2 ]] || { log_error "--iso-repo exige valor (auto|none|DIR)"; exit 2; }; ISO_REPO="$2"; shift 2 ;;
       --iso-repo-packages) [[ $# -ge 2 ]] || { log_error "--iso-repo-packages exige valor"; exit 2; }; ISO_REPO_PACKAGES="$2"; shift 2 ;;
       --iso-repo-allow-mismatch) ISO_REPO_ALLOW_MISMATCH=1; shift ;;
+      --chat-node)       [[ $# -ge 2 ]] || { log_error "--chat-node exige valor"; exit 2; }; CHAT_NODE="$2"; shift 2 ;;
+      --chat-port)       [[ $# -ge 2 ]] || { log_error "--chat-port exige valor"; exit 2; }; CHAT_PORT="$2"; shift 2 ;;
+      --chat-bind)       [[ $# -ge 2 ]] || { log_error "--chat-bind exige valor"; exit 2; }; CHAT_BIND="$2"; shift 2 ;;
+      --chat-peer)       [[ $# -ge 2 ]] || { log_error "--chat-peer exige NOME=IP"; exit 2; }; CHAT_PEERS+=("$2"); shift 2 ;;
+      --chat-peers-file) [[ $# -ge 2 ]] || { log_error "--chat-peers-file exige caminho"; exit 2; }; CHAT_PEERS_FILE="$2"; shift 2 ;;
+      --chat-key-file)   [[ $# -ge 2 ]] || { log_error "--chat-key-file exige caminho"; exit 2; }; CHAT_KEY_FILE="$2"; shift 2 ;;
+      --chat-keydir)     [[ $# -ge 2 ]] || { log_error "--chat-keydir exige caminho"; exit 2; }; CHAT_KEYDIR="$2"; shift 2 ;;
+      --chat-disable)    CHAT_INSTALL=0; shift ;;
       --work-dir)        [[ $# -ge 2 ]] || { log_error "--work-dir exige valor"; exit 2; }; WORK_DIR="$2"; shift 2 ;;
       --keep-work)       KEEP_WORK=1; shift ;;
       --check-templates) CHECK_TEMPLATES=1; DRY_RUN=1; shift ;;
@@ -702,6 +853,13 @@ parse_args() {
   # ADR-002: a identidade só pode ser derivada DEPOIS de o papel ser validado.
   # A função também resolve o hostname padrão (o mesmo do usuário).
   resolve_identity
+
+  # ADR-003: o chat só pode ser validado DEPOIS da identidade (o nome do nó
+  # padrão é o hostname do alvo).
+  validate_chat
+  if [[ -z "$CHAT_NODE" ]]; then
+    CHAT_NODE="$SYS_HOSTNAME"
+  fi
 
   validate_network
 
@@ -1834,6 +1992,10 @@ subst_template() {
     -e "s|@@USER_FULLNAME@@|${USER_FULLNAME}|g" \
     -e "s|@@HOSTNAME@@|${SYS_HOSTNAME}|g" \
     -e "s|@@IDENTITY_SOURCE@@|${IDENTITY_SOURCE}|g" \
+    -e "s|@@CHAT_INSTALL@@|${CHAT_INSTALL}|g" \
+    -e "s|@@CHAT_NODE@@|${CHAT_NODE}|g" \
+    -e "s|@@CHAT_PORT@@|${CHAT_PORT}|g" \
+    -e "s|@@CHAT_BIND@@|${CHAT_BIND}|g" \
     -e "s|@@PASSWORD_HASH@@|${hash_esc}|g" \
     -e "s|@@ROOT_PASSWORD_HASH@@|${root_hash_esc}|g" \
     -e "s|@@LOCALE@@|${LOCALE}|g" \
@@ -1870,6 +2032,67 @@ inject_common_templates() {
   cp "${ISO_DIR}/common/ai-cpu-os-firstboot.service"      "${dest}/ai-cpu-os-firstboot.service"
   chmod 0755 "${dest}/late-command.sh" "${dest}/firstboot.sh"
   chmod 0644 "${dest}/ai-cpu-os-firstboot.service"
+  stage_chat_payload "${dest}/chat"
+}
+
+# Copia para a mídia o que o chat precisa ter em mãos (ADR-003):
+#   chat/fleet.key          chave global de fallback
+#   chat/keys/<nome>.key    uma chave por nó (modo recomendado)
+#   chat/peers.txt          a frota (uma linha "nome=ip")
+# As chaves vão com modo 0640 **na mídia também**: a ISO é lida por qualquer
+# um que tenha o pendrive, então o cuidado não pode começar só no alvo.
+stage_chat_payload() {
+  local dest="$1"
+  [[ $CHAT_INSTALL -eq 1 ]] || return 0
+  mkdir -p "$dest"
+  chmod 0755 "$dest"
+
+  if [[ -n "$CHAT_KEY_FILE" ]]; then
+    install -m 0640 "$CHAT_KEY_FILE" "${dest}/fleet.key"
+  fi
+  if [[ -n "$CHAT_KEYDIR" ]]; then
+    mkdir -p "${dest}/keys"
+    chmod 0755 "${dest}/keys"
+    local k
+    shopt -s nullglob
+    for k in "$CHAT_KEYDIR"/*.key; do
+      install -m 0640 "$k" "${dest}/keys/$(basename "$k")"
+    done
+    shopt -u nullglob
+  fi
+
+  # O arquivo de frota é a fonte; as flags --chat-peer são a exceção. Escrever
+  # o resultado MESCLADO na mídia evita que o 1º boot precise das flags.
+  if [[ -n "$CHAT_PEERS_FILE" || ${#CHAT_PEERS[@]} -gt 0 ]]; then
+    local tmpf="${dest}/peers.txt" line name
+    : > "$tmpf"
+    if [[ -n "$CHAT_PEERS_FILE" ]]; then
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%%#*}"
+        line="$(printf '%s' "$line" | tr -d '[:space:]')"
+        [[ -n "$line" ]] && printf '%s\n' "$line" >> "$tmpf"
+      done < "$CHAT_PEERS_FILE"
+    fi
+    local p explicit_name explicit_addr
+    for p in "${CHAT_PEERS[@]:-}"; do
+      [[ -n "$p" ]] || continue
+      explicit_name="${p%%=*}"
+      explicit_addr="${p#*=}"
+      # Remove a linha antiga DESSE nó e acrescenta a explícita (a exceção
+      # vence independente da ordem — mesmo contrato do talk/install.sh).
+      if [[ -s "$tmpf" ]]; then
+        grep -v "^${explicit_name}=" "$tmpf" > "${tmpf}.new" || true
+        mv "${tmpf}.new" "$tmpf"
+      fi
+      printf '%s=%s\n' "$explicit_name" "$explicit_addr" >> "$tmpf"
+    done
+    if [[ -s "$tmpf" ]]; then
+      chmod 0644 "$tmpf"
+      log_info "Frota na mídia: $(grep -c . "$tmpf" || true) nó(s) em /ai-cpu-os-boot/chat/peers.txt"
+    else
+      rm -f "$tmpf"
+    fi
+  fi
 }
 
 # Rede de segurança: se algum marcador REAL sobrou, a instalação não funciona.
@@ -1878,7 +2101,7 @@ inject_common_templates() {
 # Retorna 1 (não aborta) para que o autoteste possa acumular falhas.
 check_no_leftover_tokens() {
   local -a required_tokens=(
-    DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME IDENTITY_SOURCE PASSWORD_HASH ROOT_PASSWORD_HASH
+    DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME IDENTITY_SOURCE CHAT_INSTALL CHAT_NODE CHAT_PORT CHAT_BIND PASSWORD_HASH ROOT_PASSWORD_HASH
     LOCALE KEYMAP TIMEZONE EXTRA_PACKAGES PACKAGES_BLOCK STORAGE_LAYOUT ISO_MODEL
     APT_REPO_PATH APT_LOCAL_SOURCES APT_PRIMARY_URI LLAMA_SRC_NAME
     NETWORK_SECTION NETWORK_MODE NET_IFACE NET_IP NET_GATEWAY NET_DNS
@@ -1905,6 +2128,14 @@ inject_templates() {
     log_info "[dry-run] disco: ${DISK:-<não fixado>} · papel: ${ROLE} · família: ${FAMILY}"
     # Formato estável — é o que o tests/test-role-identity.sh lê (ADR-002).
     log_info "[dry-run] $(identity_line)"
+    if [[ $CHAT_INSTALL -eq 1 ]]; then
+      local chat_keys="nenhuma"
+      [[ -n "$CHAT_KEY_FILE" ]] && chat_keys="global"
+      [[ -n "$CHAT_KEYDIR" ]]   && chat_keys="por nó (${CHAT_KEYDIR})"
+      log_info "[dry-run] chat: nó=${CHAT_NODE} porta=${CHAT_PORT} bind=${CHAT_BIND} chave=${chat_keys} peers=$(grep -c . <<<"${CHAT_PEERS[*]:-}" 2>/dev/null || echo 0)+frota"
+    else
+      log_info "[dry-run] chat: NÃO será instalado (--chat-disable)"
+    fi
     return 0
   fi
 

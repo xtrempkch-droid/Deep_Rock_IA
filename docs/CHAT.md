@@ -501,9 +501,9 @@ Arquivo: `/etc/ai-talk/config.json` (root:ai-talk, `0640`).
 - **`TCP_NODELAY` não é knob**: ligado sempre (§6.1). Desligá-lo só
   reintroduziria o pior caso de latência.
 
-### 7.1 O que vai na ISO (planejado)
+### 7.1 O que vai na ISO — ✅ **implementado (F2, sessão #44)**
 
-Flags futuras do `iso/build-iso.sh` (não implementadas ainda):
+Flags do `iso/build-iso.sh`:
 
 ```text
 --chat-key-file PATH     chave GLOBAL de fallback (32 bytes) a embutir na ISO
@@ -594,7 +594,7 @@ ponte com o modelo deve:
 - limitar tokens/tempo e registrar prompt/resposta;
 - opcionalmente aceitar só peers de uma allowlist.
 
-## 10. Instalação e systemd (planejado)
+## 10. Instalação e systemd — ✅ **implementado (F2, sessão #44)**
 
 ### 10.1 Layout no alvo
 
@@ -716,13 +716,31 @@ na F1):
 > O loopback **não** mede latência de rede: p50/p99 e o teto de 15 nós só saem
 > do Bloco R (duas VMs) e da bancada de §13.5.
 
-### 13.2 ISO (entra no `verify-iso.sh` / `make iso-yaml`)
+### 13.2 ISO — ✅ implementado (`make iso-chat-test`, no `validate`)
 
-- a árvore da ISO contém `talk/` (código, unit, config de exemplo);
-- a unit e o config são sintaticamente válidos;
-- a chave existe com modo `0640` quando `--chat-key-file` foi usado;
-- sem chave, o serviço está desabilitado e há aviso;
-- não há download/`pip`/`curl` no `talk/install.sh`.
+`iso/verify-iso.sh` § "Chat da frota (ADR-003)" confere, sobre o **conteúdo**:
+
+- o código do chat está na mídia (`/ai-cpu-os/talk/ai_talk.py`);
+- o `late-command.sh` tem a etapa 2-f (copia para `/etc/ai-talk`) e registra
+  `CHAT_KEY`/`CHAT_PEERS` no `.iso-config`;
+- a chave vai para o alvo com **`chmod 0640`** (o daemon recusa pior);
+- `chat/peers.txt` no formato `nome=ip` e **≤ 15** nós (ADR-005);
+- a chave global tem 64 caracteres hex (32 bytes).
+
+`tests/test-iso-chat.sh` (**31 asserções**) prova as **flags** e os **elos**:
+
+- `--chat-disable` não embarca nada e a ISO continua válida;
+- sem chave: aviso + serviço desabilitado, e a ISO **é gerada** (Regra 13-a);
+- `--chat-peer` vence o `--chat-peers-file` (e o IP antigo não fica duplicado);
+- erros de uso são fatais (rc 2): chave `0644`, chave curta, peer mal formado,
+  porta inválida, arquivo inexistente, frota com 16 nós; **15 é aceito**;
+- os três elos existem e **na ordem certa** (`run_chat_install` antes de
+  `run_role_install`);
+
+`tests/test-ai-talk-install.sh` (**39 asserções**) prova o instalador em si
+(com `--root`, sem root/systemd): config gerado e validado pelo próprio daemon,
+permissões `0640`, chave por nó dentro do peer, unit endurecida, idempotência,
+`--dry-run` sem escrever nada e recusa de árvore sem chave.
 
 ### 13.3 Duas VMs (manual/Bloco R do `VALIDATION.md`)
 
@@ -777,14 +795,16 @@ na F1):
 |------|---------|-------|
 | **F0** (sessão #39) | ADR-003 + este desenho | revisão humana; links no `AGENTS.md`/`STATE.md` |
 | **F1** ✅ (sessão #41) | `talk/ai_talk.py` + CLI + `tests/test-ai-talk.sh`; **chave por nó**, `dedupe_window`, `max_out_per_sec`, `log.control`, espaçamento | **`make talk-test`: 30 asserções em loopback**; nenhuma mudança na ISO |
-| **F2** | `talk/install.sh` (com `--dry-run`) + unit + integração no `build.sh` (etapa 2.5) + flags `--chat-*` (inclui `--chat-peers-file`/`--chat-keydir`) + `verify-iso.sh` | ISO dry-run/yaml; duas VMs (Bloco R) |
+| **F2** ✅ (sessão #44) | `talk/install.sh` (com `--dry-run`) + unit + integração no `build.sh` (etapa 2.5) + flags `--chat-*` (inclui `--chat-peers-file`/`--chat-keydir`) + `verify-iso.sh` | **`make talk-install-test` (39)** + **`make iso-chat-test` (31)** + seção do `verify-iso.sh`; ❌ duas VMs (Bloco R) ainda não |
 | **F3** | `ai-talk agent` (ponte com `llama-server`) + métricas/observabilidade | teste com fake + teste de injeção; opcional |
 | **F4** (só se precisar) | **salas/tópicos** (`room` no envelope) e/ou **relay/hub** | bancada de 15 nós (§13.5); decidido por medição, não por vontade |
 
-**Como rodar a F1:**
+**Como rodar (F1 e F2):**
 
 ```bash
-make talk-test                        # 30 asserções, sem rede externa, sem root
+make talk-test                        # 30 asserções: transporte (loopback)
+make talk-install-test                # 39 asserções: instalador (--root)
+make iso-chat-test                    # 31 asserções: chat dentro da ISO
 bash tests/test-ai-talk.sh -v         # com o nome de cada asserção
 ```
 

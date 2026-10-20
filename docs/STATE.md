@@ -1,13 +1,12 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-20 (🧑‍🔧 **a identidade do sistema passou a
-> seguir a FUNÇÃO** — ADR-002 executado na sessão #43: `inference` →
-> `ai-inference`, `builder` → `ai-builder`, `auto` mantém `ai-cpu-os` + aviso;
-> `make identity-test` 22 asserções. Na #42 o caminho Debian da ISO foi
-> **removido** (ADR-001). 💬 O `ai-talk` F1 (sessão #41) segue no código.
-> **Pendentes: F2/F3 do chat e um boot de ISO depois dessas mudanças** — ver
-> `JOURNAL.md` sessões #39–#43.)
+> **Última atualização:** 2026-10-20 (💬 **o chat da frota chegou à máquina** —
+> ADR-003 F2 na sessão #44: `talk/install.sh` + unit systemd + `--chat-*` na ISO
+> + etapa 2.5 do `build.sh`, provado por `talk-install-test` (39) e
+> `iso-chat-test` (31). Antes: #43 identidade por papel (ADR-002), #42 caminho
+> Debian removido (ADR-001), #41 F1 do transporte. **Pendentes: F3 (ponte com o
+> modelo), duas VMs e um boot de ISO** — ver `JOURNAL.md` sessões #39–#44.)
 
 ---
 
@@ -91,6 +90,8 @@
 | `talk/ai_talk.py` (**chat da frota**, F1) | ✅ | ✅ py_compile + **30 asserções** (`make talk-test`) | ❌ só loopback; **sem duas VMs e sem ISO** |
 | `iso/common/*` (late-command, 1º boot) | ✅     | ⚠️ (templating)    | ✅ **instalado em VM (Ubuntu)**; a instalação Debian (#35/#37) foi feita **antes** da remoção (ADR-001) — ver § 3.4 |
 | `tests/test-role-identity.sh` (identidade por papel) | ✅ | ✅ shellcheck | ✅ **22 asserções** (`make identity-test`); ❌ nunca vista num sistema instalado |
+| `talk/install.sh` + `talk/ai-talk.service` (F2 do chat) | ✅ | ✅ shellcheck | ✅ **39 asserções** (`--root`, sem systemd); ❌ nunca rodou como serviço real |
+| `tests/test-iso-chat.sh` (chat na ISO) | ✅ | ✅ shellcheck | ✅ **31 asserções** (dry-run/check-templates) |
 | `docs/ISO.md`                         | ✅      | ⚠️ (revisão manual)| ❌                  |
 | `docs/JOURNAL.md` (continuidade)      | ✅      | ⚠️ (revisão manual)| ☐ **em uso contínuo** |
 
@@ -407,7 +408,7 @@ Três decisões foram firmadas pelo dono e registradas em
 |-----|---------|--------|
 | **ADR-001** | Uma única base de ISO: **Ubuntu Server**; caminho Debian/preseed **removido** | ✅ **EXECUTADO (P0, sessão #42)** — ver § 3.9 |
 | **ADR-002** | Identidade do sistema derivada do papel (`ai-inference`/`ai-builder`) | ✅ **EXECUTADO (P1, sessão #43)** — ver § 3.10 |
-| **ADR-003** | Chat de frota **`ai-talk`** (TCP 7331, JSON lines, HMAC, stdlib) | **F1 no código** — `talk/ai_talk.py` + `docs/CHAT.md` |
+| **ADR-003** | Chat de frota **`ai-talk`** (TCP 7331, JSON lines, HMAC, stdlib) | ✅ **F1 + F2** (#41/#44) — transporte, instalador, unit e ISO; F3 pendente — § 3.11 |
 | **ADR-004** | Latência/espaçamento/durabilidade do chat: 50 ms por par, fila 256, p99 ≤ 10 ms, `fsync` por mensagem | ✅ **no código e provado** (`make talk-test`, 30 asserções) |
 | **ADR-005** | **Teto de 15 nós** em malha completa (chave por nó, dedupe 8.192) | ✅ **F1 no código** — provado por `make talk-test` |
 
@@ -428,10 +429,10 @@ Três decisões foram firmadas pelo dono e registradas em
 
 **O que NÃO existe ainda (não confunda plano com fato):**
 
-- O `talk/` está em **F1**: **não** há `talk/install.sh`, unit systemd,
-  integração na ISO, teste com duas VMs nem bancada de 15 nós.
+- O `talk/` está em **F2**: existe instalador, unit e integração na ISO, mas
+  **não** há F3 (ponte com o modelo), teste com duas VMs nem bancada de 15 nós.
 - Nenhuma ISO nova foi gerada ou bootada **depois das mudanças** (sessões
-  #42/#43). A dívida está registrada como **P5** no § 6.
+  #42/#43/#44). A dívida está registrada como **P5** no § 6.
 
 ---
 
@@ -549,6 +550,67 @@ numa árvore correta.
 
 ---
 
+### 3.11 💬 O chat da frota chegou à máquina (ADR-003 F2, 2026-10-20, sessão #44)
+
+**Objetivo:** fechar a F2 do ADR-003 — o transporte existia (F1), mas nada
+disso chegava a uma máquina instalada.
+
+| Peça | Arquivo | Prova |
+|---|---|---|
+| Instalador idempotente | `talk/install.sh` | `make talk-install-test` (**39**) |
+| Unit endurecida | `talk/ai-talk.service` | 4 knobs checados por teste **e** guarda |
+| Flags da ISO | `--chat-*` no `build-iso.sh` | `make iso-chat-test` (**31**) |
+| Payload na mídia | `/ai-cpu-os-boot/chat/` (chaves 0640 + frota) | `verify-iso.sh` § Chat |
+| Ponto no alvo | `late-command.sh` § 2-f → `/etc/ai-talk` | seção do verificador |
+| Corrente até o build | `.iso-config` → `firstboot.sh` → `AI_CHAT_*` | guardas no CI |
+| Etapa 2.5 | `build.sh` (`run_chat_install`) | ordem cobrada por teste |
+
+**Decisões que ficaram firmes:**
+
+- **Sem chave não se abre canal.** O `install.sh` instala o serviço
+  **desabilitado** e avisa; a ISO **é gerada** mesmo assim (é o default, e a
+  Regra 13-a manda degradar). Não existe chave default — uma chave no
+  repositório não autentica ninguém.
+- **Chat antes do papel** (etapa 2/5): se a inferência falhar, a máquina pode
+  **contar isso** pela rede. E falha do chat não derruba o build (aviso).
+- **`--chat-peer` vence `--chat-peers-file`** independente da ordem — "a
+  exceção explícita manda" é previsível; "o último vence" não é.
+- **Teto de 15 em três lugares**: `MAX_PEERS` no daemon, `install.sh` e a
+  geração da ISO. Acima disso é relay/hub (ADR-005), não "mais um pouco".
+
+**Bugs reais encontrados por execução (não por revisão):**
+
+1. **`fetch` devolve o CAMINHO, não o conteúdo.** A primeira versão da seção
+   do verificador comparava o caminho como se fosse o arquivo — reportava "1
+   nó" para uma frota de 2 e "chave inválida" para uma chave correta.
+2. **Chave por nó não entrava na config com `--root`:** o gerador testava
+   `os.path.isfile(keys/<nome>.key)` no caminho **prefixado** pelo `--root`, que
+   não existe. O peer saía sem `key_file` e cairia na chave global — o modo de
+   falha que o ADR-005 existe para evitar. Agora a chave é passada
+   explicitamente (`--peer-key nome=/etc/ai-talk/keys/…`).
+3. **Caminhos prefixados indo para a config do alvo:** com `--root`, a config
+   gravava `/tmp/tmp.xxx/etc/ai-talk/fleet.key`. No alvo, o daemon morreria.
+4. **`--peers-file` + `--peer`: o arquivo vencia**, ao contrário do documentado.
+5. **6 guardas decorativos** que eu mesmo escrevi (nome solto em vez de
+   valor/estrutura): `ENABLE_SERVICE=0`, `stage_chat_payload`,
+   `run_chat_install`, `NoNewPrivileges`, `8#004`, `--peer-key`. Todos
+   denunciados por `make ci-guards-test`.
+
+**Resultado:** `make validate` **verde** — `ai-talk-install` **39**,
+`iso-chat` **31**, `ci-guards` **110** (era 100), `ai-talk` 30, `webui` 51,
+`role-identity` 22, `iso-lint` OK.
+
+**O que NÃO foi provado:**
+
+- ❌ **Duas VMs trocando mensagens** (Bloco R do `VALIDATION.md`) — o único
+  teste que mede latência real. O loopback é mais rápido que qualquer LAN.
+- ❌ **Serviço rodando de verdade** sob systemd com `ai-talk.service`: o teste
+  usa `--root` (sem `useradd`/`systemctl`). A unit é validada por conteúdo.
+- ❌ Bancada de 15 nós (CHAT.md §13.5) — o teto é **aplicado**, não medido.
+- ❌ Nenhuma ISO gerada/bootada depois de todas as mudanças.
+
+---
+
 ## 4. Problemas conhecidos no momento
 
 1. **Risco em hardware físico não medido.** O caminho ISO foi provado em VM; o
@@ -657,19 +719,20 @@ da rede).
 
 > **👉 ESTA É A SEÇÃO REFERENCIADA PELO `AGENTS.md`.**
 
-**🧭 PRÓXIMA AÇÃO (sessão #43, 2026-10-20) — P5: gerar e bootar uma ISO, e
-depois a P3 (chat na ISO + duas VMs).**
+**🧭 PRÓXIMA AÇÃO (sessão #44, 2026-10-20) — P5: gerar e bootar uma ISO, e
+depois o Bloco R (duas VMs).**
 
-Estado da fila: **P0 ✅** (§ 3.9), **P1 ✅** (§ 3.10) e **P2/F1 do `ai-talk` ✅**
-(sessão #41). O que resta, em ordem:
+Estado da fila: **P0 ✅** (§ 3.9), **P1 ✅** (§ 3.10), **P2/F1 ✅** (#41) e
+**P3/F2 ✅** (§ 3.11). O que resta, em ordem:
 
 1. **P5 — gerar e bootar uma ISO Ubuntu** ← **é aqui que se começa**
-   - Duas mudanças grandes desde o último boot (sessão #21): o caminho Debian
-     saiu (#42) e a identidade passou a derivar do papel (#43). Nenhuma das
-     duas foi vista num sistema instalado.
+   - Três mudanças grandes desde o último boot (sessão #21): o caminho Debian
+     saiu (#42), a identidade passou a derivar do papel (#43) e o chat entrou
+     na ISO (#44). Nenhuma das três foi vista num sistema instalado.
    - `bash iso/build-iso.sh --role inference --disk auto --yes` e
      `bash iso/test-vm.sh --iso … --yes`; conferir no alvo
-     `getent passwd ai-inference` e `.iso-config`.
+     `getent passwd ai-inference`, o `.iso-config` e
+     `systemctl status ai-talk` (sem chave ele deve estar **disabled**).
    - **Aceite:** `test-vm.sh` exit 0 com o 1º boot aplicado e o usuário
      `ai-inference` existindo. Enquanto isso não acontecer, o que existe é
      verificação de **conteúdo** — não é boot (Regra 13).
@@ -681,12 +744,11 @@ Estado da fila: **P0 ✅** (§ 3.9), **P1 ✅** (§ 3.10) e **P2/F1 do `ai-talk`
    - **Aceite cumprido:** 30 asserções no `make validate` e no CI; nenhum
      download; nenhuma dependência Python externa (`ci-guards` 89 → 98).
 3. **P3 — `ai-talk` fase 2/3 (ISO + duas VMs + ponte com o modelo).**
-   - `talk/install.sh` idempotente, unit `ai-talk.service`, etapa 2.5 do
-     `build.sh` (antes do papel, para relatar falha), flags `--chat-*` na ISO
-     (incluindo `--chat-peers-file`/`--chat-keydir`), seção no `verify-iso.sh`
-     e Bloco R no `VALIDATION.md`.
-   - **Aceite:** ISO dry-run/yaml verdes; duas VMs trocam mensagens; a ponte
-     com o `llama-server` é opcional e **não executa comandos** recebidos.
+   ✅ **F2 feita (#44):** `talk/install.sh`, unit, etapa 2.5, flags `--chat-*`,
+   seção no `verify-iso.sh` (`talk-install-test` 39, `iso-chat-test` 31).
+   ⬜ **Falta:** o **Bloco R** (duas VMs trocando mensagens, com latência
+   medida) e a **F3** (ponte opcional com o `llama-server`, que **não** executa
+   comandos recebidos).
 4. **P4 (só se a bancada exigir) — `ai-talk` no teto de 15 nós.**
    - Bancada de 15 containers (§13.5 do `CHAT.md`): 14 conexões por nó,
      broadcast em ~2 RTTs, p99 ≤ 10 ms com 280 msg/s de fundo.
