@@ -151,21 +151,19 @@ planta "meta-guarda: volta um guarda na forma '! cmd'" .github/workflows/validat
 
 # --- Guardas de existência/positivos (o outro lado: apagar o alvo) ---------
 planta "tirar iso-repo-test do validate" Makefile \
-  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-dry-run-both|' Makefile
+  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-dry-run|' Makefile
 planta "tirar iso-select-test do validate" Makefile \
-  sed_ 's|^validate: .*$|validate: lint docs families-test iso-repo-test ci-guards-test iso-dry-run-both|' Makefile
+  sed_ 's|^validate: .*$|validate: lint docs families-test iso-repo-test ci-guards-test iso-dry-run|' Makefile
 planta "tirar ci-guards-test do validate" Makefile \
-  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test iso-dry-run-both|' Makefile
+  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test iso-dry-run|' Makefile
 planta "tirar iso-verify-test do validate" Makefile \
-  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test ci-guards-test iso-dry-run-both|' Makefile
+  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test ci-guards-test iso-dry-run|' Makefile
 planta "renomear packages_with_candidate()" iso/build-iso.sh \
   sed_ 's|^packages_with_candidate()|packages_with_candidate_velho()|' iso/build-iso.sh
 planta "renomear normalize_iso_name()" iso/build-iso.sh \
   sed_ 's|^normalize_iso_name()|normalize_iso_name_velho()|' iso/build-iso.sh
 planta "tirar o marcador '*' da fixture do SHA256SUMS" tests/fixtures/SHA256SUMS.ubuntu-24.04 \
   sed_ 's|\*ubuntu-24.04.5|ubuntu-24.04.5|' tests/fixtures/SHA256SUMS.ubuntu-24.04
-planta "o verificador esquecer a preseed (volta o falso positivo)" iso/verify-iso.sh \
-  sed_ 's|apt-setup/local0/repository|apt-setup/REMOVIDO|' iso/verify-iso.sh
 planta "o pendrive deixar de exigir disco inteiro (TYPE)" iso/write-pendrive.sh \
   sed_ 's|TYPE|TIPO|g' iso/write-pendrive.sh
 planta "o pendrive deixar de conferir a assinatura CD001" iso/write-pendrive.sh \
@@ -175,13 +173,13 @@ planta "o teste do pendrive esquecer que o alvo e um ARQUIVO" tests/test-write-p
 planta "o conferidor de ISO esquecer a assinatura CD001" iso/check-iso.sh \
   sed_ 's|CD001|XXXXX|g' iso/check-iso.sh
 planta "tirar iso-check-test do validate" Makefile \
-  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-dry-run-both|' Makefile
+  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-dry-run|' Makefile
 planta "o artifact da ISO voltar a ser gateado pela Release" .github/workflows/iso.yml \
   sed_ 's|steps.size.outputs.release_too_big|steps.size.outputs.too_big|' .github/workflows/iso.yml
 
 # --- Interface web (fácil de degradar sem ninguém notar) --------------------
 planta "tirar ui-test do validate" Makefile \
-  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-check-test iso-dry-run-both|' Makefile
+  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-check-test iso-dry-run|' Makefile
 planta "a UI passar a usar dependência externa" webui/server.py \
   app 'import fastapi' webui/server.py
 planta "a UI passar a exigir pip install" webui/server.py \
@@ -203,11 +201,31 @@ planta "a UI deixar de recusar bind fora do localhost" webui/server.py \
 planta "a ISO passar a levar o webui/ (Regra 13-b)" iso/build-iso.sh \
   sed_ 's|--exclude=./webui||' iso/build-iso.sh
 
+# --- ai-talk (chat da frota): invariantes do ADR-003/004/005 ----------------
+planta "tirar talk-test do validate" Makefile \
+  sed_ 's| talk-test||' Makefile
+planta "tirar a chamada de make talk-test do CI" .github/workflows/validate.yml \
+  sed_ 's|make talk-test|make ui-test|' .github/workflows/validate.yml
+planta "o ai-talk deixar de assinar (compare_digest)" talk/ai_talk.py \
+  sed_ 's|hmac.compare_digest|str.__eq__|' talk/ai_talk.py
+planta "o ai-talk deixar de ligar TCP_NODELAY" talk/ai_talk.py \
+  sed_ 's|socket.TCP_NODELAY|0|' talk/ai_talk.py
+planta "o ack sair ANTES do fsync (perde durabilidade)" talk/ai_talk.py \
+  sed_ 's|os.fsync(self.handle.fileno())|pass|' talk/ai_talk.py
+planta "o teto de 15 nós virar 30" talk/ai_talk.py \
+  sed_ 's|^MAX_PEERS = 15|MAX_PEERS = 30|' talk/ai_talk.py
+planta "o ai-talk aceitar chave legível por outros" talk/ai_talk.py \
+  sed_ 's|if st.st_mode & stat.S_IROTH:|if False:|' talk/ai_talk.py
+planta "o dedupe_window voltar a 1024 (não cobre o retry de 9 s)" talk/ai_talk.py \
+  sed_ 's|"dedupe_window": 8192|"dedupe_window": 1024|' talk/ai_talk.py
+planta "o ai-talk passar a usar dependência externa" talk/ai_talk.py \
+  app 'import requests' talk/ai_talk.py
+
 # --- AVX-512 + trava de instância única do gerador de ISO -------------------
 planta "tirar avx512-test do validate" Makefile \
-  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test pendrive-test iso-check-test ui-test iso-dry-run-both|' Makefile
+  sed_ 's|^validate: .*$|validate: lint docs families-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test pendrive-test iso-check-test ui-test iso-dry-run|' Makefile
 planta "tirar iso-lock-test do validate" Makefile \
-  sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-check-test ui-test iso-dry-run-both|' Makefile
+  sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test pendrive-test iso-check-test ui-test iso-dry-run|' Makefile
 
 # --- Disco do autoinstall: o modo nº 1 de a automação não acontecer ---------
 # `--disk auto` ia LITERAL para o YAML e virava `match: {path: auto}`: nenhum
@@ -217,7 +235,7 @@ planta "--disk auto voltar a ir LITERAL para o YAML (match: {path: auto})" iso/b
 planta "o default do CI voltar a /dev/vda (só existe em VM)" .github/workflows/iso.yml \
   sed_ "s#inputs.disk || 'auto'#inputs.disk || '/dev/vda'#" .github/workflows/iso.yml
 planta "tirar iso-disk-test do validate" Makefile \
-  sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test pendrive-test iso-check-test ui-test iso-dry-run-both|' Makefile
+  sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test pendrive-test iso-check-test ui-test iso-dry-run|' Makefile
 planta "renomear acquire_build_lock()" iso/build-iso.sh \
   sed_ 's|^acquire_build_lock()|acquire_build_lock_velho()|' iso/build-iso.sh
 planta "renomear download_to()" iso/build-iso.sh \
@@ -238,14 +256,12 @@ planta "o default de --network voltar a 'none'" iso/build-iso.sh \
   sed_ 's|^NETWORK_MODE="auto"|NETWORK_MODE="none"|' iso/build-iso.sh
 planta "o autoinstall perder o bloco de rede" iso/autoinstall/autoinstall.yaml \
   sed_ 's|^@@NETWORK_SECTION@@$|# sem rede|' iso/autoinstall/autoinstall.yaml
-planta "o late-command deixar de gravar o netplan do alvo" iso/preseed/late-command.sh \
-  sed_ 's|99-ai-cpu-os.yaml|SEM-REDE.yaml|' iso/preseed/late-command.sh
+planta "o late-command deixar de gravar o netplan do alvo" iso/common/late-command.sh \
+  sed_ 's|99-ai-cpu-os.yaml|SEM-REDE.yaml|' iso/common/late-command.sh
 planta "a ISO deixar de embarcar o netplan do alvo" iso/build-iso.sh \
   sed_ 's|ai-cpu-os-netplan.yaml|sem-netplan.yaml|g' iso/build-iso.sh
-planta "a preseed perder o marcador de rede" iso/preseed/ai-cpu-os.cfg \
-  sed_ 's|^@@NETWORK_PRESEED@@$|# sem rede|' iso/preseed/ai-cpu-os.cfg
-planta "cloud-init deixar de ser desligado na rede" iso/preseed/late-command.sh \
-  sed_ 's|99-ai-cpu-os-disable-network.cfg|cloud-init.yaml|' iso/preseed/late-command.sh
+planta "cloud-init deixar de ser desligado na rede" iso/common/late-command.sh \
+  sed_ 's|99-ai-cpu-os-disable-network.cfg|cloud-init.yaml|' iso/common/late-command.sh
 
 # --- Mod `network`: o reparo da maquina JA instalada ------------------------
 planta "a mod network perder o netplan do ai-cpu-os" mods/network/apply.sh \
@@ -263,13 +279,13 @@ planta "a mod network deixar de avisar que o glob não casa placa" mods/network/
 planta "a mod network entrar no conjunto system (mexeria na rede no build)" mods/network/mod.conf \
   sed_ 's|^MOD_SETS="network"|MOD_SETS="system"|' mods/network/mod.conf
 planta "tirar network-test do validate" Makefile \
-  sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test pendrive-test iso-check-test ui-test iso-dry-run-both|' Makefile
+  sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test pendrive-test iso-check-test ui-test iso-dry-run|' Makefile
 planta "tirar o alvo network-fix (o reparo na propria maquina)" Makefile \
   sed_ 's|^network-fix:|network_velho:|' Makefile
 
 # --- Gravação do disco: sync no alvo + tempo antes de matar o qemu ----------
-planta "o firstboot deixar de sincronizar o disco (arquivos de 0 byte)" iso/preseed/firstboot.sh \
-  sed_ 's|^sync$|true|' iso/preseed/firstboot.sh
+planta "o firstboot deixar de sincronizar o disco (arquivos de 0 byte)" iso/common/firstboot.sh \
+  sed_ 's|^sync$|true|' iso/common/firstboot.sh
 planta "o test-vm voltar a matar o qemu sem esperar o disco" iso/test-vm.sh \
   sed_ 's|descarregarem o disco|encerrando|' iso/test-vm.sh
 
@@ -281,46 +297,45 @@ planta "o install.sh deixar de detectar a sintaxe do binário" roles/inference/i
 planta "o shell-ia voltar a devolver a linha do protocolo" roles/inference/shell-ia.py \
   sed_ 's|^        return chat(messages)$|        return messages[-1].get("content", "")|' roles/inference/shell-ia.py
 
-# --- ISO Debian: a instalação automática tem de começar sozinha -------------
-# Cada item abaixo foi um travamento REAL numa VM (sessão #35), todos com o
-# mesmo sintoma: a máquina fica parada, o disco não é tocado e o serial não
-# mostra erro nenhum.
-planta "o isolinux voltar a esperar tecla (prompt 1)" iso/build-iso.sh \
-  sed_ 's|/prompt 0/|/prompt 1/|' iso/build-iso.sh
-planta "o preseed deixar de ser injetado no initrd" iso/build-iso.sh \
-  sed_ 's|^    inject_preseed_initrd$|    true|' iso/build-iso.sh
-planta "a cmdline deixar de passar preseed/file=" iso/build-iso.sh \
-  sed_ 's|preseed/file=/preseed.cfg|preseed/url=http://x/p.cfg|g' iso/build-iso.sh
-planta "as entradas Debian perderem o idioma da cmdline" iso/build-iso.sh \
-  sed_ 's|\$(debian_locale_args)||g' iso/build-iso.sh
-planta "a preseed deixar de responder localechooser/languagelist" iso/preseed/ai-cpu-os.cfg \
-  sed_ 's|^d-i localechooser/languagelist select @@LANG@@|# sem idioma|' iso/preseed/ai-cpu-os.cfg
-planta "o verificador deixar de conferir o idioma do instalador" iso/verify-iso.sh \
-  sed_ 's|localechooser/languagelist|lista-idiomas|g' iso/verify-iso.sh
-planta "a preseed deixar de responder o dispositivo do GRUB" iso/preseed/ai-cpu-os.cfg \
-  sed_ 's|^@@GRUB_BOOTDEV@@|# sem bootdev|' iso/preseed/ai-cpu-os.cfg
-planta "o verificador deixar de conferir o dispositivo do GRUB" iso/verify-iso.sh \
-  sed_ 's|grub-installer/bootdev|grub-installer/dispositivo|g' iso/verify-iso.sh
-
-# --- ISO Debian: o PRIMEIRO BOOT tem de aplicar o ai-cpu-os -----------------
-# Os três itens abaixo foram vistos num sistema REALMENTE instalado (SSH no
-# alvo, sessão #35): a instalação terminava, mas o 1º boot abortava.
-planta "o late-command deixar a fonte 'cdrom:' no apt do alvo" iso/preseed/late-command.sh \
-  sed_ 's|cdrom:|cdromx:|g' iso/preseed/late-command.sh
-planta "o late-command deixar de trocar o hook final do d-i" iso/preseed/late-command.sh \
-  sed_ 's|20final-message|nota-final|g' iso/preseed/late-command.sh
-planta "o late-command deixar de reiniciar o d-i (para no menu)" iso/preseed/late-command.sh \
-  sed_ 's|^\([[:space:]]*\)reboot -f|\1: reboot -f|' iso/preseed/late-command.sh
-planta "o firstboot deixar de espelhar no console serial" iso/preseed/firstboot.sh \
-  sed_ 's|/dev/ttyS0|/dev/ttyS1|g' iso/preseed/firstboot.sh
-planta "o EXTRA_PACKAGES perder o sudo (Debian não o traz)" iso/build-iso.sh \
+# --- ISO: a instalação automática tem de começar sozinha --------------------
+# O caminho Debian (preseed) saiu no ADR-001, mas o que ele ensinou continua
+# valendo como CLASSE de bug: a máquina fica parada, o disco não é tocado e o
+# serial não mostra erro. Os equivalentes no Ubuntu/Subiquity têm guarda
+# própria — e cada item abaixo planta a violação correspondente.
+planta "o autoinstall sair da cmdline do GRUB (instalador fica interativo)" iso/build-iso.sh \
+  sed_ 's|autoinstall quiet|interativo quiet|g' iso/build-iso.sh
+planta "o autoinstall deixar de ir para a RAIZ da ISO" iso/build-iso.sh \
+  sed_ 's|-map "${UBUNTU_STAGE}/autoinstall.yaml" /autoinstall.yaml|-map "${UBUNTU_STAGE}/autoinstall.yaml" /boot/autoinstall.yaml|' iso/build-iso.sh
+planta "o verificador deixar de procurar o autoinstall na raiz" iso/verify-iso.sh \
+  sed_ 's|/autoinstall.yaml|/autoinstal.yaml|g' iso/verify-iso.sh
+planta "a instalação deixar de reiniciar sozinha (para no 'Reboot Now')" iso/autoinstall/autoinstall.yaml \
+  sed_ 's|^shutdown: reboot|shutdown: poweroff|' iso/autoinstall/autoinstall.yaml
+planta "o instalador voltar a tentar se atualizar no meio do caminho" iso/autoinstall/autoinstall.yaml \
+  sed_ 's|^  update: false|  update: true|' iso/autoinstall/autoinstall.yaml
+planta "o late-command deixar a fonte 'cdrom:' no apt do alvo" iso/common/late-command.sh \
+  sed_ 's|cdrom:|cdromx:|g' iso/common/late-command.sh
+planta "o firstboot deixar de espelhar no console serial" iso/common/firstboot.sh \
+  sed_ 's|/dev/ttyS0|/dev/ttyS1|g' iso/common/firstboot.sh
+planta "o autoinstall deixar de instalar o servidor SSH" iso/autoinstall/autoinstall.yaml \
+  sed_ 's|install-server: true|install-server: false|' iso/autoinstall/autoinstall.yaml
+planta "o EXTRA_PACKAGES perder o sudo (fica sem acesso administrativo)" iso/build-iso.sh \
   sed_ 's|^EXTRA_PACKAGES="sudo |EXTRA_PACKAGES="|' iso/build-iso.sh
+
+# --- ISO: uma base só (ADR-001) ---------------------------------------------
+# Se o caminho Debian voltar pela porta dos fundos, o projeto volta a ter duas
+# ISOs — que é exatamente o que o ADR-001 decidiu encerrar.
+planta "o build-iso voltar a mencionar o caminho Debian (preseed)" iso/build-iso.sh \
+  app 'log_info "preseed/ antigo"' iso/build-iso.sh
+planta "o verificador voltar a conferir a preseed" iso/verify-iso.sh \
+  app 'grep -q apt-setup/local0 "$f"' iso/verify-iso.sh
+planta "o workflow da ISO voltar a passar DISTRO= ao make (variavel morta)" .github/workflows/iso.yml \
+  app 'make iso-dry-run DISTRO="$ISO_DISTRO"' .github/workflows/iso.yml
 
 # --- Acesso remoto: sem sshd a máquina instalada é um tijolo ---------------
 # Medido numa instalação real (sessão #36): o alvo subiu, pegou IP e não tinha
 # NENHUM listener (65535 portas em RST). Sem teclado/tela, não há conserto.
-planta "o late-command deixar de garantir o SSH do alvo" iso/preseed/late-command.sh \
-  sed_ 's|openssh-server|openssh-cliente|g' iso/preseed/late-command.sh
+planta "o late-command deixar de garantir o SSH do alvo" iso/common/late-command.sh \
+  sed_ 's|openssh-server|openssh-cliente|g' iso/common/late-command.sh
 planta "o build.sh deixar de garantir o SSH no 1º boot" build.sh \
   sed_ 's|^[[:space:]]*ensure_ssh$|: ensure_ssh|' build.sh
 
@@ -348,11 +363,11 @@ planta "o verificador voltar a usar /tmp às cegas" iso/verify-iso.sh \
 planta "o llama-build voltar a dizer 'forçada' para família detectada" llama-build.sh \
   sed_ 's|detectada na CPU e repassada pela cadeia|forçada por --family|' llama-build.sh
 
-# --- A instalação não pode exigir internet (telas do d-i) ------------------
-planta "a preseed voltar a tentar o espelho de rede" iso/build-iso.sh \
-  sed_ 's|d-i apt-setup/use_mirror boolean false|d-i apt-setup/use_mirror boolean true|' iso/build-iso.sh
-planta "o pkgsel voltar a travar a instalação sem repo" iso/build-iso.sh \
-  sed_ 's|d-i pkgsel/run_tasksel boolean false|d-i pkgsel/run_tasksel boolean true|' iso/build-iso.sh
+# --- A instalação não pode exigir internet --------------------------------
+# Regra 13-b: a ISO é air-gapped. No Subiquity a tentação equivalente é o
+# `refresh-installer` (baixa o instalador novo) e o `geoip` (consulta remota).
+planta "o autoinstall voltar a consultar geoip pela rede" iso/autoinstall/autoinstall.yaml \
+  sed_ 's|^  geoip: false|  geoip: true|' iso/autoinstall/autoinstall.yaml
 planta "o Release do repo local voltar a dizer Codename: ./" iso/build-iso.sh \
   sed_ "s|printf 'Codename: %s\\\\n' \"\${REPO_SUITE:-stable}\"|printf 'Codename: ./\\\\n'|" iso/build-iso.sh
 

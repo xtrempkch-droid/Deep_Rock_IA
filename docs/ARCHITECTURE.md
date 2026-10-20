@@ -1,6 +1,7 @@
 # ARCHITECTURE — ai-cpu-os
 
-> **Última atualização:** 2026-10-07
+> **Última atualização:** 2026-10-20 (fase de simplificação; ver
+> [`docs/DECISIONS.md`](DECISIONS.md) e [`docs/CHAT.md`](CHAT.md))
 
 Este documento descreve **como o sistema é montado**, **por onde os dados
 fluem** e **por que decidimos assim** — incluindo alternativas descartadas.
@@ -103,7 +104,22 @@ Conjunto `portable` (aplicável em qualquer máquina, uma a uma):
 - `gitea-compose.yml` — Gitea (SQLite, :3000, SSH :2222).
 - `build-runner.sh` — build Docker com cache + push ao registry local.
 
-### 2.6 `docs/TUTORIAL.md` (documento de encerramento de marco/versão)
+### 2.6 `talk/` — chat da frota `ai-talk` (PLANEJADO — ADR-003)
+
+- **Não é um papel:** é um **serviço de frota** compartilhado pelos dois
+  papéis (`inference` e `builder`). A camada é transversal: família = hardware,
+  papel = função, `talk/` = comunicação.
+- **Daemon + CLI:** TCP 7331 na LAN, um objeto JSON por linha,
+  HMAC-SHA256 com chave de frota, Python 3 da biblioteca padrão.
+- **Ordem no 1º boot:** `build.sh` instala o `talk/` **antes** do papel, para
+  que a máquina consiga relatar uma falha do papel pelo próprio chat. Se o
+  chat falhar, o build **degrada com aviso** e continua (Regra 13-a).
+- **Não é o `talk` do netkit:** sem `talkd`, sem UDP 517/518. O nome é
+  `ai-talk`; o contrato está em [`docs/CHAT.md`](CHAT.md).
+- **Vai na ISO** (é runtime), diferente da `webui/` (ferramenta da máquina que
+  gera a mídia). Ver Regra 18 do `AGENTS.md`.
+
+### 2.7 `docs/TUTORIAL.md` (documento de encerramento de marco/versão)
 - Não é um componente de código: é a **porta de entrada didática**.
 - Cobre o fluxo completo (preparar → detectar → simular → aplicar → usar →
   medir) para os **dois** perfis, explicando o "o quê" e o "por quê".
@@ -183,6 +199,9 @@ tests/smoke-test.sh  (validação rápida)
 | **shell-IA com whitelist de comandos**                     | LLM pode alucinar comandos; whitelist + sem `shell=True` + timeout = sandbox mínimo viável.                |
 | **`kernel.numa_balancing=0` só em single-socket**          | Em single-socket, o balanceamento NUMA adiciona overhead sem benefício.                                    |
 | **Huge pages como `always` (com fallback `madvise`)**      | `always` é mais simples e benéfico para cargas de longa duração; `madvise` é mais conservador.             |
+| **Base única de ISO: Ubuntu Server** (ADR-001, executado na sessão #42) | Um caminho de boot, um instalador, um conjunto de templates. O Debian continua como **hospedeiro** das mods, não como base de mídia; o caminho preseed foi **removido** (`--distro debian` aborta). |
+| **Identidade = papel** (ADR-002)                            | `inference`→`ai-inference`, `builder`→`ai-builder`: SSH, logs e o nó do chat dizem a função. `--username`/`--hostname` explícitos vencem; `auto` não deriva (o papel só é conhecido no 1º boot). |
+| **Chat de frota `ai-talk`: TCP + JSON lines + HMAC** (ADR-003) | Simétrico, rápido e sem broker. Python stdlib + air-gapped. Mensagem é dado, nunca comando; a ponte com o modelo é opcional e não executa tool calls remotas. |
 
 ---
 
@@ -198,6 +217,8 @@ tests/smoke-test.sh  (validação rápida)
 | **Postgres para o Gitea**                            | Não há carga que justifique; SQLite reduz partes móveis.                                                 |
 | **AVX-512 por emulação (`SDE`)**                     | Emulação é mais lenta que AVX2 nativo — contra a filosofia de ganho real.                                |
 | **Swap em disco para modelos grandes no Xeon**       | Thrashing de I/O destrói latência; melhor reduzir o tamanho do modelo.                                   |
+| **`talk`/`talkd` do netkit para a frota**            | Obsoleto, UDP, sem autenticação/criptografia, interativo e sem log durável. O `ai-talk` usa TCP + JSON lines + HMAC (ADR-003). |
+| **Matrix/MQTT/IRC para 2 nós**                       | Servidor/broker, contas e peso operacional desproporcionais. O `ai-talk` é um daemon de ~1 arquivo, sem dependências. |
 
 ---
 
@@ -275,8 +296,9 @@ Por isso a imagem habilita `AVX2`/`FMA`/`F16C` **explicitamente** e mantém
 
 | Data       | Mudança                                        |
 |------------|------------------------------------------------|
+| 2026-10-20 | 🧭 **Fase de simplificação (ADR-001/002/003):** base única de ISO Ubuntu; identidade pelo papel; componente de frota `talk/` (`ai-talk`). A seção 2.6 descreve o `talk/` planejado; a seção 4 registra as decisões e a seção 5 rejeita o `talk` do netkit. Nada implementado ainda. |
 | 2026-10-07 | Versão inicial da arquitetura (`0.1.0-alpha`). |
-| 2026-10-07 | Adicionado o tutorial didático como componente (2.6) e o princípio 6. |
+| 2026-10-07 | Adicionado o tutorial didático como componente (hoje 2.7) e o princípio 6. |
 | 2026-10-07 | Adicionada a seção 7 (CI/CD) e o princípio 7. **Código removido:**
    variáveis mortas (`SCRIPT_DIR` em `detect-hardware.sh` e
    `llama-build.sh`; `locators` em `detect-hardware.sh`). Motivo: zerar os

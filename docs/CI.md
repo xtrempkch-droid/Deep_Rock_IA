@@ -17,7 +17,7 @@ Portanto "compilar" no GitHub cobre três frentes diferentes:
 | **Validar** os scripts e a documentação | `validate.yml` | Erros de sintaxe/lint/regras barram o merge. |
 | **Compilar** o llama.cpp para cada hardware | `build-llama.yml` | Artefatos `.tar.gz` com os binários + execução real provando que rodam. |
 | **Empacotar** o runtime em container | `container.yml` | Imagem publicada no GHCR (`:latest` e `:znver2`). |
-| **🎯 Gerar a ISO de instalação** | `iso.yml` | ISO remasterizada (netinst + preseed + projeto), anexada à Release. |
+| **🎯 Gerar a ISO de instalação** | `iso.yml` | ISO remasterizada (Ubuntu Server live + autoinstall + projeto), anexada à Release. |
 
 > ⚠️ **O que o CI NÃO consegue testar:** o tuning de kernel (governor,
 > C-states, huge pages, sysctl) exige um host com privilégios e — no caso dos
@@ -29,12 +29,14 @@ Portanto "compilar" no GitHub cobre três frentes diferentes:
 ### 1.1 A ISO (`iso.yml`) — o entregável final
 
 O workflow **`iso.yml`** não "compila" no sentido tradicional: ele **remasteriza
-uma ISO oficial do Debian** para produzir a imagem de instalação do ai-cpu-os.
+uma ISO oficial do Ubuntu Server** para produzir a imagem de instalação do
+ai-cpu-os (base única — ADR-001; o caminho Debian foi removido).
 
 O que ele faz, em ordem:
 
-1. Instala `xorriso`, `isolinux` (fornece o `isohdpfx.bin` para o boot híbrido)
-   e `mtools` (patch do `grub.cfg` dentro da `efi.img`).
+1. Instala `xorriso` e `curl` (e `mtools` não é mais necessário: os setores de
+   boot da ISO oficial são preservados por `-indev/-outdev` + `-boot_image
+   replay`).
 2. `make iso-lint` — `bash -n` + `shellcheck` nos scripts da ISO.
 3. `make iso-select-test` — confere a escolha da ISO oficial no `SHA256SUMS`
    (sem rede: usa as fixtures).
@@ -54,7 +56,7 @@ O que ele faz, em ordem:
    a via de distribuição.
 
 
-**Sobre o disco do preseed:** o CI usa `/dev/vda` como placeholder (existe em
+**Sobre o disco do autoinstall:** o CI usa `/dev/vda` como placeholder (existe em
 VMs com virtio). Isso é **deliberadamente seguro**: se alguém instalar essa ISO
 gerada no CI em hardware real, o instalador **falha** (não existe `/dev/vda`)
 em vez de apagar o disco errado. Para instalar de verdade, regenere a ISO
@@ -98,9 +100,10 @@ Dispara em **todo push para `main` e em todo Pull Request**.
    aborta o **lote inteiro** quando um nome não tem candidato, e o `|| true`
    engolia até 25 pacotes por lote — falha **dependente da release do host**,
    logo impossível de pegar com um dry-run.
-10. `make iso-verify-test` — o `verify-iso.sh` tem de ser **distro-aware**.
-   Ele procurava o repositório em uso só no `/autoinstall.yaml`, e numa ISO
-   **Debian** (que usa preseed) isso reprovava uma ISO **correta** (run #10).
+10. `make iso-verify-test` — o `verify-iso.sh` tem de **reprovar** as falhas
+   reais e **recusar** o caminho Debian (ADR-001). Historicamente ele era
+   *distro-aware* porque conferir só o `/autoinstall.yaml` reprovava uma ISO
+   **Debian** correta (run #10); com a base única a checagem tem um caminho só.
 11. `make iso-check-test` — a conferência de uma ISO **baixada**
     (`iso/check-iso.sh`), construída sobre fixtures byte a byte. Existe para a
     máquina que **não tem `xorriso`**: valida tamanho, SHA256, a assinatura
@@ -129,8 +132,14 @@ Dispara em **todo push para `main` e em todo Pull Request**.
     entrega o log e o `done`, e — o ponto central — **sem `xorriso` a geração é
     RECUSADA com o motivo explícito** em vez de falhar em silêncio (Regra 13-a).
     Também prova que **não existe rota de escrita** e que o bind é `127.0.0.1`.
-17. `make iso-dry-run-both` — dry-run dos DOIS caminhos (ubuntu e debian) **sem
-   flags extras**, exatamente como o `make validate` local.
+17. `make talk-test` — prova o contrato do **chat da frota** (`talk/ai_talk.py`)
+    em **loopback**, sem root e sem rede externa: entrega + `ack` + `fsync`,
+    **espaçamento de 50 ms por par**, `hello` isento e `ping` throttled, fila
+    com **exit 5** no overflow, dedupe de `id`, assinatura **por nó**,
+    `ECONNREFUSED` em *fail fast*, chave frouxa recusada, **teto de 15 peers**
+    e a checagem de que o código usa **só a stdlib**.
+18. `make iso-dry-run` — dry-run do caminho Ubuntu **sem flags extras**,
+   exatamente como o `make validate` local (ADR-001: base única).
 
 ### Job `dry-run` (matriz: `xeon` e `ryzen`)
 Roda `detect-hardware.sh`, depois
@@ -150,7 +159,7 @@ reais:
 
 | Invariante | Por quê |
 |-----------|---------|
-| `iso-dry-run-both` existe no `Makefile`, está no `validate` e o CI **chama** esse alvo | Um comando duplicado entre CI e `make` deixou passar a regressão do `--iso-repo auto`, que quebrou o `validate` no GitHub com o `make validate` local verde |
+| `iso-dry-run` existe no `Makefile`, está no `validate` e o CI **chama** esse alvo | Um comando duplicado entre CI e `make` deixou passar a regressão do `--iso-repo auto`, que quebrou o `validate` no GitHub com o `make validate` local verde (hoje o alvo é Ubuntu-only) |
 | Nenhum `actions/*` em major antigo (`@v1..@v4`) | O `iso.yml` ficou preso em `@v4` enquanto o resto do repo já estava em `@v6`/`@v7` — o bump do Dependabot não o alcançou |
 | `upload-artifact` em `@v7` nos **dois** workflows que o usam | Sobrou um `@v6` no `main` porque o PR #3 do Dependabot trazia o bump e o alinhamento do `iso.yml` copiou o major vizinho. O guarda é **negativo e positivo**: ficou **negativo** (`@v1..@v6` reprova, varrendo todos os `*.yml`) e **positivo por arquivo** (`build-llama.yml` **e** `iso.yml`, um `grep` para cada). O positivo **não** pode contar `*.yml`: o próprio `validate.yml` cita a string dentro do comando e a contagem ficaria inflada — a perda de um dos dois passaria despercebida |
 | Download do repo apt **sem** `xargs -r -n 25` | `apt-get download a b c` aborta o **lote inteiro** quando um nome não tem candidato: um pacote virtual no fecho custava até 25 pacotes por lote, em silêncio (o `|| true` engolia). O script usa `packages_with_candidate` + fallback um-a-um |
@@ -158,16 +167,19 @@ reais:
 | O `artifact` da ISO **não** é gateado pelo limite da Release | O mesmo booleano gateava os dois, e a ISO air-gapped (~4 GB) era gerada e **descartada** — quem não tem `xorriso` ficava sem nenhum caminho. O limite de 2 GiB é de asset de Release |
 | `make iso-check-test` existe, está no `validate` e o CI o chama | O conferidor de ISO baixada existe porque a máquina de desenvolvimento **não tem `xorriso`**; sem teste, o modo de falha mais comum (o navegador entregar o `.zip` em vez do `.iso`) voltaria a passar despercebido |
 | `make ci-guards-test` existe, está no `validate` e o CI o chama | Fecha o buraco acima: planta **cada** violação numa cópia temporária e exige que o job falhe. Guarda que nunca reprovou não é guarda |
+| `talk-test` existe no `Makefile`, está no `validate` e o CI chama `make talk-test` | Mesma regra do corolário 13-a. Os guardas do chat cobrem `compare_digest`, `TCP_NODELAY`, `os.fsync`, `MAX_PEERS = 15`, `dedupe_window = 8192` e a recusa de chave legível por outros — cada um com violação plantada em `tests/test-ci-guards.sh` |
 | A Interface Web **só** usa biblioteca padrão (sem `fastapi`/`flask`/`pip install`) | A máquina alvo pode ser limitada: instalar pacote Python não pode ser pré-requisito para gerar a ISO. Guarda negativo + positivo |
 | A página **não** carrega recurso externo (CDN) | Um `<script src="https://…">` deixaria a UI quebrada justamente na máquina offline/limitada |
 | A UI **não** lida com senha e **não** tem rota de escrita | Gravar pendrive exige root: senha não deve passar pelo navegador. A UI lista os dispositivos e mostra o comando para o usuário rodar no terminal |
 | A UI **recusa** bind fora de `127.0.0.1` | Expor na rede uma página que gera ISO e escolhe disco para particionar |
 | A ISO **não** leva o `webui/` (`--exclude=./webui`) | É ferramenta da máquina que **gera** a mídia, não do sistema instalado (Regra 13-b) |
 | `make iso-repo-test` existe, está no `validate` e o CI o chama | O bug do repo apt era **dependente do ambiente** (só aparece com uma "isca" no fecho, que varia com a release do host) — por isso precisa de teste com stub, não de um dry-run |
-| `make iso-verify-test` existe, está no `validate` e o CI o chama | O `verify-iso.sh` tinha **viés de distro**: procurava o repo em uso só no autoinstall e reprovava uma ISO Debian correta (run #10). O guarda exige o marcador da preseed (`apt-setup/local0/repository`) no verificador |
+| `make iso-verify-test` existe, está no `validate` e o CI o chama | O `verify-iso.sh` tinha **viés de distro** (reprovava uma ISO Debian correta, run #10). Com a base única, o guarda exige o **contrário**: o verificador **não** pode voltar a conferir preseed (`apt-setup/local0`) e tem de citar o ADR-001 |
 Este é o job que protege as regras do `AGENTS.md` de erosão:
 
-- Verifica que todos os **28 arquivos obrigatórios** existem.
+- Verifica que todos os **arquivos obrigatórios** existem (a lista `required`
+  do workflow; hoje são 93 — inclui os documentos de decisão `docs/DECISIONS.md`
+  e `docs/CHAT.md`).
 - Verifica que `AGENTS.md` continua referenciando `docs/TUTORIAL.md` e a
   diretriz por **marco** (Regra 9) e que o `README.md` linka o tutorial.
 - Verifica que **todo** `*.sh` contém `set -euo pipefail` (Regra 7).
@@ -299,7 +311,7 @@ visibilidade do pacote em *GitHub → Packages → ai-cpu-os-llama → Settings*
 > existir como alvo do `Makefile`, e o CI deve **chamar o alvo** em vez de
 > repetir o comando. Motivo real: o dry-run dos dois caminhos da ISO era um
 > `run:` duplicado no `validate.yml` — o CI falhava e o `make validate` local
-> passava. Agora os dois rodam `make iso-dry-run-both`, e há guarda que reprova
+> passava. Agora os dois rodam `make iso-dry-run`, e há guarda que reprova
 > se alguém voltar a duplicar.
 
 O `Makefile` existe para que você não precise adivinhar o que o CI faz:

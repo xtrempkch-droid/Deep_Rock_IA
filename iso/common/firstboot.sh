@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# iso/preseed/firstboot.sh — aplica o ai-cpu-os no primeiro boot do sistema
-# instalado a partir da ISO (Debian **ou** Ubuntu).
+# iso/common/firstboot.sh — aplica o ai-cpu-os no primeiro boot do sistema
+# instalado a partir da ISO (base **Ubuntu Server**, ADR-001).
 # -----------------------------------------------------------------------------
 # Este arquivo é um TEMPLATE: `iso/build-iso.sh` substitui os marcadores
 # (nomes entre arrobas duplas) antes de gravá-lo na ISO.
@@ -36,11 +36,10 @@ log() { printf '[%s] [firstboot] %s\n' "$(_ts)" "$*"; }
 # Espelha tudo em arquivo, além do journal.
 exec > >(tee -a "$LOG") 2>&1
 
-# O `iso/test-vm.sh` julga pelo CONSOLE SERIAL, e aqui há uma pegadinha do
-# Debian: no sistema INSTALADO `/dev/console` é o ÚLTIMO `console=` da cmdline,
-# e o d-i grava `console=ttyS0,115200 console=tty1` — ou seja, o
-# `journal+console` do unit cai no tty1 (invisível numa VM sem vídeo) e o teste
-# esperava para sempre com o trabalho JÁ concluído (sessão #35).
+# O `iso/test-vm.sh` julga pelo CONSOLE SERIAL. No sistema INSTALADO
+# `/dev/console` pode ser o ÚLTIMO `console=` da cmdline (tty1), invisível numa
+# VM sem vídeo — o teste esperava para sempre com o trabalho JÁ concluído
+# (sessão #35). Por isso os marcadores vão explicitamente ao /dev/ttyS0.
 #
 # A tentação é espelhar a saída inteira no /dev/ttyS0 — NÃO FAÇA: o build do
 # llama.cpp escreve megabytes e o console serial da VM **travou** de vez (nem

@@ -8,7 +8,7 @@
 #
 # Por que existe: a geração da ISO Ubuntu morria com `exit code 22` do curl —
 # sem nenhuma pista do motivo — porque o SHA256SUMS do Ubuntu tem DUAS
-# particularidades que o do Debian não tem:
+# particularidades:
 #
 #   1. Marca o modo BINÁRIO com `*` antes do nome (mesmo formato do
 #      `md5sum -b`). Sem remover o `*`, a URL sai como
@@ -20,8 +20,8 @@
 #
 # Nenhum dos dois aparece com um SHA256SUMS inventado de duas linhas — por isso
 # as fixtures são cópias fiéis dos arquivos oficiais (capturadas em 2026-10-12
-# de releases.ubuntu.com/24.04/SHA256SUMS e
-# cdimage.debian.org/debian-cd/current/amd64/iso-cd/SHA256SUMS).
+# de releases.ubuntu.com/24.04/SHA256SUMS. A fixture do Debian continua em
+# tests/fixtures/ apenas como histórico (o caminho Debian saiu — ADR-001).
 #
 # Uso:
 #   bash tests/test-iso-selection.sh
@@ -113,26 +113,6 @@ case "$u_name" in
   *)               ok  "ubuntu: ignora as variantes desktop e wsl" ;;
 esac
 
-# --- Debian: o caso que funcionava, mas por sorte ---------------------------
-D_SUMS="${FIXTURES_DIR}/SHA256SUMS.debian-13"
-d_entry="$(pick_iso_entry "$D_SUMS" "$DEBIAN_ISO_PATTERN")"
-d_name="${d_entry##* }"
-
-check "debian: escolhe o netinst amd64" \
-  "debian-13.7.0-amd64-netinst.iso" "$d_name"
-
-# Sem âncora, `netinst\.iso$` casaria `debian-edu-*` e `debian-mac-*` — e o
-# arquivo lista os três, então o resultado dependia da ORDEM das linhas.
-case "$d_name" in
-  *edu*|*mac*) bad "debian: casou uma variante edu/mac" ;;
-  *)           ok  "debian: ignora as variantes edu e mac" ;;
-esac
-
-# Fixture só com variantes: o padrão ancorado tem de não achar NADA (antes
-# acharia `debian-edu` e o build baixaria a ISO errada).
-only_variants="$(pick_iso_entry "${FIXTURES_DIR}/SHA256SUMS.debian-somente-variantes" "$DEBIAN_ISO_PATTERN")"
-check "debian: padrão ancorado não aceita só-variantes (deve vir vazio)" \
-  "" "$only_variants"
 
 # --- --iso-url: casamento por nome exato ------------------------------------
 by_name="$(pick_iso_entry_by_name "$U_SUMS" "ubuntu-24.04.4-live-server-amd64.iso")"
@@ -145,9 +125,9 @@ check "--iso-url: nome inexistente devolve vazio" "" "$by_name_seems_wrong"
 check "normalize: remove o marcador binário '*'" \
   "ubuntu-24.04.5-live-server-amd64.iso" "$(normalize_iso_name '*ubuntu-24.04.5-live-server-amd64.iso')"
 check "normalize: remove o prefixo './'" \
-  "debian-13.7.0-amd64-netinst.iso" "$(normalize_iso_name './debian-13.7.0-amd64-netinst.iso')"
+  "ubuntu-24.04.5-live-server-amd64.iso" "$(normalize_iso_name './ubuntu-24.04.5-live-server-amd64.iso')"
 check "normalize: nome limpo passa intacto" \
-  "debian-13.7.0-amd64-netinst.iso" "$(normalize_iso_name 'debian-13.7.0-amd64-netinst.iso')"
+  "ubuntu-24.04.5-live-server-amd64.iso" "$(normalize_iso_name 'ubuntu-24.04.5-live-server-amd64.iso')"
 
 echo
 if [[ $FAIL -eq 0 ]]; then

@@ -5,13 +5,14 @@
 # Pega uma ISO oficial, injeta o projeto ai-cpu-os + a configuração de
 # instalação automática e remonta uma ISO nova que instala tudo sozinha.
 #
-# Dois caminhos suportados (`--distro`):
-#   * ubuntu (PADRÃO) → Ubuntu Server live + **autoinstall** (Subiquity).
+# Caminho suportado (`--distro`):
+#   * ubuntu (PADRÃO, ÚNICO) → Ubuntu Server live + **autoinstall** (Subiquity).
 #     A config vai como `autoinstall.yaml` na RAIZ da ISO (ao lado de `casper/`)
 #     e a remontagem usa `xorriso -indev/-outdev -map`, preservando os setores
 #     de boot originais byte a byte.
-#   * debian (LEGADO, funcional) → Debian netinst + preseed (d-i), com o
-#     caminho de extração + remontagem via mkisofs descrito mais abaixo.
+#   * debian → REMOVIDO (ADR-001). `--distro debian` falha com exit 2 e uma
+#     mensagem que aponta o ADR. O runtime Debian (build.sh/mods) continua
+#     suportado; o que deixou de existir foi a ISO com base Debian.
 #
 # A ISO gerada:
 #   * instala o SO mínimo, não interativo;
@@ -24,7 +25,7 @@
 #   sudo bash iso/build-iso.sh --disk /dev/nvme0n1 [opções]
 #
 # Opções:
-#   --distro NAME         ubuntu (padrão) | debian
+#   --distro NAME         ubuntu (única base suportada; 'debian' falha — ADR-001)
 #   --disk DEV            Disco alvo do particionamento (APAGADO). Obrigatório
 #                         sem --dry-run, a menos que --allow-any-disk seja usado.
 #                         `--disk auto` = não fixa o disco (o instalador escolhe
@@ -44,9 +45,10 @@
 #   --no-verify           Não roda o iso/verify-iso.sh no fim (ele é rápido e
 #                         somente leitura; o padrão é verificar).
 #   --hostname NAME       Hostname do sistema instalado (padrão: <usuario>).
-#   --username NAME       Usuário administrativo (padrão: ai-cpu-os).
+#   --username NAME       Usuário administrativo (padrão: ai-cpu-os; a próxima
+#                         fase deriva de --role: ai-inference/ai-builder — ADR-002).
 #   --password-hash HASH  Hash da senha (crypt). Se omitido, gera e mostra um.
-#   --locale / --keymap / --timezone / --mirror-host / --mirror-dir
+#   --locale / --keymap / --timezone
 #   --extra-packages "…"  Pacotes extras (separados por espaço).
 #   --work-dir DIR        Diretório de trabalho (padrão: iso/work).
 #   --keep-work           Não apaga o diretório de trabalho no fim.
@@ -55,8 +57,6 @@
 #   -h | --help           Esta ajuda.
 #
 # Requisitos: xorriso, curl, sha256sum, tar.
-#   Opcionais: mtools + isolinux (apenas no caminho Debian: boot UEFI dentro de
-#   efi.img e boot híbrido via isohdpfx.bin).
 #
 # ⚠️ A ISO gerada APAGA o disco alvo. Boote em VM antes de usar em hardware.
 # -----------------------------------------------------------------------------
@@ -74,7 +74,6 @@ readonly ISO_DIR
 REPO_ROOT="$(cd "${ISO_DIR}/.." && pwd)"
 readonly REPO_ROOT
 
-readonly DEBIAN_CD_BASE_DEFAULT="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd"
 # Ubuntu Server live (amd64). O padrão aponta para a série LTS mais recente;
 # para outra versão use --iso-url com a URL do diretório de sua escolha.
 readonly UBUNTU_CD_BASE_DEFAULT="https://releases.ubuntu.com/24.04"
@@ -85,7 +84,6 @@ readonly UBUNTU_CD_BASE_DEFAULT="https://releases.ubuntu.com/24.04"
 # string do awk o `\.` vira escape desconhecido (o gawk avisa e o trata como
 # `.`, que casa qualquer caractere). A classe evita a ambiguidade.
 readonly UBUNTU_ISO_PATTERN='^ubuntu-[0-9][^ ]*-live-server-amd64[.]iso$'
-readonly DEBIAN_ISO_PATTERN='^debian-[0-9][^ ]*-amd64-netinst[.]iso$'
 
 # Modelo embutido na mídia (decisão da sessão #14: a ISO é air-gapped, então o
 # .gguf tem de estar NA MÍDIA — não pode ser baixado no 1º boot).
@@ -121,7 +119,7 @@ readonly SUGGESTED_SOURCE_URL="https://github.com/ggml-org/llama.cpp/archive/ref
 readonly ISO_REPO_DIRNAME="apt-repo"
 # Onde a mídia é montada durante a instalação. É o MESMO caminho que o
 # late-command usa para ler /cdrom/ai-cpu-os — ou seja, vale nos dois
-# instaladores (debian-installer e Subiquity).
+# instalador (Subiquity).
 readonly APT_REPO_MOUNT="/cdrom"
 # Pacotes que o PRIMEIRO BOOT precisa ter JÁ INSTALADOS (é isto que evita que o
 # llama-build.sh/install.sh baixem qualquer coisa). É a união de:
@@ -175,7 +173,7 @@ NET_IP=""             # aceita 192.168.1.50 ou 192.168.1.50/24
 NET_GATEWAY=""
 NET_DNS=""            # vazio = 1.1.1.1,8.8.8.8 (só no modo static)
 NET_PREFIX="24"       # usado quando --network-ip vem sem /prefixo
-# Derivados de validate_network (usados na preseed e no late-command).
+# Derivados de validate_network (usados no late-command).
 NET_IP_ADDR=""
 NET_PREFIX_EFF=""
 NET_NETMASK=""
@@ -186,10 +184,6 @@ LANG_CODE="pt"
 COUNTRY="BR"
 KEYMAP="br"
 TIMEZONE="America/Sao_Paulo"
-# Espelho do apt apenas no caminho Debian (o Ubuntu fixa archive.ubuntu.com
-# no autoinstall.yaml — ver o comentário "Repositório determinístico" lá).
-MIRROR_HOST="deb.debian.org"
-MIRROR_DIR="/debian"
 GRUB_WITH_OTHER_OS="true"
 EXTRA_PACKAGES="sudo git curl ca-certificates build-essential pkg-config libopenblas-dev gnupg jq pciutils util-linux openssh-server"
 WORK_DIR="${ISO_DIR}/work"
@@ -344,7 +338,8 @@ Uso:
   sudo bash iso/build-iso.sh --disk /dev/nvme0n1 [opções]
 
 Opções principais:
-  --distro NAME         ubuntu (padrão, autoinstall) | debian (preseed).
+  --distro NAME         ubuntu (autoinstall). 'debian' foi REMOVIDO (ADR-001)
+                        e falha com exit 2.
   --disk DEV            Disco alvo do particionamento (APAGADO).
   --disk auto           NÃO fixa o disco: o instalador escolhe o maior. Use isto
                         quando a ISO vai instalar em OUTRA máquina (um disco
@@ -362,12 +357,13 @@ Opções principais:
                         tela (usado pelo iso/test-vm.sh).
   --no-verify           Não roda o iso/verify-iso.sh no fim.
   --hostname NAME       Hostname do sistema instalado (padrão: <usuario>).
-  --username NAME       Usuário administrativo (padrão: ai-cpu-os).
+  --username NAME       Usuário administrativo (padrão: ai-cpu-os; em breve
+                        derivado do papel: ai-inference/ai-builder — ADR-002).
   --password-hash HASH  Hash crypt da senha do usuário. Se omitido, gera e mostra um.
   --root-password-hash HASH  Hash crypt da senha do ROOT (opcional). Sem ele, o
                         root fica BLOQUEADO (padrão). Com ele, o root é
                         habilitado: no Ubuntu via late-command (chpasswd -e);
-                        no Debian via preseed (passwd/root-login true).
+                        e o root fica habilitado no alvo.
   --network MODE        Rede do sistema INSTALADO (gravada na ISO):
                           auto (padrão) — DHCP em todas as interfaces Ethernet
                           dhcp          — igual a auto, mas explícito
@@ -378,13 +374,13 @@ Opções principais:
                         Sem isto o Subiquity não deixa configuração persistente
                         no alvo e o sistema sobe SEM DHCP.
   --network-interface NOME  Interface alvo (ex.: enp5s0). Vazio = casa en*/eth*
-                        por glob no Ubuntu e usa 'auto' no Debian. Em modo
+                        por glob. Em modo
                         static, informe-a se a placa não for en*/eth*.
   --network-ip IP[/PREFIXO]  Endereço do modo static (prefixo padrão: 24).
   --network-gateway IP  Gateway do modo static (obrigatório no modo static).
   --network-dns "A,B"   Servidores DNS do modo static (padrão: 1.1.1.1,8.8.8.8).
   --network-prefix N    Prefixo usado quando --network-ip vem sem /N (padrão: 24).
-  --locale / --keymap / --timezone / --mirror-host / --mirror-dir
+  --locale / --keymap / --timezone
   --extra-packages "…"  Pacotes extras instalados no alvo.
   --iso-model VALOR     Modelo .gguf embutido na mídia (a ISO é air-gapped, logo
                         o modelo não pode ser baixado no 1º boot):
@@ -419,8 +415,6 @@ Opções principais:
   -h | --help           Esta ajuda.
 
 Requisitos: xorriso, curl, sha256sum, tar.
-  Opcionais (só no caminho Debian): mtools (boot UEFI dentro de efi.img) e
-  isolinux (isohdpfx.bin para boot híbrido BIOS+EFI).
 
 ⚠️ A ISO gerada APAGA o disco alvo. Boote em VM antes de usar em hardware.
    Ver docs/ISO.md e o Bloco M de docs/VALIDATION.md.
@@ -433,11 +427,11 @@ EOF
 NET_DNS_DEFAULT="1.1.1.1,8.8.8.8"
 
 # IPv4 estrito (cada octeto 0-255, sem zeros à esquerda). É o que vai para o
-# netplan/preseed — um valor torto aqui deixaria o alvo sem rede.
+# netplan — um valor torto aqui deixaria o alvo sem rede.
 RE_IPV4='^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$'
 RE_IFACE='^[A-Za-z0-9_.:-]+$'
 
-# Prefixo CIDR → máscara decimal (o debian-installer pede netmask, não /N).
+# Prefixo CIDR → máscara decimal.
 prefix_to_netmask() {
   local p="$1" octet out="" i
   for i in 0 1 2 3; do
@@ -572,8 +566,6 @@ parse_args() {
       --locale)          [[ $# -ge 2 ]] || { log_error "--locale exige valor"; exit 2; }; LOCALE="$2"; shift 2 ;;
       --keymap)          [[ $# -ge 2 ]] || { log_error "--keymap exige valor"; exit 2; }; KEYMAP="$2"; shift 2 ;;
       --timezone)        [[ $# -ge 2 ]] || { log_error "--timezone exige valor"; exit 2; }; TIMEZONE="$2"; shift 2 ;;
-      --mirror-host)     [[ $# -ge 2 ]] || { log_error "--mirror-host exige valor"; exit 2; }; MIRROR_HOST="$2"; shift 2 ;;
-      --mirror-dir)      [[ $# -ge 2 ]] || { log_error "--mirror-dir exige valor"; exit 2; }; MIRROR_DIR="$2"; shift 2 ;;
       --extra-packages)  [[ $# -ge 2 ]] || { log_error "--extra-packages exige valor"; exit 2; }; EXTRA_PACKAGES="$2"; shift 2 ;;
       --iso-model)       [[ $# -ge 2 ]] || { log_error "--iso-model exige valor (auto|none|CAMINHO)"; exit 2; }; ISO_MODEL="$2"; shift 2 ;;
       --iso-source)      [[ $# -ge 2 ]] || { log_error "--iso-source exige valor (auto|none|CAMINHO)"; exit 2; }; ISO_SOURCE="$2"; shift 2 ;;
@@ -591,21 +583,25 @@ parse_args() {
     esac
   done
 
+  # ADR-001 (docs/DECISIONS.md): a base ÚNICA da ISO é Ubuntu Server.
+  # `--distro debian` falha com mensagem clara — NÃO cai em ramo morto. O
+  # runtime Debian (build.sh/mods) continua suportado; o que saiu foi a ISO.
   case "$DISTRO" in
-    ubuntu|debian) ;;
-    *) log_error "Distro inválida: '${DISTRO}' (use ubuntu ou debian)."; exit 2 ;;
+    ubuntu) ;;
+    debian)
+      log_error "--distro debian foi REMOVIDO: a base única da ISO é Ubuntu Server (ADR-001)."
+      log_error "O runtime Debian (build.sh/mods) continua suportado; só a ISO não."
+      log_error "Veja docs/DECISIONS.md, ADR-001. Gere com: --distro ubuntu"
+      exit 2 ;;
+    *)
+      log_error "Distro inválida: '${DISTRO}' (a única base suportada é ubuntu)."
+      exit 2 ;;
   esac
 
   case "$ROLE" in
     auto|inference|builder) ;;
     *) log_error "Papel inválido: '${ROLE}' (use auto, inference ou builder)."; exit 2 ;;
   esac
-
-  # A justificativa técnica está no comentário do autoinstall.yaml (repositório
-  # determinístico). Aqui apenas avisamos para evitar confusão.
-  if [[ "$DISTRO" == "ubuntu" && "$MIRROR_HOST" != "deb.debian.org" ]]; then
-    log_warn "--mirror-host só tem efeito no caminho Debian; o Ubuntu usa archive.ubuntu.com."
-  fi
 
   if [[ -z "$SYS_HOSTNAME" ]]; then
     SYS_HOSTNAME="$(printf '%s' "$USERNAME" | tr '_' '-')"
@@ -664,9 +660,6 @@ parse_args() {
 # ---------------------------------------------------------------------------
 # Dependências
 # ---------------------------------------------------------------------------
-HAS_MTOOLS=0
-HAS_ISOHDPFX=""
-
 check_deps() {
   section "Dependências"
   local missing=()
@@ -687,26 +680,6 @@ check_deps() {
     log_ok "Ferramentas obrigatórias presentes (xorriso $(xorriso --version 2>/dev/null | head -1 | awk '{print $2}'))."
   fi
 
-  # mtools e isohdpfx.bin só são usados no caminho Debian. O Ubuntu preserva os
-  # setores de boot originais via `xorriso -indev/-outdev -map`, então NÃO
-  # precisa de nenhum dos dois — vale avisar para não assustar quem só quer
-  # gerar a ISO Ubuntu.
-  if [[ "$DISTRO" == "ubuntu" ]]; then
-    log_info "Distro ubuntu: mtools/isolinux não são necessários (setores de boot preservados)."
-    return 0
-  fi
-
-  command -v mcopy >/dev/null 2>&1 && HAS_MTOOLS=1
-
-  local cand
-  for cand in /usr/lib/ISOLINUX/isohdpfx.bin /usr/lib/syslinux/mbr/isohdpfx.bin; do
-    if [[ -f "$cand" ]]; then HAS_ISOHDPFX="$cand"; break; fi
-  done
-
-  if [[ -z "$HAS_ISOHDPFX" ]]; then
-    log_warn "isohdpfx.bin não encontrado: a ISO sairá sem boot híbrido via MBR."
-    log_warn "Instale o pacote 'isolinux' para habilitar o boot BIOS+EFI: apt-get install -y isolinux"
-  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -735,8 +708,8 @@ resolve_password() {
 
 # Senha do ROOT (hash crypt, opcional). Sem ela, o root fica BLOQUEADO —
 # comportamento padrão (e o mais seguro). Com ela, o root é habilitado na
-# instalação: late-command (chpasswd -e) no Ubuntu e preseed
-# (passwd/root-login true) no Debian. Nunca aceitamos senha em TEXTO PURO:
+# instalação: late-command (chpasswd -e) no alvo. Nunca aceitamos senha em
+# TEXTO PURO:
 # `chpasswd -e` e o d-i esperam um hash crypt, e um texto puro aqui viraria
 # "senha = o texto" — falha que só apareceria no primeiro login.
 resolve_root_password() {
@@ -814,14 +787,8 @@ acquire_iso() {
   fi
 
   # Descobrir a versão atual e o checksum oficial, para não confiar em URL fixa.
-  local default_base sum_pattern
-  if [[ "$DISTRO" == "ubuntu" ]]; then
-    default_base="$UBUNTU_CD_BASE_DEFAULT"
-    sum_pattern="$UBUNTU_ISO_PATTERN"
-  else
-    default_base="$DEBIAN_CD_BASE_DEFAULT"
-    sum_pattern="$DEBIAN_ISO_PATTERN"
-  fi
+  local default_base="$UBUNTU_CD_BASE_DEFAULT"
+  local sum_pattern="$UBUNTU_ISO_PATTERN"
 
   local base_url="${ISO_URL:-$default_base}"
   if [[ -n "$ISO_URL" ]]; then
@@ -876,7 +843,7 @@ acquire_iso() {
   if [[ -f "$dest" ]] && verify_sha_quiet "$dest" "$EXPECTED_SHA"; then
     log_info "ISO já está no cache e confere com o SHA256SUMS (reutilizando)."
   else
-    log_info "Baixando ${base_url}/${filename} (≈ 700 MB no Debian, ≈ 2.6 GB no Ubuntu)…"
+    log_info "Baixando ${base_url}/${filename} (≈ 2.6 GB)…"
     run "Download da ISO" curl -fL --retry 3 --progress-bar -o "${dest}.part" "${base_url}/${filename}"
     mv "${dest}.part" "$dest"
     verify_sha "$dest" "$EXPECTED_SHA" || { log_error "Checksum não confere. Download corrompido?"; exit 1; }
@@ -903,43 +870,11 @@ verify_sha_quiet() {
 }
 
 # ---------------------------------------------------------------------------
-# Layout: extração (Debian) ou preparação do stage (Ubuntu)
+# Layout: preparação do stage (Ubuntu)
 # ---------------------------------------------------------------------------
-EXTRACT_DIR=""
-ISO_ROOT=""
-UBUNTU_STAGE=""
+UBUNTU_STAGE=
 UBUNTU_GRUB_BIOS=""
 UBUNTU_GRUB_EFI=""
-
-# Debian: extrai a ISO inteira e edita a árvore no lugar (isolinux + efi.img).
-extract_iso_debian() {
-  section "Extração (Debian)"
-  EXTRACT_DIR="${WORK_DIR}/extract"
-  ISO_ROOT="${EXTRACT_DIR}"
-
-  if [[ $DRY_RUN -eq 1 ]]; then
-    log_info "[dry-run] xorriso -osirrox on -indev ${ISO_PATH} -extract / ${EXTRACT_DIR}"
-    return 0
-  fi
-
-  rm -rf "$EXTRACT_DIR"
-  mkdir -p "$EXTRACT_DIR"
-  # Backups de uma execução anterior são de OUTRA árvore (talvez de outra ISO
-  # base): restaurá-los sobre a extração nova corromperia a montagem.
-  rm -rf "${WORK_DIR}/orig"
-
-  # Permite sobrescrever arquivos ao extrair (o xorriso é conservador por padrão).
-  run "Extraindo a ISO" xorriso -osirrox on -overwrite on -indev "$ISO_PATH" -extract / "$EXTRACT_DIR"
-  # Alguns arquivos vêm somente-leitura e atrapalham a edição.
-  chmod -R u+w "$EXTRACT_DIR" 2>/dev/null || true
-
-  if [[ ! -d "${ISO_ROOT}/isolinux" ]]; then
-    log_error "Layout inesperado: ${ISO_ROOT}/isolinux não existe."
-    log_error "Para Ubuntu, use --distro ubuntu (autoinstall). Ver docs/ISO.md."
-    exit 1
-  fi
-  log_ok "ISO extraída em ${EXTRACT_DIR}"
-}
 
 # Ubuntu: NÃO extrai a ISO inteira. Só tiramos os grub.cfg (que serão editados e
 # devolvidos via `-map`) e montamos um stage com o que será injetado. Assim os
@@ -967,7 +902,6 @@ prepare_ubuntu() {
   if [[ -z "$listing" ]]; then
     log_error "Layout inesperado: não encontrei /casper na ISO."
     log_error "--distro ubuntu exige uma ISO **Ubuntu Server live** (releases.ubuntu.com)."
-    log_error "Para Debian netinst, use --distro debian. Ver docs/ISO.md."
     exit 1
   fi
 
@@ -993,13 +927,9 @@ prepare_ubuntu() {
 
 inject_project() {
   section "Injeção do projeto"
-  # Debian: entra na árvore extraída. Ubuntu: entra no stage (vai para a ISO via -map).
-  local base
-  if [[ "$DISTRO" == "ubuntu" ]]; then
-    base="${UBUNTU_STAGE}"
-  else
-    base="${ISO_ROOT}"
-  fi
+  # O projeto entra no stage e vai para a ISO via `-map` (o Ubuntu não é
+  # reconstruído: só o que muda é mapeado, preservando os setores de boot).
+  local base="${UBUNTU_STAGE}"
   local dest="${base}/ai-cpu-os"
 
   if [[ $DRY_RUN -eq 1 ]]; then
@@ -1088,8 +1018,7 @@ acquire_model() {
 inject_model() {
   [[ -n "$MODEL_SRC" && -n "$MODEL_NAME" ]] || return 0
 
-  local base
-  if [[ "$DISTRO" == "ubuntu" ]]; then base="${UBUNTU_STAGE}"; else base="${ISO_ROOT}"; fi
+  local base="${UBUNTU_STAGE}"
   local dest="${base}/models"
 
   if [[ $DRY_RUN -eq 1 ]]; then
@@ -1178,8 +1107,7 @@ acquire_source() {
 inject_source() {
   [[ -n "$SOURCE_FILE" && -n "$SOURCE_NAME" ]] || return 0
 
-  local base
-  if [[ "$DISTRO" == "ubuntu" ]]; then base="${UBUNTU_STAGE}"; else base="${ISO_ROOT}"; fi
+  local base="${UBUNTU_STAGE}"
   local dest="${base}/${SOURCE_NAME}"
 
   if [[ $DRY_RUN -eq 1 ]]; then
@@ -1230,15 +1158,6 @@ iso_base_codename() {
   fi
   if [[ -n "$cn" ]]; then
     printf '%s' "$cn"
-  elif [[ "$DISTRO" == "debian" ]]; then
-    # Debian: 13 -> trixie, 12 -> bookworm, 11 -> bullseye. Reserva, caso o
-    # `/.disk/info` não exista (ISO remasterizada por terceiros).
-    case "$(printf '%s' "$(basename "${ISO_PATH:-}")" | sed -nE 's/^debian-([0-9]+)\..*/\1/p')" in
-      11) printf 'bullseye' ;;
-      12) printf 'bookworm' ;;
-      13) printf 'trixie' ;;
-      *)  printf 'stable' ;;
-    esac
   else
     ubuntu_codename_for_version "$(iso_release_version)"
   fi
@@ -1268,7 +1187,7 @@ iso_release_version() {
 # e assinar exigiria gerenciar chave no alvo, o que não agrega aqui.
 apt_local_source_line() {
   # SEM repositório na mídia, a linha tem de ser VAZIA — é isso que faz o
-  # bloco inteiro sumir (do YAML e do preseed). Devolver uma linha com caminho
+  # bloco inteiro sumir (do YAML). Devolver uma linha com caminho
   # vazio inseriria uma fonte inútil e inválida.
   [[ -n "$APT_REPO_PATH_REL" ]] || return 0
   # O caminho é o da MÍDIA MONTADA (ex.: file:///cdrom/apt-repo) — não o nome
@@ -1516,30 +1435,17 @@ acquire_repo() {
   # ---------------------------------------------------------------------------
   # Regra aprendida na marra (CI vermelho na sessão #18): um valor DEFAULT não
   # pode fazer o build falhar. `--iso-repo` nasce em `auto`, então qualquer
-  # invocação existente (`--distro debian --dry-run`, por exemplo) passaria a
-  # falhar — mesmo sendo um pedido razoável. Quando não dá para montar um
-  # repositório CORRETO, avisamos alto e seguimos sem ele: a ISO continua válida
-  # (só passa a precisar de rede para instalar pacotes).
+  # invocação existente passaria a falhar — mesmo sendo um pedido razoável.
+  # Quando não dá para montar um repositório CORRETO, avisamos alto e seguimos
+  # sem ele: a ISO continua válida (só passa a precisar de rede para instalar
+  # pacotes).
   #
   # Quem pediu um caminho explícito (`--iso-repo DIR`) e errou o caminho
   # continua recebendo erro fatal: aí a entrada é do usuário e é corrigível.
-  local host_id=""
-  if [[ -r /etc/os-release ]]; then
-    host_id="$(. /etc/os-release && printf '%s' "${ID:-}")"
-  fi
-
-  if [[ "$ISO_REPO" == "auto" && "$DISTRO" == "debian" && "$host_id" != "debian" ]]; then
-    log_warn "--iso-repo auto: esta máquina é '$host_id' e a ISO é Debian."
-    log_warn "Os .deb de uma base não servem na outra, então NÃO vou montar o repositório."
-    log_warn "A ISO sai sem ele (o alvo precisará de rede para instalar pacotes)."
-    log_warn "Para embutir: baixe os .deb do Debian e use --iso-repo CAMINHO."
-    ISO_REPO="none"
-    return 0
-  fi
 
   # Um repositório montado com os .deb de OUTRA release produz versões que não
   # casam com a base da ISO — e o modo de falha é uma instalação quebrada.
-  if [[ "$ISO_REPO" == "auto" && $ISO_REPO_ALLOW_MISMATCH -eq 0 && "$DISTRO" == "ubuntu" ]]; then
+  if [[ "$ISO_REPO" == "auto" && $ISO_REPO_ALLOW_MISMATCH -eq 0 ]]; then
     local ver want have
     ver="$(iso_release_version)"
     want="$(iso_base_codename)"
@@ -1662,8 +1568,7 @@ acquire_repo() {
 inject_repo() {
   [[ -n "$REPO_DIR_LOCAL" && -n "$APT_REPO_PATH_REL" ]] || return 0
 
-  local base
-  if [[ "$DISTRO" == "ubuntu" ]]; then base="${UBUNTU_STAGE}"; else base="${ISO_ROOT}"; fi
+  local base="${UBUNTU_STAGE}"
   local dest="${base}/${APT_REPO_PATH_REL}"
 
   if [[ $DRY_RUN -eq 1 ]]; then
@@ -1698,103 +1603,9 @@ expand_apt_local_block() {
       # removido de propósito — ver docs/ISO.md § 3.1.
       next
     }
-    /^@@APT_LOCAL_PRESEED@@$/ {
-      if (line != "") {
-        print "d-i apt-setup/local0/repository string " line
-        print "d-i apt-setup/local0/comment string ai-cpu-os local repo (midia)"
-        print "d-i apt-setup/local0/source boolean true"
-      }
-      next
-    }
     { print }
   ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
 }
-
-# Expande os marcadores do modo OFFLINE da preseed Debian.
-#
-# POR QUE (medido na sessão #38, com a ISO SEM repositório local e SEM internet):
-# a instalação automática **parava**. O `apt-setup` não conseguia configurar o
-# espelho, o udeb devolvia `apt-setup/continue` — pergunta de prioridade
-# CRÍTICA — e o d-i ficava esperando uma resposta que ninguém ia dar, com o
-# disco já particionado. Junto vinha o `pkgsel/upgrade full-upgrade`, que tenta
-# atualizar o sistema inteiro contra um espelho inacessível.
-#
-# Com repositório local na mídia nada disso acontece (o `apt` funciona). Sem
-# ele — e sem rede — a instalação tem de **completar mesmo assim** e deixar o
-# `late-command` registrar o que faltou (é ele que instala/verifica o SSH e
-# escreve /root/LEIA-SSH.md). Instalação que para no meio, sem mensagem, é o
-# pior resultado possível: a máquina fica inacessível e sem explicação.
-expand_apt_offline_block() {
-  local f="$1" have_repo="no" pkgs="$EXTRA_PACKAGES"
-  [[ -n "$APT_REPO_PATH" ]] && have_repo="yes"
-
-  awk -v have_repo="$have_repo" -v pkgs="$pkgs" '
-    /^## @@APT_OFFLINE_BLOCK@@$/ {
-      # O espelho de REDE nunca é obrigatório: a ISO air-gapped tem o que o
-      # alvo precisa na própria mídia, e um espelho inacessível (rede sem
-      # internet) faz o `apt-setup` PARAR em "[!] Please check the specified
-      # mirror" — medido na sessão #38, inclusive COM repositório local na
-      # mídia (o repo local não substitui o espelho: é fonte EXTRA).
-      # Quem quiser o espelho oficial liga depois (o target nasce com ele no
-      # sources.list via apt-setup normal). Aqui: instalar sem espelho.
-      print "d-i apt-setup/use_mirror boolean false"
-      if (have_repo == "no") {
-        print "d-i apt-setup/services-select multiselect"
-        print "# (sem repositório local: os pacotes ficam para o 1º boot)"
-      } else {
-        print "d-i apt-setup/services-select multiselect"
-        print "# (com repositório local: os pacotes vêm da mídia)"
-      }
-      next
-    }
-    /^## @@PKGSEL_BLOCK@@$/ {
-      if (have_repo == "no") {
-        # O pkgsel chama o `aptfailed` (que faz `exit $ret`) quando o tasksel
-        # ou o `apt-get install` falham — e aí o d-i mostra
-        # "[!!] Select and install software ... Installation step failed" e
-        # PARA esperando um Enter que ninguém vai dar. Medido na sessão #38,
-        # com rede local (DHCP ok) e sem internet. Por isso, sem repositório
-        # local, o pkgsel é esvaziado: a instalação COMPLETA e os pacotes
-        # ficam para o late-command / 1º boot, que avisam se não conseguirem.
-        print "# SEM repositório local: pkgsel mínimo (não há de onde baixar)"
-        print "tasksel tasksel/first multiselect"
-        print "d-i pkgsel/include string"
-        print "d-i pkgsel/run_tasksel boolean false"
-        print "d-i pkgsel/upgrade select none"
-      } else {
-        print "tasksel tasksel/first multiselect standard, ssh-server"
-        print "d-i pkgsel/include string " pkgs
-        print "d-i pkgsel/run_tasksel boolean true"
-        print "d-i pkgsel/upgrade select full-upgrade"
-      }
-      next
-    }
-    { print }
-  ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
-}
-
-# Expande o marcador @@ROOT_PRESEED@@ na preseed Debian: com hash de root, o
-# login de root é habilitado (root-login true + senha crypt); sem hash, o root
-# fica BLOQUEADO (comportamento padrão). No caminho Ubuntu o root é habilitado
-# pelo late-command (chpasswd -e) — o autoinstall/Subiquity não tem campo de
-# root, e o d-i só aceita o root pela preseed, que não existe lá.
-expand_root_preseed_block() {
-  local f="$1"
-  awk -v hash="$ROOT_PASSWORD_HASH" '
-    /^@@ROOT_PRESEED@@$/ {
-      if (hash != "") {
-        print "d-i passwd/root-login boolean true"
-        print "d-i passwd/root-password-crypted password " hash
-        print "d-i passwd/root-password-again password " hash
-      } else {
-        print "d-i passwd/root-login boolean false"
-      }
-      next
-    }
-    { print }
-  ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
-}
-
 # ---------------------------------------------------------------------------
 # Templates: substituição de marcadores e gravação
 # ---------------------------------------------------------------------------
@@ -1836,7 +1647,7 @@ expand_packages_block() {
 }
 
 # Bloco `network:` do autoinstall (e o MESMO conteúdo vira o netplan do alvo,
-# copiado do /preseed da mídia pelo late-command — uma fonte de verdade só).
+# copiado de /ai-cpu-os-boot da mídia pelo late-command — uma fonte de verdade só).
 #
 # Por que `match: name: "en*"` em vez do nome da interface: no momento de gerar
 # a ISO não se sabe qual placa a máquina terá. O glob cobre os nomes previsíveis
@@ -1909,37 +1720,7 @@ expand_network_block() {
   ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
   rm -f "$block"
 }
-
-# Bloco de rede da preseed do debian-installer. O d-i não usa netplan: ou ele
-# pergunta por DHCP (`disable_autoconfig false`, o padrão) ou recebe os campos
-# estáticos (`disable_autoconfig true` + ip/netmask/gateway/dns).
-expand_network_preseed_block() {
-  local f="$1" iface_line
-  if [[ -n "$NET_IFACE" ]]; then iface_line="$NET_IFACE"; else iface_line="auto"; fi
-
-  awk -v mode="$NETWORK_MODE" -v iface="$iface_line" \
-      -v ip="${NET_IP%%/*}" -v gw="$NET_GATEWAY" \
-      -v mask="$NET_NETMASK" -v dns="$NET_DNS_SPACE" '
-    /^@@NETWORK_PRESEED@@$/ {
-      print "d-i netcfg/choose_interface select " iface
-      if (mode == "static") {
-        print "d-i netcfg/disable_autoconfig boolean true"
-        print "d-i netcfg/get_ipaddress string " ip
-        print "d-i netcfg/get_netmask string " mask
-        print "d-i netcfg/get_gateway string " gw
-        print "d-i netcfg/get_nameservers string " dns
-        print "d-i netcfg/confirm_static boolean true"
-      } else {
-        print "d-i netcfg/disable_autoconfig boolean false"
-        print "d-i netcfg/dhcp_timeout string 60"
-      }
-      next
-    }
-    { print }
-  ' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
-}
-
-# Substitui tokens @@NOME@@ nos templates (preseed e autoinstall).
+# Substitui tokens @@NOME@@ nos templates (autoinstall e ai-cpu-os-boot).
 subst_template() {
   local src="$1" dst="$2"
   local hash_esc root_hash_esc store_esc
@@ -1963,8 +1744,6 @@ subst_template() {
     -e "s|@@COUNTRY@@|${COUNTRY}|g" \
     -e "s|@@KEYMAP@@|${KEYMAP}|g" \
     -e "s|@@TIMEZONE@@|${TIMEZONE}|g" \
-    -e "s|@@MIRROR_HOST@@|${MIRROR_HOST}|g" \
-    -e "s|@@MIRROR_DIR@@|${MIRROR_DIR}|g" \
     -e "s|@@GRUB_WITH_OTHER_OS@@|${GRUB_WITH_OTHER_OS}|g" \
     -e "s|@@EXTRA_PACKAGES@@|${EXTRA_PACKAGES}|g" \
     -e "s|@@ISO_MODEL@@|${MODEL_NAME}|g" \
@@ -1972,8 +1751,6 @@ subst_template() {
     -e "s|@@APT_REPO_PATH@@|${APT_REPO_PATH}|g" \
     -e "s|@@APT_PRIMARY_URI@@|${APT_PRIMARY_URI}|g" \
     -e "s|@@STORAGE_LAYOUT@@|${store_esc}|g" \
-    -e "s|@@PARTMAN_DISK@@|${PARTMAN_DISK_LINE}|g" \
-    -e "s|@@GRUB_BOOTDEV@@|${GRUB_BOOTDEV_LINE}|g" \
     -e "s|@@NETWORK_MODE@@|${NETWORK_MODE}|g" \
     -e "s|@@NET_IFACE@@|${NET_IFACE}|g" \
     -e "s|@@NET_IP@@|${NET_IP}|g" \
@@ -1991,9 +1768,9 @@ subst_template() {
 inject_common_templates() {
   local dest="$1"
   mkdir -p "$dest"
-  subst_template "${ISO_DIR}/preseed/late-command.sh"     "${dest}/late-command.sh"
-  subst_template "${ISO_DIR}/preseed/firstboot.sh"        "${dest}/firstboot.sh"
-  cp "${ISO_DIR}/preseed/ai-cpu-os-firstboot.service"     "${dest}/ai-cpu-os-firstboot.service"
+  subst_template "${ISO_DIR}/common/late-command.sh"      "${dest}/late-command.sh"
+  subst_template "${ISO_DIR}/common/firstboot.sh"         "${dest}/firstboot.sh"
+  cp "${ISO_DIR}/common/ai-cpu-os-firstboot.service"      "${dest}/ai-cpu-os-firstboot.service"
   chmod 0755 "${dest}/late-command.sh" "${dest}/firstboot.sh"
   chmod 0644 "${dest}/ai-cpu-os-firstboot.service"
 }
@@ -2006,8 +1783,8 @@ check_no_leftover_tokens() {
   local -a required_tokens=(
     DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME PASSWORD_HASH ROOT_PASSWORD_HASH
     LOCALE KEYMAP TIMEZONE EXTRA_PACKAGES PACKAGES_BLOCK STORAGE_LAYOUT ISO_MODEL
-    APT_REPO_PATH APT_LOCAL_SOURCES APT_LOCAL_PRESEED APT_PRIMARY_URI LLAMA_SRC_NAME ROOT_PRESEED
-    NETWORK_SECTION NETWORK_PRESEED NETWORK_MODE NET_IFACE NET_IP NET_GATEWAY NET_DNS
+    APT_REPO_PATH APT_LOCAL_SOURCES APT_PRIMARY_URI LLAMA_SRC_NAME
+    NETWORK_SECTION NETWORK_MODE NET_IFACE NET_IP NET_GATEWAY NET_DNS
   )
   local t leftover=0
   for t in "${required_tokens[@]}"; do
@@ -2024,375 +1801,39 @@ check_no_leftover_tokens() {
 }
 
 inject_templates() {
-  section "Configuração de instalação (${DISTRO})"
-
-  if [[ "$DISTRO" == "ubuntu" ]]; then
-    if [[ $DRY_RUN -eq 1 ]]; then
-      log_info "[dry-run] gravaria ${UBUNTU_STAGE}/autoinstall.yaml e ${UBUNTU_STAGE}/preseed/*"
-      log_info "[dry-run] disco: ${DISK:-<não fixado>} · papel: ${ROLE} · família: ${FAMILY} · usuário: ${USERNAME}"
-      return 0
-    fi
-    subst_template "${ISO_DIR}/autoinstall/autoinstall.yaml" "${UBUNTU_STAGE}/autoinstall.yaml"
-    # A lista de pacotes vira uma sequência em bloco do YAML (ver a função).
-    expand_packages_block "${UBUNTU_STAGE}/autoinstall.yaml"
-    # Idem para o repositório local: a fonte extra entra — ou some por completo.
-    expand_apt_local_block "${UBUNTU_STAGE}/autoinstall.yaml"
-    # A rede: o bloco `network:` entra (dhcp/static) ou desaparece por inteiro.
-    expand_network_block "${UBUNTU_STAGE}/autoinstall.yaml"
-    chmod 0644 "${UBUNTU_STAGE}/autoinstall.yaml"
-    inject_common_templates "${UBUNTU_STAGE}/preseed"
-    # O MESMO bloco vira o netplan do sistema instalado (copiado pelo
-    # late-command): instalador e alvo não divergem.
-    if [[ "$NETWORK_MODE" != "none" ]]; then
-      network_yaml_block > "${UBUNTU_STAGE}/preseed/ai-cpu-os-netplan.yaml"
-      chmod 0644 "${UBUNTU_STAGE}/preseed/ai-cpu-os-netplan.yaml"
-    fi
-    check_no_leftover_tokens "${UBUNTU_STAGE}/autoinstall.yaml" \
-                            "${UBUNTU_STAGE}/preseed/late-command.sh" \
-                            "${UBUNTU_STAGE}/preseed/firstboot.sh" || exit 1
-    log_ok "autoinstall.yaml e preseed/* gravados no stage (marcadores OK)."
-    log_info "Storage: $(storage_layout_line)"
-    return 0
-  fi
-
-  # --- Debian -------------------------------------------------------------
-  local dest="${ISO_ROOT}/preseed"
-
-  # Linha do partman: se o disco não foi informado, comentamos a linha (o
-  # instalador usa o primeiro disco) — mas isso é explicitamente consentido.
-  if [[ -n "$DISK" ]]; then
-    PARTMAN_DISK_LINE="d-i partman-auto/disk string ${DISK}"
-  else
-    PARTMAN_DISK_LINE="# --allow-any-disk: partman usará o primeiro disco disponível"
-  fi
-  GRUB_BOOTDEV_LINE="$(grub_bootdev_line)"
+  section "Configuração de instalação (ubuntu)"
 
   if [[ $DRY_RUN -eq 1 ]]; then
-    log_info "[dry-run] gravaria ${dest}/{ai-cpu-os.cfg,late-command.sh,firstboot.sh,ai-cpu-os-firstboot.service}"
+    log_info "[dry-run] gravaria ${UBUNTU_STAGE}/autoinstall.yaml e ${UBUNTU_STAGE}/ai-cpu-os-boot/*"
     log_info "[dry-run] disco: ${DISK:-<não fixado>} · papel: ${ROLE} · família: ${FAMILY} · usuário: ${USERNAME}"
     return 0
   fi
 
-  mkdir -p "$dest"
-  subst_template "${ISO_DIR}/preseed/ai-cpu-os.cfg" "${dest}/ai-cpu-os.cfg"
-  expand_apt_local_block "${dest}/ai-cpu-os.cfg"
-  expand_apt_offline_block "${dest}/ai-cpu-os.cfg"
-  expand_root_preseed_block "${dest}/ai-cpu-os.cfg"
-  expand_network_preseed_block "${dest}/ai-cpu-os.cfg"
-  chmod 0644 "${dest}/ai-cpu-os.cfg"
-  inject_common_templates "$dest"
-  check_no_leftover_tokens "${dest}/ai-cpu-os.cfg" "${dest}/late-command.sh" "${dest}/firstboot.sh" || exit 1
+  subst_template "${ISO_DIR}/autoinstall/autoinstall.yaml" "${UBUNTU_STAGE}/autoinstall.yaml"
+  # A lista de pacotes vira uma sequência em bloco do YAML (ver a função).
+  expand_packages_block "${UBUNTU_STAGE}/autoinstall.yaml"
+  # Idem para o repositório local: a fonte extra entra — ou some por completo.
+  expand_apt_local_block "${UBUNTU_STAGE}/autoinstall.yaml"
+  # A rede: o bloco `network:` entra (dhcp/static) ou desaparece por inteiro.
+  expand_network_block "${UBUNTU_STAGE}/autoinstall.yaml"
+  chmod 0644 "${UBUNTU_STAGE}/autoinstall.yaml"
 
-  log_ok "Preseed gravado em ${dest} (todos os marcadores substituídos)."
-}
-
-# Backup de um arquivo da árvore da ISO FORA da árvore.
-# Um `.orig` ao lado do original acabaria DENTRO da ISO gerada (o initrd do
-# Debian tem 24 MB) — e o xorriso copia a árvore inteira sem filtro.
-backup_file() {
-  local f="$1" rel
-  rel="${f#"${ISO_ROOT}"/}"
-  [[ -d "${WORK_DIR}/orig" ]] || mkdir -p "${WORK_DIR}/orig"
-  mkdir -p "${WORK_DIR}/orig/$(dirname "$rel")"
-  [[ -f "${WORK_DIR}/orig/${rel}" ]] || cp -a "$f" "${WORK_DIR}/orig/${rel}"
-}
-
-# ---------------------------------------------------------------------------
-# Debian: preseed (+ late-command) DENTRO do initrd
-# ---------------------------------------------------------------------------
-# POR QUE (medido numa VM de verdade, sessão #35): com
-# `preseed/file=/cdrom/preseed/ai-cpu-os.cfg` o debian-installer **não carrega
-# nada** — ele começa no menu interativo de idioma. O motivo é ordem de
-# inicialização: o `preseed` roda no initramfs, ANTES do `cdrom-detect` montar
-# a mídia (no Debian ela aparece em /media/cdrom, e `/cdrom` é um symlink
-# criado depois). O arquivo existe na ISO, mas ninguém o enxerga ainda. O
-# sintoma é o pior tipo: o instalador "funciona", só não é automático.
-#
-# A solução determinística é o preseed viajar no próprio initramfs: `/` do
-# instalador É o ramdisk, então o arquivo existe desde o primeiro instante, sem
-# depender de montagem, de driver de CD ou de ordem de inicialização. É a
-# técnica documentada pelo próprio Debian.
-#
-# E o NOME importa: `S30initrd-preseed` só faz
-#   if [ -e /preseed.cfg ]; then preseed_location file:///preseed.cfg; fi
-# Deixar o arquivo em `/preseed/ai-cpu-os.cfg` (primeira tentativa) não serve:
-# o d-i continuava perguntando o idioma. Tem de ser `/preseed.cfg` na raiz.
-# ("colocar o preseed dentro do initrd").
-#
-# O `late-command.sh` vai junto: assim ele também não depende de a mídia estar
-# montada, e ele mesmo localiza o projeto (ver os candidatos em SRC).
-inject_preseed_initrd() {
-  section "Debian: preseed dentro do initrd"
-
-  local initrd="${ISO_ROOT}/${INITRD_PATH#/}"
-  local preseed="${ISO_ROOT}/preseed/ai-cpu-os.cfg"
-  local late="${ISO_ROOT}/preseed/late-command.sh"
-
-  if [[ $DRY_RUN -eq 1 ]]; then
-    log_info "[dry-run] embutiria preseed/ai-cpu-os.cfg e preseed/late-command.sh em ${INITRD_PATH}"
-    return 0
+  inject_common_templates "${UBUNTU_STAGE}/ai-cpu-os-boot"
+  # O MESMO bloco vira o netplan do sistema instalado (copiado pelo
+  # late-command): instalador e alvo não divergem.
+  if [[ "$NETWORK_MODE" != "none" ]]; then
+    network_yaml_block > "${UBUNTU_STAGE}/ai-cpu-os-boot/ai-cpu-os-netplan.yaml"
+    chmod 0644 "${UBUNTU_STAGE}/ai-cpu-os-boot/ai-cpu-os-netplan.yaml"
   fi
-
-  if [[ ! -f "$initrd" ]]; then
-    log_error "initrd não encontrado em ${initrd}; o preseed não seria carregado."
-    return 1
-  fi
-  if [[ ! -f "$preseed" ]]; then
-    log_error "preseed não encontrado em ${preseed}."
-    return 1
-  fi
-  if ! command -v cpio >/dev/null 2>&1; then
-    log_error "cpio ausente: é necessário para embutir o preseed no initrd."
-    log_error "Instale com: apt-get install -y cpio"
-    return 1
-  fi
-
-  # O initrd do Debian é cpio comprimido com gzip. Anexar um SEGUNDO arquivo
-  # cpio é o mecanismo oficial do initramfs: o kernel desempacota todos em
-  # sequência, então `/preseed/…` passa a existir no ramdisk.
-  #
-  # O diretório temporário NÃO vai para /tmp: numa máquina comum /tmp é tmpfs
-  # (RAM), enche no meio de um build de ISO e o gzip morre com ENOSPC — o que
-  # aparecia como "formato inesperado?", uma mensagem que mentia sobre a causa.
-  # Usar o próprio work-dir garante espaço (a árvore da ISO já está lá).
-  local tmp; tmp="$(mktemp -d -p "${WORK_DIR:-/tmp}" .preseed-initrd.XXXXXX)"
-  local stg="${tmp}/stage"
-  mkdir -p "${stg}/preseed"
-  # `/preseed.cfg` NA RAIZ é o caminho que o próprio d-i procura sozinho:
-  # /usr/lib/debian-installer-startup.d/S30initrd-preseed faz
-  # `if [ -e /preseed.cfg ]; then preseed_location file:///preseed.cfg; fi`
-  # — e SÓ isso. O `preseed/file=` da cmdline não é lido nessa fase (foi por
-  # isso que a ISO continuou perguntando o idioma mesmo com o arquivo dentro
-  # do initrd, em /preseed/). A cópia em /preseed/ fica para o late-command.
-  cp -a "$preseed" "${stg}/preseed.cfg"
-  cp -a "$preseed" "${stg}/preseed/ai-cpu-os.cfg"
-  [[ -f "$late" ]] && cp -a "$late" "${stg}/preseed/late-command.sh"
-
-  local plain="${tmp}/initrd.cpio"
-  local gz_rc=0
-  gzip -dc "$initrd" > "$plain" 2>"${tmp}/gzip.err" || gz_rc=$?
-  if [[ $gz_rc -ne 0 ]]; then
-    local gz_msg; gz_msg="$(<"${tmp}/gzip.err")"; gz_msg="${gz_msg//$'\n'/ }"; gz_msg="${gz_msg:0:200}"
-    log_error "não consegui descomprimir ${initrd} (gzip rc=${gz_rc}): ${gz_msg:-sem mensagem}"
-    log_error "Espaço livre em ${WORK_DIR:-/tmp}: $(df -h "${WORK_DIR:-/tmp}" | awk 'NR==2{print $4}') — ENOSPC aqui significa temporário sem espaço."
-    rm -rf "$tmp"
-    return 1
-  fi
-
-  local extra="${tmp}/extra.cpio"
-  ( cd "$stg" && find . -print0 | cpio --null -o -H newc --quiet ) > "$extra" 2>/dev/null || {
-    log_error "falha ao criar o cpio com o preseed."
-    rm -rf "$tmp"
-    return 1
-  }
-
-  cat "$extra" >> "$plain"
-  backup_file "$initrd"
-  gzip -9 -c "$plain" > "${tmp}/initrd.new" || {
-    log_error "falha ao recomprimir o initrd com o preseed."
-    rm -rf "$tmp"
-    return 1
-  }
-  mv "${tmp}/initrd.new" "$initrd"
-  rm -rf "$tmp"
-
-  log_ok "Preseed embutido no initrd (/preseed.cfg — o caminho que o d-i carrega sozinho)."
-  log_info "Isso remove a dependência de a mídia estar montada na hora do preseed."
-}
-
-patch_isolinux() {
-  section "Boot BIOS (Debian/isolinux)"
-  local cfg="${ISO_ROOT}/isolinux/isolinux.cfg"
-
-  if [[ $DRY_RUN -eq 1 ]]; then
-    log_info "[dry-run] descobriria install.*/vmlinuz e initrd.gz"
-    log_info "[dry-run] ajustaria default/timeout/prompt em isolinux.cfg e acrescentaria:"
-    log_info "         label ai-cpu-os-auto → preseed/file=/preseed.cfg (dentro do initrd)"
-    return 0
-  fi
-
-  if [[ ! -f "$cfg" ]]; then
-    log_warn "${cfg} não encontrado; pulando o patch do boot BIOS."
-    return 0
-  fi
-
-  # Descobrir o kernel/initrd do instalador.
-  local rel; rel="$(cd "$ISO_ROOT" && ls -d install.* 2>/dev/null | head -1 || true)"
-  if [[ -z "$rel" ]]; then
-    log_error "Não encontrei o diretório install.* (kernel do instalador)."
-    exit 1
-  fi
-  KERNEL_PATH="/${rel}/vmlinuz"
-  if [[ -f "${ISO_ROOT}/${rel}/initrd.gz" ]]; then
-    INITRD_PATH="/${rel}/initrd.gz"
-  elif [[ -f "${ISO_ROOT}/${rel}/gtk/initrd.gz" ]]; then
-    INITRD_PATH="/${rel}/gtk/initrd.gz"
-  else
-    log_error "Não encontrei o initrd.gz do instalador em ${rel}/."
-    exit 1
-  fi
-  log_info "Kernel: ${KERNEL_PATH} · initrd: ${INITRD_PATH}"
-
-  backup_file "$cfg"
-
-  # ---------------------------------------------------------------------------
-  # `prompt 0`, NÃO `prompt 1`. Medido numa VM de verdade (sessão #35): com
-  # `prompt 1` o isolinux mostra `boot:` e ESPERA UMA TECLA — o `timeout` não
-  # salva, e o instalador nunca inicia. O sintoma é cruel: a VM fica parada, o
-  # disco não é tocado (qcow2 continua com 193 KB) e o console serial fica com
-  # ZERO byte, sem nenhuma mensagem de erro em lugar nenhum.
-  # ---------------------------------------------------------------------------
-  sed -i -E 's/^[[:space:]]*default[[:space:]].*/default ai-cpu-os-auto/' "$cfg"
-  sed -i -E 's/^[[:space:]]*timeout[[:space:]].*/timeout 100/'            "$cfg"
-  sed -i -E 's/^[[:space:]]*prompt[[:space:]].*/prompt 0/'               "$cfg"
-
-  # Console serial: sem `serial`/`console` o MENU do isolinux só existe na tela
-  # virtual — um teste headless não vê nada, nem para diagnosticar. O kernel já
-  # recebe `console=ttyS0` via kernel_args_extra; isto cuida do bootloader.
-  if [[ "$SERIAL_CONSOLE" == "yes" ]]; then
-    if ! grep -qE '^[[:space:]]*serial[[:space:]]' "$cfg"; then
-      sed -i '1i serial 0 115200' "$cfg"
-      sed -i '2i console 0' "$cfg"
-    fi
-  fi
-
-  cat >> "$cfg" <<EOF
-
-# ---------------------------------------------------------------------------
-# ai-cpu-os: entrada de boot automática (inserida por iso/build-iso.sh)
-# ---------------------------------------------------------------------------
-label ai-cpu-os-auto
- menu label ^Instalar ai-cpu-os (automatico${DISK:+, APAGA ${DISK}})
- kernel ${KERNEL_PATH}
- append vga=788 initrd=${INITRD_PATH} auto=true priority=critical preseed/file=/preseed.cfg $(debian_locale_args) $(kernel_args_extra) --- quiet
-EOF
-  log_ok "Boot BIOS configurado (default ai-cpu-os-auto, timeout 10s)."
-}
-
-patch_efi_debian() {
-  section "Boot UEFI (Debian)"
-
-  if [[ $DRY_RUN -eq 1 ]]; then
-    log_info "[dry-run] procuraria EFI/*/grub.cfg (ou grub.cfg dentro de efi.img, via mtools)"
-    log_info "[dry-run] e acrescentaria a menuentry 'ai-cpu-os-auto' como padrão"
-    return 0
-  fi
-
-  # Caso 1: grub.cfg solto na ISO (mais simples).
-  local direct=""
-  local cand
-  for cand in "EFI/boot/grub.cfg" "EFI/debian/grub.cfg" "boot/grub/grub.cfg"; do
-    if [[ -f "${ISO_ROOT}/${cand}" ]]; then direct="$cand"; break; fi
-  done
-
-  if [[ -n "$direct" ]]; then
-    log_info "Encontrei ${direct} na ISO; acrescentando a entrada automática."
-    if [[ $DRY_RUN -eq 1 ]]; then
-      log_info "[dry-run] acrescentaria a menuentry 'ai-cpu-os-auto' em ${direct}"
-      return 0
-    fi
-    backup_file "${ISO_ROOT}/${direct}"
-    # Acrescentamos no FIM para que `set default` tenha efeito (o arquivo é
-    # interpretado sequencialmente pelo GRUB).
-    cat >> "${ISO_ROOT}/${direct}" <<EOF
-
-# ai-cpu-os: entrada automática (iso/build-iso.sh)
-set timeout=10
-set default="ai-cpu-os-auto"
-menuentry "Instalar ai-cpu-os (automatico)" --id ai-cpu-os-auto {
-  linux  ${KERNEL_PATH} auto=true priority=critical preseed/file=/preseed.cfg $(debian_locale_args) $(kernel_args_extra) --- quiet
-  initrd ${INITRD_PATH}
-}
-EOF
-    log_ok "Boot UEFI configurado em ${direct}."
-    return 0
-  fi
-
-  # Caso 2: grub.cfg dentro de uma imagem FAT (efi.img).
-  local img
-  img="$(cd "$ISO_ROOT" && find . -type f -name 'efi.img' 2>/dev/null | head -1 || true)"
-  if [[ -z "$img" ]]; then
-    log_warn "Não encontrei efi.img; a ISO pode não bootar por UEFI."
-    log_warn "O boot BIOS (isolinux) está configurado e é o caminho principal."
-    return 0
-  fi
-  img="${img#./}"
-
-  if [[ $HAS_MTOOLS -eq 0 ]]; then
-    log_warn "UEFI: ${img} existe, mas 'mtools' não está instalado."
-    log_warn "Sem mtools, o boot UEFI cai no menu padrão do Debian (instalação NÃO automática)."
-    log_warn "Instale 'mtools' para habilitar o patch do UEFI: apt-get install -y mtools"
-    return 0
-  fi
-
-  if [[ $DRY_RUN -eq 1 ]]; then
-    log_info "[dry-run] procuraria grub.cfg dentro de ${img} (mtools) e acrescentaria a entrada automática"
-    return 0
-  fi
-
-  # Descobrir o grub.cfg dentro da imagem FAT.
-  local inside
-  inside="$(mdir -i "${ISO_ROOT}/${img}" ::/ -b 2>/dev/null | awk '{print $NF, $1}' \
-            | grep -i 'grub\.cfg$' | head -1 | awk '{print $2}' || true)"
-  if [[ -z "$inside" ]]; then
-    log_warn "Não encontrei grub.cfg dentro de ${img}; boot UEFI sem automação."
-    return 0
-  fi
-
-  local tmp; tmp="$(mktemp)"
-  if ! mcopy -i "${ISO_ROOT}/${img}" "::${inside}" "$tmp" 2>/dev/null; then
-    log_warn "Falha ao extrair ${inside} de ${img}; boot UEFI sem automação."
-    rm -f "$tmp"
-    return 0
-  fi
-
-  cat >> "$tmp" <<EOF
-
-# ai-cpu-os: entrada automática (iso/build-iso.sh)
-set timeout=10
-set default="ai-cpu-os-auto"
-menuentry "Instalar ai-cpu-os (automatico)" --id ai-cpu-os-auto {
-  linux  ${KERNEL_PATH} auto=true priority=critical preseed/file=/preseed.cfg $(debian_locale_args) $(kernel_args_extra) --- quiet
-  initrd ${INITRD_PATH}
-}
-EOF
-
-  if mcopy -o -i "${ISO_ROOT}/${img}" "$tmp" "::${inside}" 2>/dev/null; then
-    log_ok "Boot UEFI configurado dentro de ${img} (${inside})."
-  else
-    log_warn "Falha ao gravar ${inside} em ${img}; boot UEFI sem automação."
-  fi
-  rm -f "$tmp"
-}
-
-regenerate_md5sums() {
-  local f="${ISO_ROOT}/md5sum.txt"
-  if [[ "$DISTRO" == "ubuntu" ]]; then
-    # No Ubuntu a árvore da ISO não é extraída (remontamos via -indev/-outdev),
-    # então não há como regenerar de forma barata. O `md5sum.txt` original fica
-    # obsoleto e é REMOVIDO na remontagem (ver repack_iso_ubuntu).
-    log_info "Ubuntu: md5sum.txt será removido na remontagem (não é usado pelo Subiquity)."
-    return 0
-  fi
-  if [[ $DRY_RUN -eq 1 ]]; then
-    log_info "[dry-run] regeneraria md5sum.txt (todos os arquivos, exceto ele mesmo)"
-    return 0
-  fi
-  if [[ ! -f "$f" ]]; then
-    log_warn "md5sum.txt não encontrado; nada a regenerar."
-    return 0
-  fi
-  log_info "Regenerando md5sum.txt (o instalador verifica a integridade da mídia)…"
-  ( cd "$ISO_ROOT" \
-    && find . -type f ! -name md5sum.txt -print0 \
-       | LC_ALL=C sort -z \
-       | xargs -0 md5sum > /tmp/ai-cpu-os-md5sum.txt \
-    && mv /tmp/ai-cpu-os-md5sum.txt md5sum.txt )
-  log_ok "md5sum.txt regenerado ($(wc -l < "$f") entradas)."
+  check_no_leftover_tokens "${UBUNTU_STAGE}/autoinstall.yaml" \
+                          "${UBUNTU_STAGE}/ai-cpu-os-boot/late-command.sh" \
+                          "${UBUNTU_STAGE}/ai-cpu-os-boot/firstboot.sh" || exit 1
+  log_ok "autoinstall.yaml e ai-cpu-os-boot/* gravados no stage (marcadores OK)."
+  log_info "Storage: $(storage_layout_line)"
 }
 
 # ---------------------------------------------------------------------------
-# Boot do Ubuntu (GRUB): não há isolinux. Descobrimos o kernel/initrd do
+# Boot (GRUB): descobrimos o kernel/initrd do
 # sistema live (casper/) e acrescentamos uma entrada automática ao menu.
 # ---------------------------------------------------------------------------
 _casper_exists() {
@@ -2428,41 +1869,6 @@ kernel_args_extra() {
     printf 'console=ttyS0,115200'
   fi
 }
-
-# ---------------------------------------------------------------------------
-# Debian: idioma/teclado pela CMDLINE do kernel
-# ---------------------------------------------------------------------------
-# POR QUE (medido numa VM de verdade, sessão #35): o preseed já traz
-# `debian-installer/language`, `country`, `locale` e
-# `keyboard-configuration/xkb-keymap`, e MESMO ASSIM o instalador abria em
-# "[!!] Select a language" e ficava plantado ali para sempre — o resto da
-# instalação (rede, usuários, relógio, discos) só continuava depois que alguém
-# escolhia o idioma na mão. Ou seja: a ISO não era automática.
-#
-# A causa está em `etc/preseed_aliases` (dentro do initrd):
-#
-#   language  debian-installer/language
-#   country   debian-installer/country
-#   locale    debian-installer/locale
-#   keymap    keyboard-configuration/xkb-keymap
-#
-# O `localechooser` é um dos PRIMEIROS componentes do menu principal e pergunta
-# o idioma antes de o preseed da mídia ser aplicado; o que ele respeita é o que
-# já está na base do debconf desde o initramfs — e quem coloca lá é o
-# `env2debconf` (S32env-preseed), que lê `/proc/cmdline`. Por isso os valores
-# têm de estar na cmdline, e não só no preseed.
-#
-# `--keymap` também vale aqui: teclado errado em instalador automático é
-# silencioso (ninguém digita nada) e só aparece depois, no sistema instalado.
-debian_locale_args() {
-  local out=""
-  [[ -n "$LANG_CODE" ]] && out+="language=${LANG_CODE}"
-  [[ -n "$COUNTRY"   ]] && out+=" country=${COUNTRY}"
-  [[ -n "$LOCALE"    ]] && out+=" locale=${LOCALE}"
-  [[ -n "$KEYMAP"    ]] && out+=" keymap=${KEYMAP}"
-  printf '%s' "${out# }"
-}
-
 # Acrescenta timeout/default + a menuentry automática ao fim de um grub.cfg.
 # `autoinstall` é o parâmetro de kernel que liga o modo não interativo; o
 # `autoinstall.yaml` é achado sozinho na raiz da mídia (ver o cabeçalho do
@@ -2516,7 +1922,7 @@ patch_boot_ubuntu() {
 detect_volume_id() {
   # Geramos um volume id próprio, determinístico e válido pelas regras do
   # ISO9660 (maiúsculas, dígitos e '_', até 32 caracteres). Reaproveitar o
-  # volume id original é arriscado: o do Debian tem espaços e o do Ubuntu tem
+  # volume id original é arriscado: pode ter espaços e o do Ubuntu tem
   # minúsculas e pontos, que o xorriso pode recusar no `-V`.
   printf '%s' "AI_CPU_OS_${DISTRO}_${ROLE}" \
     | tr '[:lower:]' '[:upper:]' \
@@ -2524,50 +1930,9 @@ detect_volume_id() {
     | tr -s '_' \
     | cut -c1-32
 }
-
-repack_iso() {
-  section "Remontagem da ISO"
-  mkdir -p "$(dirname "$OUT_ISO")"
-
-  if [[ "$DISTRO" == "ubuntu" ]]; then
-    repack_iso_ubuntu
-    return 0
-  fi
-
-  local efi_img=""
-  if [[ $DRY_RUN -eq 0 ]]; then
-    efi_img="$(cd "$ISO_ROOT" 2>/dev/null && find . -type f -name 'efi.img' 2>/dev/null | head -1 | sed 's|^\./||' || true)"
-  fi
-
-  local -a cmd=(
-    -as mkisofs
-    -r -J -joliet-long -l -iso-level 3
-    -V "$VOLUME_ID"
-    -c isolinux/boot.cat
-    -b isolinux/isolinux.bin
-      -no-emul-boot -boot-load-size 4 -boot-info-table
-  )
-  if [[ -n "$HAS_ISOHDPFX" ]]; then
-    cmd+=(-isohybrid-mbr "$HAS_ISOHDPFX")
-  fi
-  if [[ -n "$efi_img" ]]; then
-    cmd+=(-eltorito-alt-boot -e "$efi_img" -no-emul-boot -isohybrid-gpt-basdat)
-    log_info "Boot UEFI (El Torito): ${efi_img}"
-  fi
-  cmd+=(-o "$OUT_ISO" "$ISO_ROOT")
-
-  if [[ $DRY_RUN -eq 1 ]]; then
-    log_info "[dry-run] xorriso ${cmd[*]}"
-    return 0
-  fi
-
-  run "Gerando a ISO" xorriso "${cmd[@]}"
-  log_ok "ISO gerada: ${OUT_ISO}"
-}
-
 # Ubuntu: remonta com `-indev/-outdev -map`, ou seja, PARTINDO da ISO oficial e
 # apenas sobrepondo o que mudou. É a diferença de fundo em relação ao caminho
-# Debian (que extrai a árvore e a reconstrói com mkisofs): assim os setores de
+# (o caminho antigo extraía a árvore e reconstruía com mkisofs): assim os setores de
 # boot do Ubuntu — El Torito BIOS, imagem EFI e MBR híbrido — ficam
 # byte a byte iguais aos da ISO oficial, sem depender de mtools nem de
 # isohdpfx.bin.
@@ -2589,7 +1954,7 @@ repack_iso_ubuntu() {
     -boot_image any replay
     -volid "$VOLUME_ID"
     -map "${UBUNTU_STAGE}/ai-cpu-os"        /ai-cpu-os
-    -map "${UBUNTU_STAGE}/preseed"          /preseed
+    -map "${UBUNTU_STAGE}/ai-cpu-os-boot"   /ai-cpu-os-boot
     -map "${UBUNTU_STAGE}/autoinstall.yaml" /autoinstall.yaml
     -map "$UBUNTU_GRUB_BIOS"                /boot/grub/grub.cfg
   )
@@ -2600,7 +1965,7 @@ repack_iso_ubuntu() {
 
   # O modelo, a fonte do llama.cpp e o repositório apt entram na mídia por -map
   # explícito. Isto é o preço do caminho Ubuntu mapear SÓ o que muda (em vez de
-  # reconstruir a árvore, como o Debian faz): o que não for mapeado fica no
+  # reconstruir a árvore): o que não for mapeado fica no
   # `stage` e **não** na ISO. Sem estes três, a ISO se dizia air-gapped mas não
   # tinha o modelo/fonte/repo — o `verify-iso.sh` reprovou exatamente isso
   # ("o autoinstall aponta para um repositório local, mas /apt-repo NÃO está na
@@ -2654,12 +2019,12 @@ verify_output() {
   log_info "SHA256:  $(sha256sum "$OUT_ISO" | awk '{print $1}')"
 
   local listing
-  listing="$(xorriso -indev "$OUT_ISO" -find /preseed -type f -exec echo 2>/dev/null || true)"
+  listing="$(xorriso -indev "$OUT_ISO" -find /ai-cpu-os-boot -type f -exec echo 2>/dev/null || true)"
   if [[ -n "$listing" ]]; then
-    log_ok "Conteúdo de /preseed na ISO:"
+    log_ok "Conteúdo de /ai-cpu-os-boot na ISO:"
     printf '    | %s\n' $listing
   else
-    log_warn "Não consegui listar /preseed na ISO gerada (verifique manualmente)."
+    log_warn "Não consegui listar /ai-cpu-os-boot na ISO gerada (verifique manualmente)."
   fi
 
   if [[ -n "$(xorriso -indev "$OUT_ISO" -find /ai-cpu-os/build.sh -type f 2>/dev/null || true)" ]]; then
@@ -2668,75 +2033,33 @@ verify_output() {
     log_warn "Não confirmei /ai-cpu-os na ISO gerada."
   fi
 
-  # Configuração de instalação: cada distro tem a sua, e é ELA que faz a
-  # instalação ser automática — então vale confirmar que chegou na ISO.
-  if [[ "$DISTRO" == "ubuntu" ]]; then
-    if [[ -n "$(xorriso -indev "$OUT_ISO" -find /autoinstall.yaml -type f 2>/dev/null || true)" ]]; then
-      log_ok "autoinstall.yaml presente na raiz da ISO (é achado ao lado de casper/)."
-    else
-      log_error "autoinstall.yaml AUSENTE: a instalação não seria automática."
-      exit 1
-    fi
+  # O autoinstall é o que faz a instalação ser automática — vale confirmar que
+  # chegou na ISO.
+  if [[ -n "$(xorriso -indev "$OUT_ISO" -find /autoinstall.yaml -type f 2>/dev/null || true)" ]]; then
+    log_ok "autoinstall.yaml presente na raiz da ISO (é achado ao lado de casper/)."
   else
-    if [[ -n "$(xorriso -indev "$OUT_ISO" -find /preseed/ai-cpu-os.cfg -type f 2>/dev/null || true)" ]]; then
-      log_ok "Preseed presente em /preseed/ai-cpu-os.cfg."
-    else
-      log_error "Preseed AUSENTE: a instalação não seria automática."
-      exit 1
-    fi
+    log_error "autoinstall.yaml AUSENTE: a instalação não seria automática."
+    exit 1
   fi
 
   # O menu de boot precisa ter a nossa entrada padrão.
-  if [[ "$DISTRO" == "ubuntu" ]]; then
-    local grub_txt grub_tmp
-    # Extrair para um arquivo temporário, NÃO para /dev/stdout: o xorriso não
-    # entrega o conteúdo de forma confiável em /dev/stdout (a captura vinha
-    # vazia e gerava um falso "Não confirmei a entrada 'ai-cpu-os-auto'" mesmo
-    # com a entrada presente).
-    grub_tmp="$(mktemp)"
-    if xorriso -osirrox on -indev "$OUT_ISO" \
-         -extract /boot/grub/grub.cfg "$grub_tmp" >/dev/null 2>&1; then
-      grub_txt="$(cat "$grub_tmp" 2>/dev/null || true)"
-    fi
-    rm -f "$grub_tmp"
-    if [[ "$grub_txt" == *ai-cpu-os-auto* ]]; then
-      log_ok "Menu do GRUB com a entrada automática 'ai-cpu-os-auto'."
-    else
-      log_warn "Não confirmei a entrada 'ai-cpu-os-auto' no menu do GRUB."
-    fi
+  local grub_txt grub_tmp
+  # Extrair para um arquivo temporário, NÃO para /dev/stdout: o xorriso não
+  # entrega o conteúdo de forma confiável em /dev/stdout (a captura vinha
+  # vazia e gerava um falso "Não confirmei a entrada 'ai-cpu-os-auto'" mesmo
+  # com a entrada presente).
+  grub_tmp="$(mktemp)"
+  if xorriso -osirrox on -indev "$OUT_ISO" \
+       -extract /boot/grub/grub.cfg "$grub_tmp" >/dev/null 2>&1; then
+    grub_txt="$(cat "$grub_tmp" 2>/dev/null || true)"
+  fi
+  rm -f "$grub_tmp"
+  if [[ "$grub_txt" == *ai-cpu-os-auto* ]]; then
+    log_ok "Menu do GRUB com a entrada automática 'ai-cpu-os-auto'."
   else
-    if grep -q 'ai-cpu-os-auto' "${ISO_ROOT}/isolinux/isolinux.cfg" 2>/dev/null; then
-      log_ok "Menu do isolinux com a entrada automática 'ai-cpu-os-auto'."
-    else
-      log_warn "Não confirmei a entrada 'ai-cpu-os-auto' no isolinux.cfg."
-    fi
+    log_warn "Não confirmei a entrada 'ai-cpu-os-auto' no menu do GRUB."
   fi
 }
-
-# ---------------------------------------------------------------------------
-# Autoteste dos templates (usado pelo CI e pelo `make iso-yaml`)
-# ---------------------------------------------------------------------------
-# Substitui os templates com valores de exemplo, confere que nenhum marcador
-# sobrou, valida a sintaxe dos scripts gerados e (se o yamllint existir) o YAML
-# do autoinstall. Cobre os DOIS layouts de storage (com e sem --disk).
-#
-# Por que isto existe: o template do autoinstall NÃO é YAML válido enquanto tem
-# `@@STORAGE_LAYOUT@@` (o `@` é indicador reservado do YAML), então o yamllint
-# não consegue validá-lo diretamente — só o arquivo SUBSTITUÍDO é YAML de
-# verdade. Este autoteste é o que fecha essa lacuna.
-# O `grub-installer/bootdev` é pergunta CRÍTICA ("[!!] Configurando grub-pc"):
-# sem resposta o d-i ESPERA por um dispositivo depois de já ter instalado o
-# sistema inteiro — a instalação automática para no último passo (medido numa
-# VM de verdade, sessão #35). Com o disco fixado, respondemos o MESMO disco do
-# partman; sem disco fixado, `default` deixa o grub-installer escolher.
-grub_bootdev_line() {
-  if [[ -n "$DISK" ]]; then
-    printf 'd-i grub-installer/bootdev string %s' "$DISK"
-  else
-    printf 'd-i grub-installer/bootdev string default'
-  fi
-}
-
 check_templates() {
   section "Autoteste dos templates"
   local tmp rc=0
@@ -2749,7 +2072,6 @@ check_templates() {
   for variant in com-disco sem-disco; do
     if [[ "$variant" == "com-disco" ]]; then disk="/dev/nvme0n1"; else disk=""; fi
     DISK="$disk"
-    GRUB_BOOTDEV_LINE="$(grub_bootdev_line)"
 
     # Três modos de rede, porque cada um gera um YAML DIFERENTE (e o modo
     # `none` precisa fazer o bloco `network:` desaparecer por inteiro).
@@ -2778,13 +2100,8 @@ check_templates() {
       expand_packages_block "${dir}/autoinstall.yaml"
       expand_apt_local_block "${dir}/autoinstall.yaml"
       expand_network_block "${dir}/autoinstall.yaml"
-      subst_template "${ISO_DIR}/preseed/late-command.sh"       "${dir}/late-command.sh"
-      subst_template "${ISO_DIR}/preseed/firstboot.sh"          "${dir}/firstboot.sh"
-      subst_template "${ISO_DIR}/preseed/ai-cpu-os.cfg"         "${dir}/ai-cpu-os.cfg"
-      expand_apt_local_block "${dir}/ai-cpu-os.cfg"
-      expand_apt_offline_block "${dir}/ai-cpu-os.cfg"
-      expand_root_preseed_block "${dir}/ai-cpu-os.cfg"
-      expand_network_preseed_block "${dir}/ai-cpu-os.cfg"
+      subst_template "${ISO_DIR}/common/late-command.sh"        "${dir}/late-command.sh"
+      subst_template "${ISO_DIR}/common/firstboot.sh"           "${dir}/firstboot.sh"
       if [[ "$NETWORK_MODE" != "none" ]]; then
         network_yaml_block > "${dir}/ai-cpu-os-netplan.yaml"
       fi
@@ -2793,7 +2110,7 @@ check_templates() {
       log_info "              packages =${EXTRA_PACKAGES:+ }${EXTRA_PACKAGES}"
 
       if check_no_leftover_tokens "${dir}/autoinstall.yaml" "${dir}/late-command.sh" \
-                                  "${dir}/firstboot.sh" "${dir}/ai-cpu-os.cfg"; then
+                                  "${dir}/firstboot.sh"; then
         log_ok "  marcadores: todos substituídos"
       else
         rc=1
@@ -2815,13 +2132,6 @@ check_templates() {
           log_error "  rede static: netplan do alvo não tem endereço/rota"
           rc=1
         fi
-        if grep -q 'netcfg/get_ipaddress string 192.168.1.50' "${dir}/ai-cpu-os.cfg" \
-           && grep -q 'netcfg/get_netmask string 255.255.255.0' "${dir}/ai-cpu-os.cfg"; then
-          log_ok "  rede static: preseed com IP + netmask (d-i)"
-        else
-          log_error "  rede static: preseed sem get_ipaddress/get_netmask"
-          rc=1
-        fi
       else
         if grep -q 'dhcp4: true' "${dir}/ai-cpu-os-netplan.yaml"; then
           log_ok "  rede dhcp: dhcp4 no netplan do alvo"
@@ -2829,23 +2139,6 @@ check_templates() {
           log_error "  rede dhcp: netplan do alvo sem dhcp4"
           rc=1
         fi
-        if grep -q 'netcfg/disable_autoconfig boolean false' "${dir}/ai-cpu-os.cfg"; then
-          log_ok "  rede dhcp: preseed com DHCP explícito (d-i)"
-        else
-          log_error "  rede dhcp: preseed sem netcfg/disable_autoconfig false"
-          rc=1
-        fi
-      fi
-
-      # `grub-installer/bootdev` é pergunta CRÍTICA do d-i e vem DEPOIS de o
-      # sistema inteiro estar instalado: se o preseed não a responde, a
-      # instalação automática para em "[!!] Configurando grub-pc".
-      want_bootdev="${disk:-default}"
-      if grep -q "grub-installer/bootdev string ${want_bootdev}\$" "${dir}/ai-cpu-os.cfg"; then
-        log_ok "  grub-installer/bootdev = ${want_bootdev}"
-      else
-        log_error "  grub-installer/bootdev ausente/errado (esperado '${want_bootdev}')"
-        rc=1
       fi
 
       if bash -n "${dir}/firstboot.sh" 2>/dev/null; then
@@ -2866,8 +2159,8 @@ check_templates() {
       # `$` (`$6$sal$resto`). Se o marcador ficar entre ASPAS DUPLAS no
       # template, o shell expande `$6` ao ler o arquivo e — sob `set -u` — o
       # late-command.sh morre com exit 2 ANTES de copiar qualquer coisa. Foi o
-      # que travou a ISO Debian em "[!!] Falha ao executar o comando do
-      # preseed" (sessão #35). A sintaxe (`sh -n`) NÃO pega isso: só avaliação
+      # que já travou a ISO Debian (sessão #35). A sintaxe (`sh -n`) NÃO pega
+      # isso: só avaliação
       # de verdade pega, então aqui o valor é lido por um shell com `-u`.
       local hash_line got_hash
       hash_line="$(grep -m1 '^ROOT_PASSWORD_HASH=' "${dir}/late-command.sh" || true)"
@@ -2938,8 +2231,6 @@ ISO_PATH=""
 VOLUME_ID=""
 KERNEL_PATH=""
 INITRD_PATH=""
-PARTMAN_DISK_LINE=""
-GRUB_BOOTDEV_LINE=""
 
 main() {
   parse_args "$@"
@@ -2962,7 +2253,7 @@ main() {
   fi
 
   if [[ "${EUID:-$(id -u)}" -ne 0 && $DRY_RUN -eq 0 ]]; then
-    log_warn "Sem root: a extração/remontagem costuma funcionar, mas mtools pode reclamar."
+    log_warn "Sem root: a remontagem com xorriso costuma funcionar, mas pode falhar em alguns ambientes."
   fi
 
   # ANTES de tocar em qualquer coisa no disco: um build por vez. Dois builds no
@@ -2984,41 +2275,25 @@ main() {
   # erro aqui precisa aparecer ANTES da remontagem da ISO.
   acquire_repo
 
-  # A ordem importa: o layout (extração Debian / stage Ubuntu) precisa existir
-  # antes de injetar o projeto, e o patch de boot precisa do kernel/initrd que
-  # só é conhecido depois do stage/extração.
-  if [[ "$DISTRO" == "ubuntu" ]]; then
-    prepare_ubuntu
-    inject_project
-    inject_model
-    inject_source
-    inject_repo
-    inject_templates
-    patch_boot_ubuntu
-  else
-    extract_iso_debian
-    inject_project
-    inject_model
-    inject_source
-    inject_repo
-    inject_templates
-    patch_isolinux
-    patch_efi_debian
-    # DEPOIS do patch de boot (que descobre INITRD_PATH) e antes do md5sum.txt,
-    # que precisa refletir o initrd modificado.
-    inject_preseed_initrd
-    regenerate_md5sums
-  fi
+  # A ordem importa: o stage precisa existir antes de injetar o projeto, e o
+  # patch de boot precisa do kernel/initrd que só é conhecido depois dele.
+  prepare_ubuntu
+  inject_project
+  inject_model
+  inject_source
+  inject_repo
+  inject_templates
+  patch_boot_ubuntu
 
   VOLUME_ID="$(detect_volume_id)"
   log_info "Volume ID da ISO: '${VOLUME_ID}'"
 
-  repack_iso
+  repack_iso_ubuntu
   verify_output
 
   section "Resumo"
   log_ok "ISO: ${OUT_ISO}"
-  log_info "Distro base: ${DISTRO}"
+  log_info "Distro base: ubuntu (única suportada — ADR-001)"
   log_info "Papel gravado: ${ROLE} (auto = detecta o hardware no primeiro boot)"
   log_info "Família gravada: ${FAMILY} (auto = detecta o hardware no primeiro boot)"
   if [[ -n "$ROOT_PASSWORD_HASH" ]]; then
@@ -3147,10 +2422,10 @@ selftest_iso_tools() {
   expand_packages_block "${stage}/autoinstall.yaml"
   expand_apt_local_block "${stage}/autoinstall.yaml"
   expand_network_block "${stage}/autoinstall.yaml"
-  inject_common_templates "${stage}/preseed"
+  inject_common_templates "${stage}/ai-cpu-os-boot"
   if [[ "$NETWORK_MODE" != "none" ]]; then
-    network_yaml_block > "${stage}/preseed/ai-cpu-os-netplan.yaml"
-    chmod 0644 "${stage}/preseed/ai-cpu-os-netplan.yaml"
+    network_yaml_block > "${stage}/ai-cpu-os-boot/ai-cpu-os-netplan.yaml"
+    chmod 0644 "${stage}/ai-cpu-os-boot/ai-cpu-os-netplan.yaml"
   fi
 
   # 2) O projeto real (o mesmo tar que o build injeia).
@@ -3161,8 +2436,8 @@ selftest_iso_tools() {
       . | tar -C "${stage}/ai-cpu-os" -xf -
   chmod +x "${stage}/ai-cpu-os/build.sh" "${stage}/ai-cpu-os/detect-hardware.sh" \
            "${stage}/ai-cpu-os/llama-build.sh" "${stage}/ai-cpu-os/families/resolve.sh" \
-           "${stage}/ai-cpu-os/mods/apply.sh" "${stage}/preseed/late-command.sh" \
-           "${stage}/preseed/firstboot.sh" 2>/dev/null || true
+           "${stage}/ai-cpu-os/mods/apply.sh" "${stage}/ai-cpu-os-boot/late-command.sh" \
+           "${stage}/ai-cpu-os-boot/firstboot.sh" 2>/dev/null || true
 
   # 3) A entrada de boot, gerada pela MESMA função do build.
   KERNEL_PATH="/casper/vmlinuz"

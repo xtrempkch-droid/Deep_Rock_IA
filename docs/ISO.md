@@ -1,6 +1,6 @@
 # ISO — A imagem de instalação do ai-cpu-os (entregável final)
 
-> **Última atualização:** 2026-10-12
+> **Última atualização:** 2026-10-20 (sessão #42)
 >
 > **Este é o objetivo final do projeto:** uma **ISO de instalação** de um
 > sistema operacional que já traz o ai-cpu-os embutido — insert → instala → o
@@ -9,12 +9,21 @@
 > Implementado por [`iso/build-iso.sh`](../iso/build-iso.sh). Estado (o que foi
 > testado e o que **não** foi): [`docs/STATE.md`](STATE.md).
 >
-> **Duas bases de SO** (`--distro`):
+> **Base ÚNICA: Ubuntu Server** (ADR-001 em [`docs/DECISIONS.md`](DECISIONS.md)).
+> O caminho **Debian/preseed foi REMOVIDO** na sessão #42: `--distro debian`
+> **aborta** com exit 2 citando o ADR, e o diretório `iso/preseed/` não existe
+> mais (os scripts do instalador moram em `iso/common/`).
 >
 > | `--distro` | Base | Instalador | Config | Status |
 > |---|---|---|---|---|
-> | `ubuntu` **(padrão)** | Ubuntu Server live | Subiquity/autoinstall | `autoinstall.yaml` na raiz da ISO | ⚠️ escrito, **nunca executado** |
-> | `debian` (legado) | Debian netinst | debian-installer | `preseed/ai-cpu-os.cfg` | ⚠️ escrito, `--dry-run` validado, **nunca executado** |
+> | `ubuntu` **(o único)** | Ubuntu Server live | Subiquity/autoinstall | `autoinstall.yaml` na raiz da ISO | ✅ gerada, instalada e bootada em VM (#21); **hardware físico ainda pendente** |
+> | `debian` | — | — | — | ❌ **removido** (ADR-001); existiu até a sessão #41 e chegou a ser instalado em VM (#35) e em metal (#37) |
+>
+> ⚠️ **Em transição (planejado, ainda não implementado):** identidade do
+> sistema derivada do papel (ADR-002: `ai-inference`/`ai-builder`) e chat da
+> frota **`ai-talk`** (ADR-003, contrato em [`docs/CHAT.md`](CHAT.md)).
+> ⚠️ **Após a remoção do caminho Debian, nenhuma ISO foi gerada nem bootada** —
+> as provas de comportamento (#21/#35/#37) são anteriores a ela.
 
 ---
 
@@ -28,7 +37,7 @@ sistema já nasce pronto**:
 | Sem a ISO | Com a ISO |
 |-----------|-----------|
 | Instalar o SO manualmente | Dá boot na ISO |
-| Responder o instalador | Instalação automática (autoinstall/preseed) |
+| Responder o instalador | Instalação automática (autoinstall) |
 | Clonar o repositório | Projeto já está em `/opt/ai-cpu-os` |
 | Rodar `build.sh` à mão | Aplicado automaticamente no 1º boot |
 | Ter o `.gguf` do lado | Idem (o modelo é baixado/fornecido depois) |
@@ -49,23 +58,22 @@ detectados no primeiro boot).
       ├─ descobre a ISO oficial da versão atual + baixa o SHA256SUMS
       ├─ baixa e VERIFICA a ISO oficial
       ├─ injeta: /ai-cpu-os/            ← o projeto inteiro
-      │          /autoinstall.yaml      ← respostas automáticas (Ubuntu)   [ou]
-      │          /preseed/ai-cpu-os.cfg ← respostas automáticas (Debian)
-      │          /preseed/late-command.sh    ← copia o projeto no alvo
-      │          /preseed/firstboot.sh       ← aplica as mods no 1º boot
-      │          /preseed/ai-cpu-os-firstboot.service
+      │          /autoinstall.yaml      ← respostas automáticas (Subiquity)
+      │          /ai-cpu-os-boot/late-command.sh  ← copia o projeto no alvo
+      │          /ai-cpu-os-boot/firstboot.sh     ← aplica as mods no 1º boot
+      │          /ai-cpu-os-boot/ai-cpu-os-firstboot.service
+      │          /ai-cpu-os-boot/ai-cpu-os-netplan.yaml  ← rede do alvo
       ├─ ajusta o boot p/ instalar sem perguntar nada
-      │    ubuntu: entrada GRUB 'ai-cpu-os-auto' com o parâmetro `autoinstall`
-      │            (setores de boot originais PRESERVADOS via -indev/-outdev)
-      │    debian: label isolinux + grub.cfg do UEFI (preseed/file=…)
+      │    entrada GRUB 'ai-cpu-os-auto' com o parâmetro `autoinstall`
+      │    (setores de boot originais PRESERVADOS via -indev/-outdev)
       └─ remonta a ISO (BIOS + UEFI)
       ▼
- [2] ISO  ai-cpu-os-<distro>-<data>.iso   (~2,7 GB Ubuntu / ~700 MB Debian)
+ [2] ISO  ai-cpu-os-ubuntu-<data>.iso   (~2,7 GB)
       │
       │  (gravada em pendrive: dd, ou montada numa VM)
       ▼
  [3] MÁQUINA ALVO — INSTALAÇÃO
-      │  boot → GRUB/isolinux → entrada "ai-cpu-os-auto"
+      │  boot → GRUB → entrada "ai-cpu-os-auto"
       │  → instalador lê a config automática → instala SEM PERGUNTAR
       │  → late-command copia /ai-cpu-os → /target/opt/ai-cpu-os
       │  → habilita ai-cpu-os-firstboot.service (sentinela .firstboot-pending)
@@ -90,7 +98,7 @@ detectados no primeiro boot).
 
 Esta é a decisão de design mais importante da ISO, e ela é deliberada.
 
-Na hora em que o `late_command` (Debian) ou o `late-commands:` (Ubuntu) roda,
+Na hora em que o `late-commands:` do autoinstall roda,
 estamos **dentro do ambiente do instalador**, com o sistema alvo montado em
 `/target` — mas **o sistema alvo não está em execução**. As consequências:
 
@@ -154,6 +162,7 @@ Mesmo sendo mais demorado. As razões não são estéticas:
 | 4 | Pacotes do instalador **na mídia** | O mesmo repositório, carregado ao alvo — o 1º boot instala sem rede | ✅ **implementado e bootado** |
 | 5 | **Modelo** na mídia | `--iso-model auto\|<caminho>\|none` embute o `.gguf`; o late-command copia para `/opt/models` e o 1º boot usa via `AI_MODEL_FILE` | ✅ **implementado** |
 | 6 | O sistema saber que está offline | `OFFLINE=1` no `.iso-config` | ❌ **descartado** (ver nota) |
+| 7 | **Chat da frota** `ai-talk` (planejado) | `talk/` vai na ISO (stdlib, sem download); chave/peers decididos na geração ou depois, localmente | ❌ **só desenho** (ADR-003/`docs/CHAT.md`) |
 
 > ℹ️ **Sobre o item 6:** ele era "o sistema precisa saber que está offline". Com o
 > repositório na mídia, o modo `--offline` deixou de ter função: nada é baixado e
@@ -216,9 +225,11 @@ normal; com rede, ele também funciona).
 > ⚠️ **Honestidade sobre o que foi provado.** Gerada e **bootada em VM**
 > (sessão #21): `verify-iso.sh` **PASS=41/FAIL=0**; `test-vm.sh` **exit 0** (a
 > ISO bootou, instalou sozinha e o 1º boot aplicou o ai-cpu-os). **O que
-> continua NÃO provado:** o caminho **Debian/preseed** (nunca executado), o
-> **boot UEFI**, e tudo em **hardware físico** (Blocos A–O do `VALIDATION.md`).
-> Resta também um resíduo do air-gapped em investigação (§ 6).
+> continua NÃO provado:** o **boot UEFI**, o hardware físico com **Ubuntu** e
+> os Blocos A–O do `VALIDATION.md`. O caminho **Debian/preseed** foi executado
+> em VM (#35) e em metal (#37) **antes** de ser **removido** (ADR-001, sessão
+> #42) — não é mais uma pendência. Resta também um resíduo do air-gapped em
+> investigação (§ 6).
 >
 > ℹ️ **O CI consegue gerar a ISO de verdade** (tem `xorriso`): o workflow `iso`
 > baixa a ISO base, remasteriza e roda o `verify-iso.sh` no fim. Mas há um limite
@@ -244,8 +255,8 @@ máquina da mesma release da ISO (ou numa VM dela), ou passe
 
 ## 4. Como gerar a ISO
 
-> **Dependências:** veja a lista completa em § 4.8 (o que é obrigatório, o que só
-o Debian precisa e o que é só para o teste de VM).
+> **Dependências:** veja a lista completa em § 4.8 (o que é obrigatório no
+gerador e o que é só para o teste em VM).
 
 ### 4.2 Primeiro: simular (sempre)
 
@@ -258,15 +269,19 @@ bash iso/build-iso.sh --distro ubuntu --disk /dev/nvme0n1 --dry-run
 ### 4.3 Gerar de verdade
 
 ```bash
-# Instalação no SEU disco (o mais seguro quando a máquina é esta):
-sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/nvme0n1
+# Instalação no SEU disco (o mais seguro quando a máquina é esta).
+# Informe o PAPEL para a futura identidade ai-inference/ai-builder:
+sudo bash iso/build-iso.sh --distro ubuntu --role inference --disk /dev/nvme0n1
+
+# A máquina de build/registry/Gitea:
+sudo bash iso/build-iso.sh --distro ubuntu --role builder --disk /dev/nvme0n1
 
 # ISO GENÉRICA, para instalar em OUTRA máquina (ou quando você não sabe qual
 # será o disco do alvo): o instalador escolhe o maior disco disponível.
 sudo bash iso/build-iso.sh --distro ubuntu --disk auto
 
-# legado (Debian netinst + preseed)
-sudo bash iso/build-iso.sh --distro debian --disk /dev/nvme0n1
+# O caminho Debian foi REMOVIDO (ADR-001): `--distro debian` agora aborta
+# com exit 2 e uma mensagem apontando docs/DECISIONS.md.
 ```
 
 > ⚠️ **`--disk` é o disco que será APAGADO** na máquina onde a ISO for
@@ -287,8 +302,9 @@ Opções mais usadas:
 
 | Opção | Para que serve |
 |-------|----------------|
-| `--distro ubuntu` | Base do SO: `ubuntu` (padrão, autoinstall) ou `debian` (preseed). |
-| `--role auto` | Papel gravado na ISO. `auto` (padrão) detecta no hardware real. |
+| `--distro ubuntu` | Base do SO: **`ubuntu` (o único valor aceito, autoinstall)**. Qualquer outro valor — inclusive `debian` — **aborta** com exit 2 (ADR-001). |
+| `--role auto\|inference\|builder` | Papel gravado na ISO. `auto` (padrão) detecta no hardware real. **Com papel concreto, a próxima fase deriva o usuário/hostname** (`ai-inference`/`ai-builder`, ADR-002); `auto` mantém `ai-cpu-os` + aviso. |
+| `--username` / `--hostname` | Vencem qualquer padrão (inclusive a futura identidade por papel). |
 | `--family auto` | Família gravada na ISO. `auto` (padrão) detecta no hardware real. |
 | `--firstboot-reboot` | Reinicia automaticamente ao fim do primeiro boot (aplica C-states). |
 | `--hostname NOME` | Hostname do sistema instalado (padrão: igual ao usuário). |
@@ -317,10 +333,10 @@ geração da ISO** e vai escrita na mídia em três lugares coerentes:
 | Onde | O que é gravado |
 |------|-----------------|
 | `autoinstall.yaml` → `network:` | O netplan que o **instalador** usa (DHCP ou IP fixo). |
-| `/preseed/ai-cpu-os-netplan.yaml` | O **mesmo** YAML, para ser copiado ao alvo (uma fonte de verdade só). |
+| `/ai-cpu-os-boot/ai-cpu-os-netplan.yaml` | O **mesmo** YAML, para ser copiado ao alvo (uma fonte de verdade só). |
 | `late-command.sh` → `/etc/netplan/99-ai-cpu-os.yaml` | O netplan **persistente** do sistema instalado. |
 
-No Ubuntu o late-command também:
+O `late-command.sh` também:
 
 - move para `.ai-cpu-os.bak` o netplan deixado pelo instalador/cloud-init
   (`00-installer-config.yaml`, `50-cloud-init.yaml`, `01-netcfg.yaml`) — duas
@@ -330,10 +346,8 @@ No Ubuntu o late-command também:
   cada boot;
 - usa `optional: true`, para o boot não esperar uma placa que não tem cabo.
 
-No Debian (preseed) o caminho é outro, e o mesmo `--network` alimenta o
-`netcfg` do d-i: `disable_autoconfig false` (DHCP) ou
-`get_ipaddress`/`get_netmask`/`get_gateway`/`get_nameservers` (static). O d-i
-escreve `/etc/network/interfaces` no alvo.
+O antigo caminho Debian alimentava o `netcfg` do d-i; ele foi removido
+(ADR-001), então `--network` tem hoje **um** consumidor: o autoinstall.
 
 Modos:
 
@@ -394,17 +408,14 @@ quebraram a geração da ISO Ubuntu (o build morria com **`exit code 22`** do
 `curl` e mais nada — 404 na URL, sem dizer qual):
 
 1. O `SHA256SUMS` do **Ubuntu** marca o modo binário com **`*`** antes do nome
-   (`*ubuntu-24.04.5-live-server-amd64.iso`), igual ao `md5sum -b`. O do
-   **Debian** não usa marcador. Sem remover o `*`, a URL fica
-   `.../24.04/*ubuntu-24.04.5-…iso` → **404**. Era por isso que o caminho
-   Debian funcionava e o Ubuntu não.
+   (`*ubuntu-24.04.5-live-server-amd64.iso`), igual ao `md5sum -b`. Sem remover
+   o `*`, a URL fica `.../24.04/*ubuntu-24.04.5-…iso` → **404**.
 2. O `SHA256SUMS` do Ubuntu lista **todas** as point releases (24.04.3, .4,
    .5…) e as variantes **desktop/wsl**. Pegar a **primeira** entrada casada
    baixaria a versão mais **velha**.
 
-Hoje: os padrões são **ancorados** (`^ubuntu-[0-9][^ ]*-live-server-amd64[.]iso$`
-e `^debian-[0-9][^ ]*-amd64-netinst[.]iso$`, o que exclui `debian-edu-*`,
-`debian-mac-*`, `*-desktop-*` e `*-wsl-*`) e a escolha é a de **maior versão**
+Hoje: o padrão é **ancorado** (`^ubuntu-[0-9][^ ]*-live-server-amd64[.]iso$`,
+o que exclui `*-desktop-*` e `*-wsl-*`) e a escolha é a de **maior versão**
 (`sort -V | tail -1`). Os nomes passam por `normalize_iso_name` (remove `*` e o
 prefixo `./`) e há uma checagem final que **falha com mensagem clara** se o nome
 não for um nome de arquivo simples — em vez de deixar o `curl` devolver 404.
@@ -439,21 +450,23 @@ ruim, sem perder os vizinhos), com os nomes que falharam **reportados** no log.
 Quem guarda isso é `make iso-repo-test`, que reproduz o caso inteiro **offline**
 (com `apt-cache`/`apt-get` substituídos por stubs) — inclusive o modo lote.
 
-#### O verificador é distro-aware
+#### O verificador confere o conteúdo (uma base só)
 
 O `iso/verify-iso.sh` confere a **coerência** entre a mídia e a configuração de
-instalação. Essa configuração **muda de lugar conforme a distro**:
+instalação. Com a base única (ADR-001) existe **um** arquivo de config
+(`/autoinstall.yaml`, na raiz da ISO) e **um** lugar para a fonte extra (a seção
+`sources` do curtin). O modo de falha que a checagem existe para pegar — config
+**sem** a fonte extra → instalação dependente de rede — continua coberto, e
+agora também há uma checagem de que o `late-commands:` chama
+`/cdrom/ai-cpu-os-boot/late-command.sh` (o caminho novo dos templates).
 
-| Base | Arquivo de config | Onde fica a fonte extra |
-|------|-------------------|--------------------------|
-| Ubuntu (autoinstall) | `/autoinstall.yaml` | seção `sources` do curtin |
-| Debian (preseed) | `/preseed/ai-cpu-os.cfg` | `d-i apt-setup/local0/repository` |
+> 📌 **História, para quem for mexer:** o verificador já foi distro-aware porque
+> conferir só o autoinstall reprovava uma ISO **Debian** correta (o repo estava
+> na mídia e a preseed o usava) — foi o `2 problema(s)` do run #10. Com a
+> remoção do Debian a checagem ficou com um caminho só, e o teste
+> `make iso-verify-test` foi reescrito para cobrir o novo contrato.
 
-Conferir só o autoinstall reprovava uma ISO **Debian correta** (o repo estava na
-mídia e a preseed o usava) — foi o `2 problema(s)` do run #10. Hoje a checagem
-escolhe o arquivo e o marcador pela `--distro`, e o modo de falha que ela existe
-para pegar (config **sem** a fonte extra → instalação dependente de rede)
-continua coberto nos dois caminhos. Quem guarda é `make iso-verify-test`.
+Quem guarda é `make iso-verify-test`.
 
 ### 4.3.1 Não tenho `xorriso` (ou a máquina é modesta)
 
@@ -466,7 +479,7 @@ Caminho completo, sem instalar nada pesado na sua:
 
 ```bash
 # 1. Navegador: Actions → workflow "iso" → Run workflow
-#    (escolha ubuntu/debian; marque air_gapped para a ISO que se basta)
+#    (marque air_gapped para a ISO que se basta)
 
 # 2. Baixe o artifact da execução (o .zip) e EXTRAIA — dentro está o .iso
 #    e o .iso.sha256. (Renomear o .zip para .iso não funciona.)
@@ -572,10 +585,10 @@ mesmo diretório que contém `casper/`. Escolhemos o segundo porque ele:
 mas só a forma "sem chave de topo" é válida em **22.04 e 24.04**. É escolha de
 compatibilidade entre os dois LTS.
 
-**c) Remontagem por `-indev/-outdev -map` + `-boot_image replay`, não por extração + mkisofs.** Em vez
-de extrair a árvore e remontar (como o caminho Debian faz), partimos da ISO
+**c) Remontagem por `-indev/-outdev -map` + `-boot_image replay`, não por
+extração + mkisofs.** Em vez de extrair a árvore e remontar, partimos da ISO
 oficial e apenas **sobrescrevemos** o que muda: `/boot/grub/grub.cfg`,
-`/autoinstall.yaml`, `/preseed/…`, `/ai-cpu-os`, `/models`,
+`/autoinstall.yaml`, `/ai-cpu-os-boot/…`, `/ai-cpu-os`, `/models`,
 `/llama-src.tar.gz` e `/apt-repo`. Assim os setores de boot (El Torito BIOS,
 imagem EFI e MBR híbrido) ficam **byte a byte** iguais aos do Ubuntu — sem
 `mtools`, sem `isohdpfx.bin` e sem o risco de gerar uma ISO que não boota.
@@ -597,19 +610,24 @@ O `md5sum.txt` original fica obsoleto com essas alterações e é **removido** n
 remontagem (o Subiquity não o usa no autoinstall).
 
 **d) Tuning sempre no primeiro boot.** O `autoinstall.yaml` traz só o usuário,
-o locale, o particionamento e os pacotes; o `late-commands:` chama o MESMO
-`iso/preseed/late-command.sh` usado pelo Debian, passando `AI_CURTIN=1` para ele
-usar `curtin in-target --` em vez do `in-target` do d-i. Um script, dois
-instaladores — ver § 3.
+o locale, o particionamento e os pacotes; o `late-commands:` chama
+`iso/common/late-command.sh` com `AI_CURTIN=1`, para ele usar
+`curtin in-target --`. O mesmo script serve o `build.sh` rodado à mão — ver § 3.
 
 ---
 
-### 4.5.1 Como a variante Debian funciona (a cadeia de boot do preseed)
+### 4.5.1 Como a variante Debian funcionava (HISTÓRICO — caminho REMOVIDO)
 
-O Debian **não** tem autoinstall: quem responde as perguntas é o
+> 🗑️ **REMOVIDO (ADR-001, sessão #42).** `iso/preseed/` não existe mais e
+> `--distro debian` aborta. Esta seção fica **só como registro** do que foi
+> aprendido na sessão #35 — o conhecimento vale como classe de bug (instalador
+> automático não pode parar pedindo entrada), não como código. O runtime
+> Debian (`build.sh`/`mods/`) continua suportado.
+
+O Debian **não** tem autoinstall: quem respondia as perguntas era o
 `debian-installer` (d-i) lendo um **preseed**. Cada elo da cadeia abaixo — e
-cada linha da tabela — já travou a instalação de verdade (sessão #35; ver
-`TROUBLESHOOTING.md`):
+cada linha da tabela — travou a instalação de verdade (sessão #35; ver
+`TROUBLESHOOTING.md`). Nada disto existe mais no código:
 
 ```text
 isolinux.cfg / grub.cfg     prompt 0 + preseed/file=/preseed.cfg + idioma na cmdline
@@ -639,16 +657,18 @@ d-i preseed/late_command  →  sh /preseed/late-command.sh  (copia o projeto)
 | `apt` do alvo | remove `deb … cdrom:` do `sources.list` do alvo e roda `apt-get update` uma vez | o instalador grava a mídia como fonte; depois ela não existe e **todo** `apt-get update` falha (o 1º boot abortava com `rc=100`) |
 | Pacotes | `EXTRA_PACKAGES` inclui **`sudo`** | o Debian **não** traz `sudo` numa instalação padrão: sem ele, e com o root bloqueado, o usuário da ISO não administra nada |
 
-> **O `md5sum.txt` do Debian é regenerado** depois do patch (o d-i confere a
+> **O `md5sum.txt` do Debian era regenerado** depois do patch (o d-i confere a
 > mídia); no Ubuntu ele é removido.
 
 ---
 
 ### 4.5.2 ⚡ O que muda quando a ISO NÃO tem repositório local (e não há rede)
 
-Medido na sessão #38, com uma VM numa rede local **sem internet** (DHCP
-funciona, o espelho não responde). Sem `--iso-repo`, a instalação Debian
-**parava** em telas interativas. Foram três telas, cada uma com uma causa:
+> 🗑️ Esta seção descreve o que acontecia no **caminho Debian**, removido no
+> ADR-001. Fica como registro do que foi medido na sessão #38, com uma VM numa
+> rede local **sem internet** (DHCP funciona, o espelho não responde): sem
+> `--iso-repo`, a instalação Debian **parava** em telas interativas. Foram três
+> telas, cada uma com uma causa:
 
 | Tela | Causa | Correção |
 |---|---|---|
@@ -657,7 +677,7 @@ funciona, o espelho não responde). Sem `--iso-repo`, a instalação Debian
 | `[!!] Select and install software — Installation step failed` | o `pkgsel` chama `aptfailed` (`exit $ret`) quando `tasksel`/`apt-get install` falham | sem repo local: `pkgsel/include` vazio + `pkgsel/run_tasksel false` + `pkgsel/upgrade none` |
 
 Com `--iso-repo auto`, além disso: o `Release` do repositório passou a trazer o
-**`Codename` real** (antes era `./`, e o `late-command` recusava o repositório
+**`Codename` real** (vale igual para o caminho Ubuntu) (antes era `./`, e o `late-command` recusava o repositório
 por "outra release" — o alvo ficava **sem a fonte local** e o 1º boot dependia
 de rede).
 
@@ -754,8 +774,8 @@ sudo make pendrive DEVICE=/dev/sdb      # grava (pede para digitar o nome)
 # Obrigatórias
 sudo apt install -y xorriso curl coreutils
 
-# Só para --distro debian (boot UEFI dentro de efi.img + boot híbrido via MBR)
-sudo apt install -y isolinux mtools
+# (o caminho Debian precisava de isolinux e mtools; ele foi REMOVIDO no
+#  ADR-001, então essas duas dependências não existem mais)
 
 # Só para o teste de VM
 sudo apt install -y qemu-system-x86 qemu-utils
@@ -784,8 +804,8 @@ sudo apt install -y util-linux
 |------|--------|--------------|
 | Particiona o disco | ⚠️ **Apaga** o disco de `--disk` | Não desliga — é o objetivo |
 | Cria usuário com sudo | `--username`, senha definida/hash | `--username`, `--password-hash` |
-| Root | bloqueado por padrão; habilitável com `--root-password-hash` (hash crypt): late-command `chpasswd -e` (Ubuntu e Debian) + preseed `root-login true` (Debian) | omitir `--root-password-hash` |
-| Instala pacotes base | Ubuntu: `packages:`; Debian: `pkgsel/include` | `--extra-packages` |
+| Root | bloqueado por padrão; habilitável com `--root-password-hash` (hash crypt): o late-command roda `chpasswd -e` no alvo | omitir `--root-password-hash` |
+| Instala pacotes base | `packages:` do autoinstall | `--extra-packages` |
 | Copia o projeto | `/opt/ai-cpu-os` | — |
 | Grava papel e família | `.iso-config` (lidos no 1º boot) | `--role`, `--family` |
 | Aplica o tuning no 1º boot | mods `system`: sysctl, THP, governor, C-states | `--skip-mods` no `build.sh` |
@@ -803,27 +823,27 @@ como hash (nunca texto puro: o late-command usa `chpasswd -e`).
 
 | Item | Situação |
 |------|----------|
-| **A ISO Ubuntu foi construída, bootada e instalada** | ✅ **FEITO (sessão #21)**: gerada dentro de um container `ubuntu:24.04`, instalada numa VM com KVM, e o **1º boot aplicou o ai-cpu-os** (família `intel-haswell`) compilando o llama.cpp do tarball da mídia, **sem rede**. Ver `STATE.md` § 3.3. ⚠️ Falta **hardware físico** e o caminho **Debian**. |
+| **A ISO Ubuntu foi construída, bootada e instalada** | ✅ **FEITO (sessão #21)**: gerada dentro de um container `ubuntu:24.04`, instalada numa VM com KVM, e o **1º boot aplicou o ai-cpu-os** (família `intel-haswell`) compilando o llama.cpp do tarball da mídia, **sem rede**. Ver `STATE.md` § 3.3. ⚠️ Falta **hardware físico (Ubuntu)** e **UEFI**. ⚠️ **Depois de remover o caminho Debian (sessão #42) nenhuma ISO foi gerada nem bootada.** |
 | 🖥️ **A interface web (`make ui`)** | ⚠️ **Nunca aberta num navegador** — nem por quem escreveu. O `make ui-test` (34 asserções) exercita a **API**: lista branca, validadores, SSE, recusa sem `xorriso`, ausência de rota de escrita, bind em `127.0.0.1`. **Tudo que for visual é afirmação não verificada.** Ver § 4.3.2. |
 | 🖥️ **A UI numa máquina COM `xorriso`** | ⚠️ Só o caminho de **recusa** foi provado (esta máquina não tem `xorriso`). O caminho feliz — job roda, o SSE mostra o progresso real até o fim e a ISO nova aparece na lista — **não** foi exercitado ponta a ponta. |
 | **Caminho Ubuntu (`--distro ubuntu`)** | ✅ **EXECUTADO (sessão #21)**: ISO gerada, instalada numa VM (KVM) e o 1º boot aplicou o ai-cpu-os sem rede. Ver `STATE.md` § 3.3. |
 | **`iso/verify-iso.sh`** | ✅ Exercitado de verdade: roda no `make iso-lint` sobre uma árvore montada com os templates e o projeto **reais**, incluindo um **teste negativo** (reprova quando falta a config). E o caminho `--iso` (com `xorriso`) foi executado na sessão #21: **PASS=41/FAIL=0**. |
 | **`iso/test-vm.sh`** | ✅ **Executado (sessão #21)**: `exit 0` — bootou, instalou sozinho e o 1º boot aplicou. ⚠️ Nesta máquina de desenvolvimento **não há `qemu`**: só roda onde houver qemu + `/dev/kvm`. |
 | **`--serial-console`** | ✅ **Validado (sessão #21)**: foi o que tornou a instalação e o 1º boot observáveis sem tela. Sem ele, o `test-vm.sh` não vê os marcadores (o script avisa exatamente isso). |
-| Layout da ISO base | Ubuntu exige `casper/` (recusado com mensagem clara se não existir); Debian exige `isolinux/`. Outras ISOs falham de propósito em vez de gerar algo quebrado. |
-| Boot BIOS | Ubuntu: El Torito preservado do original e **bootou numa VM**. Debian: `isolinux` + `isohdpfx.bin` — **não validado**. |
-| Boot UEFI | Ubuntu: imagem EFI preservada + patch do `grub.cfg` do UEFI. Debian: **best-effort** (tenta `EFI/*/grub.cfg`; se estiver dentro de `efi.img`, exige `mtools`). **Não validado.** |
+| Layout da ISO base | A base tem de ter `casper/` (recusado com mensagem clara se não existir). Outras ISOs falham de propósito em vez de gerar algo quebrado. |
+| Boot BIOS | El Torito preservado do original e **bootou numa VM** (#21). |
+| Boot UEFI | Imagem EFI preservada + patch do `grub.cfg` do UEFI. **Não validado.** |
 | **Rede no 1º boot** | ✅ **Não é necessária E foi provado (sessão #21)**: numa VM, o 1º boot compilou o llama.cpp do tarball da mídia e usou o modelo e o repositório local, sem rede. A rede **é usada** se estiver disponível (para atualizar pacotes) e é **obrigatória na máquina que GERA a ISO**. |
 | **Modelo na mídia** | ✅ Implementado (`--iso-model`) e **validado num boot real** (o `late-command` copiou para `/opt/models` e o `firstboot` usou via `AI_MODEL_FILE`, sem rede). |
-| **Repositório apt na mídia** | ✅ Implementado (`--iso-repo`) e **validado (era bug)**: a seção `sources` do Subiquity **não funciona** (o curtin roda `apt-get update` num chroot sem `/cdrom`). O repo é carregado ao alvo (`/opt/apt-repo`) pelo late-command e usado no 1º boot. ⚠️ O **Debian** (`apt-setup/local0/*`) segue **não testado**. |
+| **Repositório apt na mídia** | ✅ Implementado (`--iso-repo`) e **validado (era bug)**: a seção `sources` do Subiquity **não funciona** (o curtin roda `apt-get update` num chroot sem `/cdrom`). O repo é carregado ao alvo (`/opt/apt-repo`) pelo late-command e usado no 1º boot. |
 | **Fonte do llama.cpp na mídia** | ✅ Implementado (`--iso-source`) e **validado num boot real**: `/opt/llama.cpp/build/bin/llama-server` foi compilado do tarball, sem rede. |
 | **Resíduo air-gapped (a investigar)** | ⚠️ O `llama-build.sh` usa `-DLLAMA_CURL=OFF` (runtime), mas o **build** ainda tenta baixar o **UI** do llama.cpp do HuggingFace (`-- UI: downloading … llama-ui …`). Na VM o `.sha256` falhou e o build **seguiu** (parece *best-effort*). **Confirmar** que a ISO é 100% offline (provável flag `-DLLAMA_BUILD_UI=OFF`/`-DLLAMA_UI=OFF` conforme a versão). |
 | **Release da ISO × máquina de build** | `--iso-repo auto` só monta o repositório se a release casar com a da ISO. **Solução prática (sessão #21):** gere a ISO **dentro de um container da mesma release** (ex.: `docker run ubuntu:24.04 …`) — o `--iso-repo auto` passa a casar e o build não exige sudo no host. |
-| **Debian/preseed** | 🔴 **Nunca executado.** Só o caminho Ubuntu foi bootado. O Debian usa `mkisofs`/`isolinux`/`efi.img` (com `mtools`) e `apt-setup/local0/*` — nada disso foi exercitado. |
+| **Debian/preseed** | 🗑️ **REMOVIDO (ADR-001, sessão #42).** Chegou a ser executado em VM (#35) e em metal (#37); o aprendizado ficou em § 4.5.1/§ 4.5.2. O runtime Debian (`build.sh`/`mods/`) continua suportado. |
 | **Boot UEFI** | ⚠️ **Nunca testado.** O `-boot_image replay` restaurou a imagem EFI oculta do Ubuntu; falta bootar de fato com `--boot-mode uefi` (precisa de `ovmf`). |
 | Tamanho | **5,2 GiB medido** (air-gapped: base 4,1 GB + repo 329 MB + modelo 1,1 GB + fonte 37 MB). |
 | Assinatura | A ISO gerada **não é assinada**. Verifique o SHA256 que o script imprime. |
-| `md5sum.txt` | Debian: regenerado. Ubuntu: **removido** (ficaria obsoleto; o Subiquity não o usa). |
+| `md5sum.txt` | **Removido** da ISO gerada (ficaria obsoleto; o Subiquity não o usa). |
 | Efeito real das mods na ISO | O autoteste valida a *geração*; que sysctl/governor/C-states **funcionam** no alvo depende do Bloco O de `VALIDATION.md` (ainda em hardware físico). |
 
 ---
@@ -832,8 +852,8 @@ como hash (nunca texto puro: o late-command usa `chpasswd -e`).
 
 | Alternativa | Prós | Por que foi descartada |
 |-------------|------|------------------------|
-| **simple-cdd** | Integrado ao Debian, gera ISO com preseed | Exige espelho local / baixa muita coisa; menos controle sobre o boot e o `late_command`. Fica na lista para simplificar no futuro. |
-| **live-build** | ISO oficial do Debian, live + instalador | Pesado, exige ambiente limpo (chroot) e quebra fácil; `--debian-installer live` é notoriamente chato de scriptar. |
+| **simple-cdd** | Integrado ao Debian, gera ISO com preseed | Exige espelho local / baixa muita coisa; menos controle sobre o boot e o `late_command`. Descartado junto com o caminho Debian (ADR-001). |
+| **live-build** | ISO oficial do Debian, live + instalador | Pesado, exige ambiente limpo (chroot) e quebra fácil; `--debian-installer live` é notoriamente chato de scriptar. Descartado junto com o caminho Debian (ADR-001). |
 | **Packer** | Fluxo maduro, ótimo p/ nuvem | Produz **imagem de disco/VM**, não uma ISO de instalação. É outro entregável (e está no ROADMAP como ideia). |
 | **Cubic** | GUI, simples p/ Ubuntu | Só Ubuntu, **não automatizável** — contraria "tudo por script". |
 | **Ubuntu autoinstall (Subiquity)** | Caminho moderno p/ Ubuntu | **Adotado** como base padrão — ver § 4.5. A preocupação original ("mecanismo diferente, via cloud-init") foi resolvida usando `autoinstall.yaml` na mídia em vez de `nocloud`. |
@@ -854,7 +874,9 @@ tudo por script, idempotente, auditável.
 | ✅ **FEITO** | **Construir e bootar a ISO numa VM** (Bloco M) — **concluído na sessão #21** (Ubuntu, em VM com KVM). Ver § 9 e o `STATE.md` § 3.3. |
 | ✅ **FEITO** | **Rodar o caminho Ubuntu contra uma ISO real** — feito; os bugs de layout/`xorriso` que só apareciam aí foram corrigidos (`replay`, `-map`, `-rm --`, GRUB `--id`). |
 | ✅ **FEITO** | **Os 5 requisitos do § 3.1:** fonte, modelo e repositório na mídia; o 1º boot roda **sem rede** (provado). |
-| 🔴 Alta | **Rodar o caminho Debian (`--distro debian`)** — nunca executado. Precisa de `mkisofs`/`isolinux`/`mtools` e o `apt-setup/local0/*`. |
+| ✅ **FEITO** | **Remover o caminho Debian** (`--distro debian`/preseed) — ADR-001, **sessão #42**: scripts compartilhados movidos para `iso/common/`, `iso/preseed/` apagado, `verify-iso.sh`/`Makefile`/CI/`webui/`/testes limpos, `--distro debian` **aborta** com `exit 2` citando o ADR. |
+| 🔴 Alta (P1) | **Identidade do sistema derivada do papel** — ADR-002: `inference`→`ai-inference`, `builder`→`ai-builder`, `auto`→`ai-cpu-os` + aviso; testes offline. |
+| 🔴 Alta (P2/P3) | **`ai-talk`** — ADR-003/`docs/CHAT.md`: transporte + CLI + teste offline; depois ISO/duas VMs + ponte opcional com o `llama-server`. |
 | 🔴 Alta | **Validar a ISO em HARDWARE FÍSICO** (Xeon E5-2680 v4 e Ryzen 5 3500X): repetir instalação + 1º boot e medir (`llama-bench`). Blocos A–O do `VALIDATION.md`. |
 | 🟡 Média | **Fechar o resíduo air-gapped:** confirmar/desligar o download do **UI** do llama.cpp no build (ver § 6). |
 | 🟡 Média | **Testar o boot UEFI** (`make iso-vm VM_ARGS="--boot-mode uefi"`). |
@@ -874,7 +896,7 @@ que cada passo **prova** e onde ele roda.
 | # | Passo | Onde | Prova |
 |---|-------|------|-------|
 | 0 | `make validate` | qualquer máquina | que os scripts não têm erro de sintaxe/lint e que o corpus de CPUs casa |
-| 1 | `make iso-yaml` | qualquer máquina | que os templates substituídos são YAML/preseed válidos e que o verificador **sabe reprovar** (teste negativo) |
+| 1 | `make iso-yaml` | qualquer máquina | que os templates substituídos são YAML válido e que o verificador **sabe reprovar** (teste negativo) |
 | 2 | `make iso-dry-run ISO_ARGS="--iso-source auto --iso-model auto --iso-repo auto"` | qualquer máquina | que a orquestração inteira acontece, sem baixar nada |
 | 3 | **Gerar a ISO** (`make iso DISK=…` ou o workflow `iso` com `air_gapped: true`) | máquina com `xorriso` + rede | ⭐ que a ISO **existe** e que o `verify-iso.sh` aprova o conteúdo dela **de verdade** (inclusive rodando `xorriso` para dentro) |
 | 4 | **Bootar e instalar em VM** (`make iso-vm`) | máquina com `qemu` + KVM | ⭐⭐ o **comportamento**: instala sozinho e o 1º boot aplica |
@@ -889,7 +911,9 @@ cria o artefato, e só o passo 4 diz se ele **funciona**.
 > (**PASS=41/FAIL=0**) e **bootada/instalada numa VM** (`test-vm.sh` `exit 0`; o
 > 1º boot aplicou o ai-cpu-os). Detalhes e os números em
 > [`docs/STATE.md`](STATE.md) § 3.3 e `JOURNAL.md` § 4 (sessão #21). **Pendentes:**
-> o caminho **Debian** (passo 3 e 4) e o **hardware real** (passo 5).
+> o **hardware real (Ubuntu)** e o **UEFI** (passo 5). O caminho Debian foi
+> **removido** (ADR-001); ⚠️ **depois dessa remoção (sessão #42) nenhuma ISO
+> foi gerada nem bootada de novo.**
 
 ### 9.1 Gerando a ISO na sua máquina (container) ou no CI
 
@@ -955,7 +979,6 @@ config) e `aplicação concluída com sucesso` (o 1º boot **aplicou**).
 | O instalador faz **perguntas** (Subiquity interativo) | o GRUB subiu a entrada errada: a `menuentry` precisa de `--id ai-cpu-os-auto` para o `set default` casar (era bug — § 4.5) |
 | **Silêncio total** no console serial (nem boot) | capture a tela por QMP (`screendump`) — pode ser o boot (BIOS/UEFI) quebrado por `xorriso` (§ 4.5) |
 | `apt-config` **exit 100** / "does not have a Release file" | o repo local foi declarado no apt do **instalador**; ele tem de ir para o **alvo** via late-command (§ 3.1) |
-| Erro de **assinatura** (Debian) | `apt-setup/local0/*` na preseed → § 3.1 |
 | Instala, mas o 1º boot **pede rede** | repositório incompleto → aumente `--iso-repo-packages` |
 | 1º boot trava/demora muito | é a compilação do llama.cpp; confira `/var/log/ai-cpu-os-firstboot.log` |
 | O `test-vm.sh` **não vê** os marcadores | a ISO foi gerada **sem** `--serial-console`, ou o processo loga só no journal (use `/dev/console` + `journal+console` — § 4.5/§ 6) |
@@ -964,20 +987,20 @@ config) e `aplicação concluída com sucesso` (o 1º boot **aplicou**).
 ### 9.4 Antes de considerar a ISO "fechada"
 
 - [x] `make validate` verde (local — feito na sessão #21 **e** no CI)
-- [x] ISO **gerada** (passo 3) — Ubuntu ✅; **Debian ❌**
+- [x] ISO **gerada** (passo 3) — Ubuntu ✅
 - [x] `verify-iso.sh` aprovado sobre a ISO real (`PASS=41/FAIL=0`)
 - [x] ISO **bootada e instalada** numa VM (passo 4, Ubuntu) — ✅ sessão #21
 - [x] 1º boot aplicado, `status=ok`
 - [x] O **tamanho** e o **SHA256** anotados em `docs/STATE.md` § 5
 - [x] Sessão registrada no `docs/JOURNAL.md` (#21)
 - [ ] **Repetir em hardware físico** (Xeon/Ryzen) — Bloco M do `VALIDATION.md`
-- [ ] **Caminho Debian** gerado e bootado
+- [x] ~~Caminho Debian gerado e bootado~~ — **não é mais escopo**: removido (ADR-001)
 - [ ] **Boot UEFI** testado
 - [ ] Fechar o **resíduo air-gapped** do UI do llama.cpp (§ 6)
 
 > ⚠️ **A Regra 13 do `AGENTS.md` é explícita:** não declare a ISO pronta sem
 > tê-la bootado e instalado em VM. Verificação de conteúdo **não** substitui
-> boot. (Feito para o **Ubuntu**; Ubuntu ≠ Debian ≠ hardware real.)
+> boot. (Feito para o **Ubuntu em VM**; VM ≠ hardware real.)
 
 ---
 
@@ -985,6 +1008,8 @@ config) e `aplicação concluída com sucesso` (o 1º boot **aplicou**).
 
 | Data | Mudança |
 |------|---------|
+| 2026-10-20 | 🗑️ **O caminho Debian foi REMOVIDO (ADR-001, sessão #42).** `iso/preseed/` deixou de existir (scripts compartilhados foram para `iso/common/`), `--distro debian` **aborta** com exit 2 citando o ADR, `verify-iso.sh` ficou com uma base só e o layout da mídia passou a ser **`/ai-cpu-os-boot/`**. O CI reprova se `preseed/` voltar. `make validate` verde (ci-guards 93). ⚠️ Nenhuma ISO gerada/bootada depois da remoção. |
+| 2026-10-20 | 🧭 **Base única: Ubuntu Server (ADR-001).** O caminho Debian/preseed passou a **DEPRECADO**; `--distro debian` emitia aviso. Planejados: identidade pelo papel (ADR-002) e chat da frota `ai-talk` (ADR-003, `docs/CHAT.md`). O topo e o roadmap foram atualizados para refletir o que já foi executado (#21 Ubuntu em VM; #35/#37 Debian em VM/metal) e o que **não** foi (hardware Ubuntu, UEFI). |
 | 2026-10-13 | 🎉 **A ISO foi GERADA e BOOTADA pela primeira vez** (sessão #21): air-gapped, construída num container `ubuntu:24.04` e instalada numa VM com KVM. `verify-iso.sh` **PASS=41/FAIL=0**; `test-vm.sh` **exit 0** (instalou sozinha; o 1º boot aplicou o ai-cpu-os, `.firstboot-status=ok`, família `intel-haswell`; llama.cpp compilado do tarball da mídia). **8 bugs reais corrigidos:** `xorriso` (`-rm --`, `-boot_image replay`, `-map` do modelo/fonte/repo, aspas do `-find`), SIGPIPE no verificador, GRUB sem `--id` (→ instalação interativa), repo apt no chroot do curtin (→ carregar ao alvo `/opt/apt-repo` + `Release`), marcadores fora do console. Atualiza § 3.1, § 4.5, § 6, § 8, § 9 e este § 10. |
 | 2026-10-07 | Criação: `iso/build-iso.sh` + preseed + serviço de primeiro boot + este documento. Nada executado em ambiente real ainda. |
 | 2026-10-12 | **Variante Ubuntu (autoinstall/Subiquity) adicionada como base padrão** (`--distro ubuntu`), com `iso/autoinstall/autoinstall.yaml`, remontagem por `-indev/-outdev -map` (setores de boot preservados), `late-command.sh` compartilhado entre os dois instaladores (`AI_CURTIN=1`), flags `--role`/`--family` no lugar de `--profile` e autoteste de templates (`--check-templates` / `make iso-yaml`) rodando no CI. **Continuamos sem ter construído nem bootado nenhuma ISO.** |

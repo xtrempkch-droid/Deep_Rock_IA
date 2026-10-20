@@ -6,7 +6,7 @@ ai-cpu-os.
 
 POR QUE EXISTE
 --------------
-Gerar a ISO exige lembrar de 6+ flags (`--distro`, `--disk`, `--role`,
+Gerar a ISO exige lembrar de 6+ flags (`--disk`, `--role`,
 `--family`, `--iso-source/model/repo`), e o passo seguinte (gravar num pendrive)
 é o mais perigoso do projeto. O terminal já faz tudo isso — este servidor só
 tira a memorização e mostra o que vai acontecer ANTES de acontecer.
@@ -79,7 +79,10 @@ ACTIONS = {
     "pendrives",   # lista dispositivos candidatos (só leitura)
 }
 
-DISTROS = ("ubuntu", "debian")
+# ADR-001 (docs/DECISIONS.md): Ubuntu é a base ÚNICA da ISO. A lista fica como
+# tupla de um item (e não é removida) para o validador continuar recusando
+# QUALQUER outro valor vindo do navegador.
+DISTROS = ("ubuntu",)
 ROLES = ("auto", "inference", "builder")
 PAYLOADS = ("auto", "none")
 # Rede do sistema INSTALADO. O default é `auto` (DHCP) de propósito: sem uma
@@ -488,6 +491,8 @@ def _iso_args_from(params: dict[str, Any]) -> list[str]:
     para o build real — é o que garante que "o que você simulou é o que vai
     rodar".
     """
+    # Base única (ADR-001). O valor continua validado — a UI não pode injetar
+    # uma distro arbitrária na linha de comando.
     distro = v_distro(str(params.get("distro", "ubuntu")))
     disk = v_disk(str(params.get("disk", "/dev/vda")))
     role = v_role(str(params.get("role", "auto")))
@@ -564,9 +569,8 @@ def action_iso_verify(params: dict[str, Any]) -> dict[str, Any]:
             "Nesta máquina use a conferência básica, que usa dd/od/sha256sum."
         )
     path = v_iso_path(str(params.get("iso", "")))
-    distro = v_distro(str(params.get("distro", "ubuntu")))
-    job = new_job(["bash", "iso/verify-iso.sh", "--iso", str(path),
-                   "--distro", distro], f"Verificando {path.name}")
+    job = new_job(["bash", "iso/verify-iso.sh", "--iso", str(path)],
+                  f"Verificando {path.name}")
     return {"job": job.id}
 
 

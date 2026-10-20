@@ -95,7 +95,7 @@ destes. Detalhes e evidência em `docs/TROUBLESHOOTING.md` § "SINALIZADO".
 |---|---|---|---|
 | 1 | **Disco fixado que não existe no alvo** | ✅ **corrigido** (2026-10-16) | A ISO saiu com `--disk /dev/vda` e o alvo não tem `/dev/vda`. **Regenere com `--disk auto`.** |
 | 2 | **UEFI nunca bootado** | ⚠️ **aberto** | Boota mas sobe o **menu** (entrada 0 = "Try or Install Ubuntu Server"). Teste: `bash iso/test-vm.sh --iso … --boot-mode uefi --yes` (precisa de `ovmf`). |
-| 3 | **Debian/preseed nunca executado** | ⚠️ **aberto** | `--distro debian` nunca foi bootado (só o Ubuntu). Rode e reporte. |
+| 3 | ~~**Debian/preseed nunca executado**~~ | 🗑️ **fora de escopo** | O caminho Debian foi **removido** (ADR-001, sessão #42): `--distro debian` aborta. |
 
 ---
 
@@ -155,7 +155,7 @@ make validate  →  TUDO VERDE
 
 - 🔴 **Nenhuma ISO bootada nesta rodada.** Os testes acima são de **conteúdo e
   lógica**, não de instalação real.
-- 🔴 **Modo 2 (UEFI) e Modo 3 (Debian/preseed) continuam sem execução.**
+- 🔴 **Modo 2 (UEFI) continua sem execução.** O Modo 3 (Debian/preseed) saiu de escopo — o caminho foi removido (ADR-001).
 - 🔴 **Nenhum pendrive físico gravado** e **nenhum hardware real** validado
   (Blocos A–O de `docs/VALIDATION.md` em branco).
 - ⚠️ A **interface web nunca foi aberta num navegador** — os testes exercitam

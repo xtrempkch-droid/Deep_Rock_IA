@@ -63,18 +63,47 @@ Todo o sistema é gerado por **script** (`build.sh`), é **idempotente**, suport
 ### 🎯 Entregável final: uma ISO de instalação
 
 > **O fim do projeto NÃO é "clonar e rodar um script".** O objetivo final é uma
-> **imagem ISO de instalação** de um SO (Debian/Ubuntu) **já com o ai-cpu-os
-> embutido**: você dá boot na ISO, a instalação é automática e o sistema nasce
-> afinado. Isso está implementado em `iso/` e especificado em `docs/ISO.md`.
+> **imagem ISO de instalação** de um SO — **Ubuntu Server** é a base **única**
+> (ADR-001; o caminho Debian/preseed foi **removido**) — **já com o ai-cpu-os
+> embutido**: você dá boot na ISO, a instalação é
+> automática e o sistema nasce afinado. Isso está implementado em `iso/` e
+> especificado em `docs/ISO.md`.
 >
 > **Não é uma ideia futura — é o critério de conclusão do projeto.** Enquanto a
 > ISO não existir e não for validada, o projeto **não está terminado**, por mais
 > que os scripts estejam prontos.
 
 Arquitetura da ISO em uma frase: a ISO entrega o *software e a intenção*
-(o perfil); o **primeiro boot** entrega o *contexto* (o hardware real), porque é
-lá que `detect-hardware.sh` vê o SMBIOS completo e escolhe `xeon` ou `ryzen`
-corretamente. Ver `docs/ISO.md` § 3.
+(o papel); o **primeiro boot** entrega o *contexto* (o hardware real), porque é
+lá que `detect-hardware.sh` vê o SMBIOS completo e escolhe a família e o papel
+(`inference`/`builder`) corretamente. Ver `docs/ISO.md` § 3.
+
+### 🧭 Decisões de arquitetura (2026-10-20) — sessões #39–#42
+
+> Registro completo, com contexto, consequências, mapas de impacto e critérios
+> de aceite: [`docs/DECISIONS.md`](docs/DECISIONS.md).
+>
+> - **ADR-001 — uma única base de ISO: Ubuntu Server.** ✅ **CONCLUÍDO (P0)**
+>   em 2026-10-20: `iso/preseed/` foi **removido**, os scripts compartilhados
+>   foram para `iso/common/`, `--distro debian` **aborta** (exit 2) citando o
+>   ADR. O runtime Debian (`build.sh`/`mods/`) **continua** suportado.
+> - **ADR-002 — identidade pelo papel.** `inference` → `ai-inference`;
+>   `builder` → `ai-builder`; `auto` → `ai-cpu-os` + aviso; `--username` e
+>   `--hostname` explícitos vencem. **Ainda não implementada.**
+> - **ADR-003 — chat de frota `ai-talk`.** TCP 7331 na LAN, JSON lines,
+>   HMAC-SHA256, Python stdlib; contrato em [`docs/CHAT.md`](docs/CHAT.md).
+>   **Ainda não implementado.**
+> - **ADR-004 — latência, espaçamento e durabilidade.** 50 ms entre `msg` do
+>   mesmo par (20 msg/s), fila de 256 com exit 5, p99 ≤ 10 ms e `fsync` por
+>   mensagem (§6.7/§6.8 do `CHAT.md`).
+> - **ADR-005 — teto de 15 nós** em malha completa; acima disso, relay/hub é
+>   obrigatório (`CHAT.md` §5.2).
+>
+> ⚠️ **Decisão não é fato:** o usuário padrão ainda é `ai-cpu-os` (ADR-002
+> **não** implementado), e o `talk/` existe só em **F1**
+> (transporte/CLI/loopback): não há serviço, ISO nem teste com duas VMs. As
+> duas coisas mais próximas são **P1 (identidade)** e depois **P2/P3**
+> (`docs/STATE.md` § 6).
 
 ---
 
@@ -138,16 +167,15 @@ ai-cpu-os/
 │   ├── Dockerfile          # Runtime do llama.cpp (GGML_NATIVE=OFF — ver docs/CI.md)
 │   └── docker-compose.example.yml
 ├── iso/                    # 🎯 ENTREGÁVEL FINAL: ISO de instalação
-│   ├── build-iso.sh        # Remasteriza a ISO base (--distro ubuntu|debian)
+│   ├── build-iso.sh        # Remasteriza a ISO base (Ubuntu; `debian` REMOVIDO)
 │   ├── verify-iso.sh       # Verifica o CONTEÚDO da ISO (ou de uma árvore: --dir)
 │   ├── test-vm.sh          # Boota a ISO em qemu e espera instalação + 1º boot
 │   ├── write-pendrive.sh   # 🎯 Grava a ISO num PENDRIVE (o passo mais perigoso)
 │   ├── check-iso.sh        # Confere uma ISO BAIXADA sem xorriso (dd/od/sha256)
 │   ├── autoinstall/        # Templates do Ubuntu (Subiquity/autoinstall)
 │   │   └── autoinstall.yaml # Config de instalação automática (padrão)
-│   └── preseed/            # Templates compartilhados + os do Debian (legado)
-│       ├── ai-cpu-os.cfg   # Respostas automáticas do debian-installer
-│       ├── late-command.sh # Copia o projeto p/ /opt/ai-cpu-os (os 2 instaladores)
+│   └── common/             # Scripts do instalador (base ÚNICA: Ubuntu)
+│       ├── late-command.sh # Copia o projeto p/ /opt/ai-cpu-os + rede + SSH
 │       ├── firstboot.sh    # Aplica as mods no primeiro boot (hardware real)
 │       └── ai-cpu-os-firstboot.service
 ├── docs/
@@ -163,8 +191,9 @@ ai-cpu-os/
 │   ├── ISO.md              # 🎯 A ISO de instalação (decisões e como gerar)
 │   ├── IMPLANTAR-EM-OUTRO-PC.md # 🖥️ Instalar/validar em OUTRA máquina (roteiro)
 │   ├── GPU.md              # 🎮 Usar GPU (opcional, sempre explícito)
+│   ├── DECISIONS.md        # 🧭 ADRs: decisões firmadas, planos e critérios
+│   ├── CHAT.md             # 💬 Contrato do `ai-talk` (chat da frota)
 │   └── JOURNAL.md          # 📓 Diário de sessões + continuidade (retomada)
-│   └── build-runner.sh # Build Docker + push p/ registry local
 ├── families/               # 🧬 Suporte por FAMÍLIA de microarquitetura
 │   ├── README.md           # Conceito família × papel, como adicionar família
 │   ├── resolve.sh          # "Cérebro": casa o CPU → família → ISA/march
@@ -212,13 +241,17 @@ ai-cpu-os/
     ├── families-matrix.txt # ~60 modelos reais → família esperada
     ├── test-iso-selection.sh # Escolha da ISO oficial no SHA256SUMS (sem rede)
     ├── test-iso-repo-filter.sh # Repo apt: filtro + fallback (stubs; sem rede)
-    ├── test-verify-iso-repo-distro.sh # Verificador distro-aware (autoinstall × preseed)
+    ├── test-verify-iso-repo.sh # Verificador cobra o repo local (base única)
     ├── test-ci-guards.sh   # Prova que os guardas do CI REPROVAM (cópia temp.)
     ├── test-write-pendrive.sh # Travas do pendrive (gravando num ARQUIVO)
     ├── test-check-iso.sh   # Conferência de ISO baixada (fixtures byte a byte)
     ├── test-iso-lock.sh    # Trava de instância única do gerador (flock real)
-│   ├── test-webui.sh       # Interface web: API + salvaguardas (sem navegador)
-│   └── fixtures/           # SHA256SUMS REAIS + saída REAL do apt-cache policy
+    ├── test-webui.sh       # Interface web: API + salvaguardas (sem navegador)
+    ├── test-ai-talk.sh     # Contrato do chat da frota (loopback, sem rede)
+    └── fixtures/           # SHA256SUMS REAIS + saída REAL do apt-cache policy
+├── talk/                   # 💬 `ai-talk` — chat da frota (F1 pronta; F2 = ISO)
+│   ├── ai_talk.py          # daemon + CLI (stdlib; TCP 7331, JSON lines, HMAC)
+│   └── README.md           # uso, `make talk-test` e o que ainda NÃO existe
 └── webui/                  # 🖥️ Interface web local (criar/conferir a ISO)
     ├── server.py           # Servidor só-stdlib: lista branca de ações + SSE
     └── index.html          # Página única, sem CDN (funciona offline)
@@ -234,6 +267,9 @@ ai-cpu-os/
 | Entender a arquitetura e os fluxos     | `docs/ARCHITECTURE.md`                       |
 | **Entender o projeto POR DENTRO (mantenedor)** | **`README.technical.md`**            |
 | Saber o estado atual + próxima ação    | **`docs/STATE.md`**                          |
+| **Saber por que uma decisão foi tomada (ADRs)** | **`docs/DECISIONS.md`**              |
+| **Saber o que está deprecado e o que será removido** | **`docs/DECISIONS.md`** (ADR-001)  |
+| **Entender/implementar o chat da frota (`ai-talk`)** | **`docs/CHAT.md`**                  |
 | Detalhes de CPU/RAM/disco              | `docs/HARDWARE.md`                           |
 | Entender uma otimização específica     | `docs/TUNING.md`                             |
 | Resolver um problema                   | `docs/TROUBLESHOOTING.md`                    |
@@ -242,7 +278,7 @@ ai-cpu-os/
 | **Testar o casamento CPU → família sem ter o hardware** | **`tests/test-families.sh`**, **`tests/families-matrix.txt`** |
 | **Testar a escolha da ISO oficial (sem rede)** | **`tests/test-iso-selection.sh`**, **`tests/fixtures/`** |
 | **Testar o repo apt local (filtro + fallback, sem rede)** | **`tests/test-iso-repo-filter.sh`** |
-| **Testar o verificador da ISO sem xorriso (distro-aware)** | **`tests/test-verify-iso-repo-distro.sh`** |
+| **Testar o verificador da ISO sem xorriso (repo local)** | **`tests/test-verify-iso-repo.sh`** |
 | **Saber se um guarda do CI reprova de verdade** | **`tests/test-ci-guards.sh`** |
 | **Testar a política de AVX-512 de uma família (ligar/desligar)** | **`tests/test-avx512-policy.sh`**, **`make avx512-test`**, `docs/FAMILIES.md` § 5 |
 | **Testar a trava de instância única do gerador de ISO (sem gerar ISO)** | **`tests/test-iso-lock.sh`**, **`make iso-lock-test`** |
@@ -258,7 +294,7 @@ ai-cpu-os/
 | **Gravar a ISO num PENDRIVE (bootável)** | **`iso/write-pendrive.sh`**, `make pendrives` / `make pendrive` |
 | **Conferir uma ISO baixada sem ter xorriso** | **`iso/check-iso.sh`**, `make iso-check ISO=…` |
 | **Criar/conferir a ISO por uma interface web (sem decorar flags)** | **`webui/server.py`**, `make ui` (→ http://127.0.0.1:8787) |
-| **Entender a variante Ubuntu (autoinstall)** | **`iso/autoinstall/autoinstall.yaml`**, **`docs/ISO.md`** § 4.5 |
+| **Entender o instalador Ubuntu (autoinstall)** | **`iso/autoinstall/autoinstall.yaml`**, **`docs/ISO.md`** § 4.5 |
 | **Retomar/continuar depois de um tempo parado** | **`docs/JOURNAL.md`** (§ 1 retomada, § 5 threads abertas) |
 | Scripts principais                     | `build.sh`, `detect-hardware.sh`, `llama-build.sh` |
 | Famílias de CPU (ISA/march)            | `families/`                                  |
@@ -285,8 +321,9 @@ Estas regras são **obrigatórias**:
    (`INFO/WARN/ERROR`), idempotência, `--dry-run` e confirmação antes de
    comandos destrutivos (salvo `--yes`).
    *Exceção única:* scripts POSIX `sh` que rodam **dentro do instalador**
-   (caso de `iso/preseed/late-command.sh` — o `/bin/sh` do debian-installer é
-   dash, que não tem `pipefail`) usam `set -eu`. Isso é verificado pelo CI.
+   (caso de `iso/common/late-command.sh` — o `/bin/sh` do ambiente do
+   instalador é dash, que não tem `pipefail`) usam `set -eu`. Isso é
+   verificado pelo CI.
 8. Toda verificação de ISA deve consultar `/proc/cpuinfo` **em tempo de
    execução** — nunca assumir que uma flag existe.
 9. **OBRIGATÓRIO:** ao **concluir um marco** (ex.: um perfil validado em
@@ -332,8 +369,12 @@ Estas regras são **obrigatórias**:
     `docker/`, **verifique se a ISO continua coerente** (o `late-command.sh`
     copia o projeto inteiro; o `firstboot.sh` o executa). Ao mexer na ISO,
     atualize **`docs/ISO.md`** e o **Bloco M** de `docs/VALIDATION.md`.
-    **Base padrão = Ubuntu Server (autoinstall); Debian (preseed) é o caminho
-    legado.** Mudou um template? Rode `make iso-yaml` — o autoteste substitui os
+    **Base ÚNICA = Ubuntu Server (autoinstall).** O caminho **Debian/preseed
+    foi REMOVIDO** (ADR-001 em `docs/DECISIONS.md`): `--distro debian`
+    **aborta** com exit 2 citando o ADR, e o CI reprova se o diretório voltar.
+    Os scripts do instalador moram em `iso/common/` (não mais em
+    `iso/preseed/`). O runtime Debian (`build.sh`/`mods/`) continua suportado.
+    Mudou um template? Rode `make iso-yaml` — o autoteste substitui os
     marcadores e valida o `autoinstall.yaml` resultante com `yamllint` (o
     template isolado NÃO é YAML válido: `@` é reservado).
     **"Terminado" exige DUAS provas distintas**, e não confunda uma com a outra:
@@ -420,6 +461,36 @@ Estas regras são **obrigatórias**:
       dá para gerar ali e aponta o caminho do GitHub Actions — degradar com
       aviso explícito (Regra 13-a), nunca falhar em silêncio.
 
+17. **Identidade do sistema = papel (ADR-002 em `docs/DECISIONS.md`).**
+    O usuário/hostname padrão de uma ISO com papel concreto é
+    `inference` → `ai-inference` e `builder` → `ai-builder`. Precedência:
+    `--username`/`--hostname` explícitos **sempre** vencem; sem eles, o papel
+    concreto define; `--role auto` mantém `ai-cpu-os` e **avisa** (o papel só é
+    conhecido no 1º boot, então não dá para derivar a identidade no instalador).
+    Não renomeie usuário depois da instalação e não crie dois usuários para
+    “escolher depois”. A função é a identidade; o hardware continua sendo a
+    **família**.
+18. **`ai-talk` é transporte, não orquestrador (ADR-003, `docs/CHAT.md`).**
+    Invariantes obrigatórios:
+    - **Não é o `talk` do netkit.** Nada de `talkd`, UDP 517/518 ou protocolo
+      antigo; o componente é `talk/` + binário `ai-talk` (TCP 7331, JSON lines,
+      HMAC-SHA256).
+    - **Somente biblioteca padrão do Python 3.** Nada de `pip`, Matrix, MQTT,
+      IRC, broker ou serviço externo.
+    - **Mensagem é dado, nunca comando.** O `ai-talk` não executa shell; a
+      ponte opcional com o `llama-server` não executa tool calls vindas da rede.
+    - **Sem chave, não inicia** (fail closed). A chave não vai para o
+      repositório, para o log nem para o `.iso-config`; vai para
+      `/etc/ai-talk/fleet.key` com permissão restrita.
+    - **Air-gapped:** o código vai na ISO; nenhum passo de instalação/1º boot
+      baixa nada (Regra 13-b).
+    - **Falha do chat não derruba a inferência:** instalação/daemon degradam com
+      aviso e o `build.sh` continua (Regra 13-a).
+    - **O teto é de 15 nós** em malha completa (ADR-005). Acima disso, o
+      caminho é relay/hub — não “aumentar o teto” sem a bancada de 15 nós.
+    - **Teste offline no CI** (`tests/test-ai-talk.sh`) e, na fase 2, duas VMs
+      (Bloco R de `docs/VALIDATION.md`). Não declare o chat pronto sem os dois.
+
 ---
 
 ## 7. Próxima ação imediata
@@ -431,7 +502,46 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-18 (sessão #37)
+- **Data:** 2026-10-20 (sessão #42)
+- **O que mudou:** 🗑️ **ADR-001 executado: o caminho Debian da ISO foi
+  removido.** `iso/preseed/` saiu (os scripts compartilhados foram para
+  `iso/common/`), `--distro debian` **aborta** com exit 2 citando o ADR,
+  `iso/verify-iso.sh` ficou com uma base só e o CI ganhou guardas provados:
+  reprova se `preseed/` voltar ao `build-iso.sh`/`verify-iso.sh` ou se o
+  diretório reaparecer. O layout da mídia mudou: os templates agora vão para
+  **`/ai-cpu-os-boot/`** (era `/preseed/`). `make validate` **verde**
+  (ci-guards 93, ai-talk 30, webui 46, iso-lint OK). ⚠️ **Nenhuma ISO foi
+  gerada nem bootada depois da remoção** — a prova de comportamento continua
+  sendo a da sessão #21/#35 (antes da mudança).
+- **Data anterior:** 2026-10-20 (sessões #39–#41)
+- **O que mudou:** 💬 **O `ai-talk` saiu do papel: a F1 está implementada e
+  testada.** `talk/ai_talk.py` (somente stdlib) traz daemon + CLI com TCP 7331,
+  JSON lines, HMAC-SHA256 **por nó**, `ack` **depois do `fsync`**,
+  `TCP_NODELAY`, conexão persistente, espaçamento de **50 ms por par** (fila
+  de 256 com **exit 5**), dedupe de **8.192** IDs e **teto de 15 peers**.
+  `make talk-test` (30 asserções, loopback, sem root e sem rede externa) prova
+  a semântica de §6.7/§6.8 e entrou no `validate` e no CI. Antes disso, a
+  sessão #39 criou **`docs/DECISIONS.md`** e **`docs/CHAT.md`**, e a #40 fixou
+  **ADR-004** (latência/espaçamento/durabilidade) e **ADR-005** (teto de 15
+  nós). `--distro debian` emite aviso de depreciação. **Não há Debian
+  removido, identidade por papel, `talk/install.sh`, ISO com o chat, duas VMs
+  nem bancada de 15 nós.**
+- **Data anterior:** 2026-10-20 (sessão #39)
+- **O que mudou:** 🧭 **Preparação da fase “uma ISO, duas funções, uma
+  frota”** — sem implementar as três mudanças. Foram criados
+  **`docs/DECISIONS.md`** (ADR-001: base **única Ubuntu**, Debian/preseed
+  deprecado e remoção P0; ADR-002: identidade por papel
+  `ai-inference`/`ai-builder`; ADR-003: chat de frota **`ai-talk`**) e
+  **`docs/CHAT.md`** (contrato completo: TCP 7331, JSON lines, HMAC-SHA256,
+  Python stdlib, systemd, segurança, testes, fases e por que **não** usar o
+  `talk` do netkit). O `iso/build-iso.sh` passou a **avisar** que
+  `--distro debian` está deprecado; `make docs` e o CI passaram a exigir os
+  dois documentos. `STATE.md` § 6, `ROADMAP.md`, `JOURNAL.md` (sessão #39) e
+  `ARCHITECTURE.md`/`ISO.md`/READMEs foram atualizados. **Nada de código
+  Debian removido, nenhuma identidade implementada, nenhum `talk/` criado,
+  nenhuma ISO gerada.** ⚠️ O `main` já estava no commit `bf2117f` (sessão
+  #38), à frente deste arquivo; a preparação foi feita sobre esse estado.
+- **Data anterior:** 2026-10-18 (sessão #37)
 - **O que mudou:** 🖥️ **Primeira validação em HARDWARE FÍSICO** (não é mais só
   VM). Uma máquina real — **AMD A8-9600** (Excavator), Debian 13 — instalou a
   ISO sozinha, o 1º boot aplicou o ai-cpu-os (`status=ok`, família `generic`,

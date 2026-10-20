@@ -115,12 +115,10 @@ jobs:
           set -euo pipefail
           make iso-repo-test
 
-      # O verificador da ISO tem de ser DISTRO-AWARE. Ele so olhava o
-      # autoinstall para decidir se a fonte extra estava em uso, e numa ISO
-      # Debian (que usa preseed) isso reprovava uma ISO CORRETA — foi o
-      # "2 problema(s)" do run #10.
-      # (o `:` no nome tem de vir entre aspas: solto, quebra o YAML)
-      - name: "ISO (verificador distro-aware: autoinstall x preseed)"
+      # O verificador da ISO confere o CONTEUDO (nao boota) e agora tem uma
+      # base so. O teste cobre as falhas que ele tem de pegar e a recusa
+      # explicita do caminho Debian (ADR-001).
+      - name: "ISO (verificador de conteudo: autoinstall, uma base so)"
         run: |
           set -euo pipefail
           make iso-verify-test
@@ -150,6 +148,15 @@ jobs:
         run: |
           set -euo pipefail
           make ui-test
+
+      # O contrato do ai-talk (§6.7/§6.8 do docs/CHAT.md) provado em loopback:
+      # espaçamento de 50 ms por par, hello isento, fila com exit 5, dedupe,
+      # assinatura por nó e `ECONNREFUSED` em fail fast. Sem rede externa, sem
+      # root e sem dependência fora da stdlib.
+      - name: "ai-talk (chat da frota: contrato em loopback)"
+        run: |
+          set -euo pipefail
+          make talk-test
 
       # A trava de instância única do gerador de ISO, provada com `flock` de
       # verdade (dois processos). Existe porque um sintoma real ("mv: cannot
@@ -221,7 +228,7 @@ jobs:
         # Usa o MESMO alvo do Makefile que o `make validate` roda localmente:
         # um só lugar para manter, e o que passa aqui passa lá (foi um comando
         # duplicado que deixou passar a regressão do --iso-repo auto).
-        run: make iso-dry-run-both
+        run: make iso-dry-run
 
   # ---------------------------------------------------------------------------
   # Dry-run: prova que a orquestração funciona nos dois papéis sem alterar nada.
@@ -280,10 +287,11 @@ jobs:
             docs/HARDWARE.md docs/TUNING.md docs/TROUBLESHOOTING.md
             docs/TUTORIAL.md docs/CI.md docs/VALIDATION.md docs/ISO.md
             docs/JOURNAL.md
+            docs/DECISIONS.md docs/CHAT.md
             docs/IMPLANTAR-EM-OUTRO-PC.md
-            iso/build-iso.sh iso/preseed/ai-cpu-os.cfg
-            iso/preseed/late-command.sh iso/preseed/firstboot.sh
-            iso/preseed/ai-cpu-os-firstboot.service
+            iso/build-iso.sh
+            iso/common/late-command.sh iso/common/firstboot.sh
+            iso/common/ai-cpu-os-firstboot.service
             iso/autoinstall/autoinstall.yaml
             iso/verify-iso.sh iso/test-vm.sh
             iso/write-pendrive.sh
@@ -315,16 +323,17 @@ jobs:
             tests/test-iso-selection.sh
             tests/test-iso-repo-filter.sh
             tests/test-ci-guards.sh
-            tests/test-verify-iso-repo-distro.sh
+            tests/test-verify-iso-repo.sh
             tests/test-write-pendrive.sh
             tests/test-check-iso.sh
             tests/test-webui.sh tests/test-network-mod.sh
             tests/test-avx512-policy.sh
             tests/test-iso-lock.sh
             tests/test-iso-disk.sh
+            talk/ai_talk.py
+            tests/test-ai-talk.sh
             webui/server.py webui/index.html
             tests/fixtures/SHA256SUMS.ubuntu-24.04
-            tests/fixtures/SHA256SUMS.debian-13
             tests/fixtures/apt-cache-policy.txt
           )
           fail=0
@@ -387,20 +396,32 @@ jobs:
           grep -q '_(preencher)_' docs/VALIDATION.md
           grep -q 'Bloco F' docs/VALIDATION.md
           grep -q 'Template de relatório' docs/VALIDATION.md
-          # A ISO é o entregável final: o AGENTS precisa dizer isso, e os
-          # templates do preseed não podem perder os marcadores de substituição.
+          # A ISO é o entregável final e tem UMA base só (ADR-001).
           grep -qi 'entregável final' AGENTS.md
           grep -q 'build-iso.sh' AGENTS.md
-          grep -q '@@ROLE@@' iso/preseed/firstboot.sh
-          grep -q '@@FAMILY@@' iso/preseed/late-command.sh
-          grep -q 'late_command' iso/preseed/ai-cpu-os.cfg
-          grep -q 'firstboot-pending' iso/preseed/firstboot.sh
-          # A variante Ubuntu precisa do autoinstall na raiz da ISO e do
-          # flag de distro no gerador; se isso sumir, a ISO volta a ser só Debian.
+          grep -q '@@ROLE@@' iso/common/firstboot.sh
+          grep -q '@@FAMILY@@' iso/common/late-command.sh
+          grep -qE '^late-commands:' iso/autoinstall/autoinstall.yaml
+          grep -q 'ai-cpu-os-boot/late-command.sh' iso/autoinstall/autoinstall.yaml
+          grep -q 'firstboot-pending' iso/common/firstboot.sh
+          # A base é Ubuntu e só: autoinstall na raiz da ISO e `--distro`
+          # aceitando exclusivamente `ubuntu`. Se `--distro debian` voltar a
+          # funcionar sem passar pelo ADR-001, o projeto volta a ter duas ISOs.
           grep -q '@@STORAGE_LAYOUT@@' iso/autoinstall/autoinstall.yaml
           grep -q 'autoinstall' iso/autoinstall/autoinstall.yaml
           grep -q 'ubuntu' iso/build-iso.sh
           grep -q -- '--distro' iso/build-iso.sh
+          # Recusar o Debian e uma decisao de arquitetura, nao um esquecimento:
+          # o erro tem de citar o ADR-001 para quem chegar depois entender.
+          grep -q 'ADR-001' iso/build-iso.sh
+          if grep -q 'preseed/' iso/build-iso.sh; then
+            echo "::error file=iso/build-iso.sh::o caminho Debian (preseed) foi removido pelo ADR-001"
+            exit 1
+          fi
+          if [[ -d iso/preseed ]]; then
+            echo "::error file=iso/preseed::diretorio Debian removido pelo ADR-001 voltou"
+            exit 1
+          fi
           # As ferramentas de validação da ISO precisam continuar existindo e
           # conectadas: verificar sem bootar E bootar numa VM são etapas
           # diferentes e as duas têm de estar rastreáveis.
@@ -440,29 +461,28 @@ jobs:
           # de falha é silencioso (sobe sem modelo), então guardamos cada elo.
           grep -q -- '--iso-model' iso/build-iso.sh
           grep -q 'SUGGESTED_MODEL_URL' iso/build-iso.sh
-          grep -q 'MODEL_FILE' iso/preseed/late-command.sh
-          grep -q 'AI_MODEL_FILE' iso/preseed/firstboot.sh
+          grep -q 'MODEL_FILE' iso/common/late-command.sh
+          grep -q 'AI_MODEL_FILE' iso/common/firstboot.sh
           grep -q 'AI_MODEL_FILE' roles/inference/install.sh
           grep -q -- '--model-file' roles/inference/install.sh
           # O REPOSITÓRIO APT LOCAL na mídia é o último elo do air-gapped: sem
           # ele o alvo instala pacotes pela rede. Guardamos a geração do índice
-          # e os dois pontos de ligação (autoinstall e preseed).
+          # e o ponto de ligação (o autoinstall; o preseed saiu no ADR-001).
           grep -q -- '--iso-repo' iso/build-iso.sh
           grep -q 'expand_apt_local_block' iso/build-iso.sh
           grep -q 'dpkg-deb' iso/build-iso.sh
           grep -q 'apt-repo' iso/build-iso.sh
           grep -q '@@APT_LOCAL_SOURCES@@' iso/autoinstall/autoinstall.yaml
-          grep -q '@@APT_LOCAL_PRESEED@@' iso/preseed/ai-cpu-os.cfg
-          grep -q 'APT_REPO_PATH' iso/preseed/late-command.sh
+          grep -q 'APT_REPO_PATH' iso/common/late-command.sh
           grep -q 'apt-repo' iso/verify-iso.sh
           # A FONTE do llama.cpp na midia e o que torna o 1o boot offline: e o
           # passo mais demorado e o unico que ainda clonaria do GitHub. Guardamos
           # a flag, a corrente (late-command -> firstboot -> llama-build) e o
           # caminho manual (build.sh --llama-source, porque sudo limpa o env).
           grep -q -- '--iso-source' iso/build-iso.sh
-          grep -q 'llama-src' iso/preseed/late-command.sh
-          grep -q 'LLAMA_SRC' iso/preseed/late-command.sh
-          grep -q 'AI_LLAMA_SOURCE' iso/preseed/firstboot.sh
+          grep -q 'llama-src' iso/common/late-command.sh
+          grep -q 'LLAMA_SRC' iso/common/late-command.sh
+          grep -q 'AI_LLAMA_SOURCE' iso/common/firstboot.sh
           grep -q 'AI_LLAMA_SOURCE' llama-build.sh
           grep -q -- '--llama-source' build.sh
           grep -q -- '--model-file' build.sh
@@ -479,11 +499,10 @@ jobs:
           grep -q -- '--network' iso/build-iso.sh
           grep -q '^network_yaml_block()' iso/build-iso.sh
           grep -q '@@NETWORK_SECTION@@' iso/autoinstall/autoinstall.yaml
-          grep -q '@@NETWORK_PRESEED@@' iso/preseed/ai-cpu-os.cfg
           grep -q 'ai-cpu-os-netplan.yaml' iso/build-iso.sh
-          grep -q 'ai-cpu-os-netplan.yaml' iso/preseed/late-command.sh
-          grep -q '/target/etc/netplan/99-ai-cpu-os.yaml' iso/preseed/late-command.sh
-          grep -q '99-ai-cpu-os-disable-network.cfg' iso/preseed/late-command.sh
+          grep -q 'ai-cpu-os-netplan.yaml' iso/common/late-command.sh
+          grep -q '/target/etc/netplan/99-ai-cpu-os.yaml' iso/common/late-command.sh
+          grep -q '99-ai-cpu-os-disable-network.cfg' iso/common/late-command.sh
           grep -q 'NETWORK_MODE' iso/verify-iso.sh
           # A REDE TAMBEM TEM DE SER REPARAVEL no sistema ja instalado: uma ISO
           # nova nao conserta uma maquina que esta no chao. A mod `network` e o
@@ -538,7 +557,10 @@ jobs:
           grep -q '^iso_base_codename()' iso/build-iso.sh
           grep -qF 'want="$(iso_base_codename)"' iso/build-iso.sh
           grep -q '\.disk/info' iso/build-iso.sh
-          grep -qE 'ISO_REPO_ALLOW_MISMATCH -eq 0 && "\$DISTRO" == "ubuntu"' iso/build-iso.sh
+          grep -qF 'ISO_REPO_ALLOW_MISMATCH -eq 0' iso/build-iso.sh
+          # e o mismatch DEGRADA (ISO_REPO=none + aviso), nunca aborta: e
+          # default, e a Regra 13-a vale aqui como em qualquer lugar.
+          grep -q 'ISO_REPO="none"' iso/build-iso.sh
           grep -q 'iso-release-test' Makefile
           grep -q 'validate:.*iso-release-test' Makefile
           grep -q 'make iso-release-test' .github/workflows/validate.yml
@@ -565,17 +587,36 @@ jobs:
           # --- apenas DETECTADA e repassada pela cadeia (log enganoso).    ---
           grep -qF 'detectada na CPU e repassada pela cadeia' llama-build.sh
           grep -qF 'a CPU sugere' llama-build.sh
-          # --- A instalacao NAO pode PARAR quando nao ha internet ------------
-          # Tres telas interativas do d-i, medidas na sessao #38: espelho
-          # inacessivel, "Select and install software" falhando e DHCP sem
-          # gateway. A preseed tem de dispensar a rede.
-          grep -q '@@APT_OFFLINE_BLOCK@@' iso/preseed/ai-cpu-os.cfg
-          grep -q '@@PKGSEL_BLOCK@@' iso/preseed/ai-cpu-os.cfg
-          grep -q '^expand_apt_offline_block()' iso/build-iso.sh
-          grep -q 'apt-setup/use_mirror boolean false' iso/build-iso.sh
-          grep -q 'pkgsel/run_tasksel boolean false' iso/build-iso.sh
-          grep -q 'pkgsel/upgrade select none' iso/build-iso.sh
-          grep -q 'apt-setup/continue boolean true' iso/preseed/ai-cpu-os.cfg
+          # --- A INSTALACAO NAO PODE PARAR PEDINDO ENTRADA ----------------
+          # O caminho Debian (preseed) saiu no ADR-001. O que ele ensinou
+          # continua valendo como CLASSE de bug: o instalador automatico
+          # tem de comecar sozinho e nao parar em tela interativa. No
+          # Ubuntu/Subiquity os equivalentes sao outros, e cada um tem guarda.
+          #
+          #  (a) o Subiquity so entra em modo automatico se a cmdline do
+          #      GRUB pedir `autoinstall`; sem isso ele abre o instalador
+          #      INTERATIVO e a VM fica parada esperando teclado.
+          grep -qF 'autoinstall quiet' iso/build-iso.sh
+          #  (b) o autoinstall tem de estar na RAIZ da ISO, ao lado de
+          #      `casper/` — e assim que o Subiquity o encontra na midia.
+          grep -qF '${UBUNTU_STAGE}/autoinstall.yaml" /autoinstall.yaml' iso/build-iso.sh
+          grep -qF '/autoinstall.yaml' iso/verify-iso.sh
+          #  (c) a instalacao tem de REINICIAR sozinha no fim: sem
+          #      `shutdown: reboot` a maquina para no "Reboot Now" e o
+          #      1o boot nunca acontece.
+          grep -qE '^shutdown:[[:space:]]*reboot' iso/autoinstall/autoinstall.yaml
+          #  (d) nada de rede no instalador: `refresh-installer.update: true`
+          #      baixa o instalador novo, e `geoip: true` faz consulta remota.
+          #      Os dois reabrem telas numa ISO air-gapped (Regra 13-b).
+          grep -qE '^[[:space:]]+update:[[:space:]]*false' iso/autoinstall/autoinstall.yaml
+          grep -qE '^[[:space:]]+geoip:[[:space:]]*false' iso/autoinstall/autoinstall.yaml
+          #  (e) `deb cdrom:` no sources.list do alvo: depois da instalacao
+          #      a midia nao existe e TODO `apt-get update` falha. O
+          #      late-command tem de remover a linha.
+          grep -qF 'deb(-src)?[[:space:]]+cdrom:' iso/common/late-command.sh
+          # e o verificador tem de cobrar o caminho NOVO dos templates na
+          # midia (era /preseed/... antes do ADR-001).
+          grep -qF 'ai-cpu-os-boot/late-command.sh' iso/verify-iso.sh
           # O repositório da mídia precisa de um CODENAME de verdade no Release:
           # com './' o late-command recusava por "outra release" e o alvo
           # ficava sem a fonte local (o 1º boot dependia de rede).
@@ -589,8 +630,38 @@ jobs:
           # desligamento logo depois deixa arquivos com 0 byte — `llama-server`,
           # `ai-server.service` (unit vazio = "masked") e `.firstboot-status`
           # (visto na sessao #29, ao inspecionar o disco instalado).
-          grep -q '^sync' iso/preseed/firstboot.sh
+          grep -q '^sync' iso/common/firstboot.sh
           grep -q 'descarregarem o disco' iso/test-vm.sh
+          #  (f) no sistema instalado /dev/console e o ULTIMO `console=` da
+          #      cmdline, entao o marcador do 1o boot nunca chegava ao serial:
+          #      o test-vm.sh esperava para sempre. O firstboot.sh tem de
+          #      espelhar no ttyS0.
+          grep -q '/dev/ttyS0' iso/common/firstboot.sh
+          grep -q 'ai-cpu-os/firstboot' iso/common/firstboot.sh
+          grep -q 'ai-cpu-os/iso-late' iso/common/late-command.sh
+          grep -q 'aplicação concluída com sucesso' iso/test-vm.sh
+          #      Espelhar o build INTEIRO no ttyS0 trava o console da VM (medido).
+          if grep -qF 'tee -a "$LOG" > /dev/ttyS0' iso/common/firstboot.sh; then
+            echo "::error file=iso/common/firstboot.sh::nao espelhe o build inteiro no ttyS0 (trava o console)"
+            exit 1
+          fi
+          #  (g) sem `sshd` o alvo instalado fica INACESSIVEL (varredura de
+          #      portas numa maquina real: 65535 em RST, nenhum listener).
+          #      O autoinstall pede `ssh.install-server`, e o late-command
+          #      VERIFICA e conserta — as duas coisas precisam existir.
+          grep -qF 'install-server: true' iso/autoinstall/autoinstall.yaml
+          grep -q 'openssh-server' iso/common/late-command.sh
+          grep -q 'LEIA-SSH.md' iso/common/late-command.sh
+          grep -q 'GARANTE o SSH' iso/verify-iso.sh
+          grep -q '^ensure_ssh()' build.sh
+          grep -qE '^[[:space:]]+ensure_ssh$' build.sh
+          #  (h) `sudo` tem de estar nos pacotes: o usuario da ISO esta no
+          #      grupo sudo e, com o root bloqueado, sem ele nao ha acesso
+          #      administrativo.
+          if ! grep -qE '^EXTRA_PACKAGES="[^"]*\bsudo\b' iso/build-iso.sh; then
+            echo "::error file=iso/build-iso.sh::EXTRA_PACKAGES precisa incluir 'sudo'"
+            exit 1
+          fi
           # O llama.cpp RENOMEIA flags entre versões: um `--no-mmap` fixo na
           # unit derrubou o servico em loop com "invalid argument" na primeira
           # ISO cujo ai-server subiu de verdade (sessao #29). A unit tem de
@@ -602,84 +673,6 @@ jobs:
             echo "::error file=roles/inference/ai-server.service::--no-mmap fixo (use LLAMA_EXTRA_ARGS + deteccao)"
             exit 1
           fi
-          # ISO DEBIAN: a instalacao automatica tem de comecar SOZINHA. Cada
-          # elo abaixo foi descoberto bootando a ISO Debian pela primeira vez
-          # (sessao #35) e o modo de falha e sempre o mesmo: a VM fica parada,
-          # o disco nao e tocado e o serial nao mostra erro.
-          #  (a) `prompt 1` mostra "boot:" e ESPERA UMA TECLA (o timeout nao
-          #      vale nesse modo) -> o instalador nunca inicia;
-          grep -qF 's/^[[:space:]]*prompt[[:space:]].*/prompt 0/' iso/build-iso.sh
-          #  (b) o d-i le o preseed do INITRD (`S30initrd-preseed` faz
-          #      `if [ -e /preseed.cfg ]`), nao do /cdrom montado depois ->
-          #      o preseed tem de ser injetado no initramfs;
-          grep -q '^inject_preseed_initrd()' iso/build-iso.sh
-          grep -qE '^[[:space:]]+inject_preseed_initrd$' iso/build-iso.sh
-          grep -q 'preseed/file=/preseed.cfg' iso/build-iso.sh
-          #  (c) o localechooser roda ANTES de a midia ser montada, entao
-          #      idioma/teclado tem de ir na cmdline (env2debconf);
-          grep -q '^debian_locale_args()' iso/build-iso.sh
-          if [[ "$(grep -cF '$(debian_locale_args)' iso/build-iso.sh)" -lt 3 ]]; then
-            echo "::error file=iso/build-iso.sh::as 3 entradas Debian precisam de debian_locale_args"
-            exit 1
-          fi
-          #  (d) a pergunta REAL e `localechooser/languagelist`, e ela so e
-          #      pulada se o idioma estiver nas ESCOLHAS da lista — em console
-          #      serial a lista e nivel 0 (so 'en'), entao responder so
-          #      `debian-installer/language` NAO basta e a instalacao trava.
-          grep -qE '^d-i[[:space:]]+localechooser/languagelist[[:space:]]+select' iso/preseed/ai-cpu-os.cfg
-          grep -q '@@LANG@@' iso/preseed/ai-cpu-os.cfg
-          grep -q 'localechooser/languagelist' iso/verify-iso.sh
-          #  (e) `grub-installer/bootdev` e pergunta CRITICA e vem DEPOIS de o
-          #      sistema inteiro estar copiado: sem resposta o d-i para em
-          #      "[!!] Configurando grub-pc" esperando o dispositivo.
-          grep -q '@@GRUB_BOOTDEV@@' iso/preseed/ai-cpu-os.cfg
-          grep -q '^grub_bootdev_line()' iso/build-iso.sh
-          grep -q 'grub-installer/bootdev' iso/verify-iso.sh
-          #  (f) o instalador grava `deb cdrom:[Debian ...]` no sources.list do
-          #      alvo; depois da instalacao a midia nao existe e TODO
-          #      `apt-get update` falha — o 1o boot do papel inference morria
-          #      com rc=100 antes de instalar qualquer dependencia.
-          grep -qF 'deb(-src)?[[:space:]]+cdrom:' iso/preseed/late-command.sh
-          grep -q 'cdrom:' iso/verify-iso.sh
-          #  (g) o `20final-message` do d-i PERGUNTA a nota final e trata um
-          #      "back" como exit 10: o finish-install aborta e a instalacao
-          #      PARA NO MENU em vez de reiniciar (console serial = sempre).
-          grep -q '20final-message' iso/preseed/late-command.sh
-          grep -q '20final-message' iso/verify-iso.sh
-          #  (g2) o patch do 20final-message e so cinto de seguranca (o udeb e
-          #       desempacotado depois do hook 07preseed). Quem reinicia de
-          #       fato e o `reboot -f` no fim do late-command; sem ele a VM
-          #       fica parada no menu principal com a instalacao pronta.
-          grep -qE '^[[:space:]]*reboot -f' iso/preseed/late-command.sh
-          grep -q 'reinicia explicitamente' iso/verify-iso.sh
-          #  (g3) no sistema instalado /dev/console e o ULTIMO `console=` da
-          #       cmdline (o d-i grava `console=ttyS0 console=tty1`), entao o
-          #       marcador do 1o boot nunca chegava ao serial: o test-vm.sh
-          #       esperava para sempre. O firstboot.sh tem de espelhar no ttyS0.
-          grep -q '/dev/ttyS0' iso/preseed/firstboot.sh
-          grep -q 'escreve o marcador no console serial' iso/verify-iso.sh
-          #       Espelhar o build INTEIRO no ttyS0 trava o console da VM (medido).
-          if grep -qF 'tee -a "$LOG" > /dev/ttyS0' iso/preseed/firstboot.sh; then
-            echo "::error file=iso/preseed/firstboot.sh::nao espelhe o build inteiro no ttyS0 (trava o console)"
-            exit 1
-          fi
-          #  (g4) sem `sshd` o alvo instalado fica INACESSIVEL (varredura de
-          #       portas numa maquina real: 65535 em RST, nenhum listener).
-          #       O pedido ao instalador falha em silencio sem rede; o
-          #       late-command tem de VERIFICAR e consertar.
-          grep -q 'openssh-server' iso/preseed/late-command.sh
-          grep -q 'LEIA-SSH.md' iso/preseed/late-command.sh
-          grep -q 'GARANTE o SSH' iso/verify-iso.sh
-          grep -q '^ensure_ssh()' build.sh
-          grep -qE '^[[:space:]]+ensure_ssh$' build.sh
-          #  (h) `sudo` NAO vem na instalacao padrao do Debian: sem ele o
-          #      usuario da ISO (grupo sudo) nao administra nada, e com o root
-          #      bloqueado o sistema fica sem acesso administrativo.
-          if ! grep -qE '^EXTRA_PACKAGES="[^"]*\bsudo\b' iso/build-iso.sh; then
-            echo "::error file=iso/build-iso.sh::EXTRA_PACKAGES precisa incluir 'sudo' (Debian nao o traz)"
-            exit 1
-          fi
-          grep -q 'pkgsel/include' iso/verify-iso.sh
           grep -q 'LLAMA_EXTRA_ARGS' roles/inference/ai-server.service
           grep -qE '^[[:space:]]*detect_extra_args\(\)' roles/inference/install.sh
           grep -q -- '--load-mode' roles/inference/install.sh
@@ -689,13 +682,21 @@ jobs:
             echo "::error file=roles/inference/shell-ia.py::devolve a linha do protocolo como resposta final"
             exit 1
           fi
+          # O workflow da ISO NAO pode passar `DISTRO=` ao make: a variavel
+          # deixou de existir (ADR-001) e um override silencioso geraria a
+          # midia sem ninguem perceber. `make` NAO reclama de variavel extra.
+          if grep -qE '\bISO_DISTRO\b|DISTRO="?\$' .github/workflows/iso.yml; then
+            echo "::error file=.github/workflows/iso.yml::DISTRO voltou (variavel removida pelo ADR-001)"
+            exit 1
+          fi
+          grep -q -- '--distro ubuntu' .github/workflows/iso.yml
           # O dry-run dos DOIS caminhos da ISO tem de ser um alvo do Makefile, e
           # o CI tem de CHAMAR esse alvo (e nao repetir o comando). Foi um
           # comando duplicado que deixou passar a regressao do --iso-repo auto:
           # o CI falhava e o `make validate` local passava.
-          grep -q 'iso-dry-run-both' Makefile
-          grep -q 'validate:.*iso-dry-run-both' Makefile
-          grep -q 'make iso-dry-run-both' .github/workflows/validate.yml
+          grep -q 'iso-dry-run' Makefile
+          grep -q 'validate:.*iso-dry-run' Makefile
+          grep -q 'make iso-dry-run' .github/workflows/validate.yml
           # A escolha da ISO oficial no SHA256SUMS. Mesmo trio do dry-run, pelo
           # MESMO motivo: a geracao da ISO Ubuntu morria com `exit code 22`
           # (404 do curl) porque o SHA256SUMS do Ubuntu marca o modo binario
@@ -777,10 +778,14 @@ jobs:
             exit 1
           fi
           grep -q 'release_too_big' .github/workflows/iso.yml
-          # O verificador TEM de escolher pela distro: a preseed tem o seu
-          # proprio marcador (apt-setup/local0) e nao pode ser cobrada pelo
-          # autoinstall (foi o falso positivo do run #10).
-          grep -q 'apt-setup/local0/repository' iso/verify-iso.sh
+          # O verificador so tem UMA base (ADR-001) e precisa cobrar dela o
+          # que ainda importa: o autoinstall na raiz da ISO e a recusa
+          # explicita do caminho Debian.
+          grep -q 'ADR-001' iso/verify-iso.sh
+          if grep -q 'apt-setup/local0' iso/verify-iso.sh; then
+            echo "::error file=iso/verify-iso.sh::ainda confere preseed (caminho Debian removido pelo ADR-001)"
+            exit 1
+          fi
           # GRAVADOR DE PENDRIVE: as travas que impedem gravar no disco errado
           # nao podem sumir, e a gravacao nao pode perder a verificacao. Cada
           # uma destas linhas e uma protecao real contra apagar a maquina.
@@ -806,6 +811,26 @@ jobs:
           grep -q 'ui-test' Makefile
           grep -q 'validate:.*ui-test' Makefile
           grep -q 'make ui-test' .github/workflows/validate.yml
+          # CHAT DA FROTA (ai-talk): o teste offline precisa rodar no CI e ser
+          # chamado pelo alvo `validate` (corolario da Regra 13-a: comando
+          # duplicado entre CI e make diverge e o local passa enquanto o CI cai).
+          grep -q 'talk-test' Makefile
+          grep -q 'validate:.*talk-test' Makefile
+          grep -q 'make talk-test' .github/workflows/validate.yml
+          # Invariantes do ADR-003/005 que nao podem sumir do codigo:
+          grep -q 'MAX_PEERS = 15' talk/ai_talk.py
+          grep -q 'compare_digest' talk/ai_talk.py
+          grep -q 'TCP_NODELAY' talk/ai_talk.py
+          grep -q 'os.fsync' talk/ai_talk.py
+          # O valor importa: 1024 IDs não cobrem o retry de 9 s a 280 msg/s.
+          grep -q '"dedupe_window": 8192' talk/ai_talk.py
+          # Sem chave, nao inicia (fail closed) e chave frouxa e recusada.
+          grep -q 'stat.S_IROTH' talk/ai_talk.py
+          # Biblioteca padrao: nenhum import de terceiro no ai-talk.
+          if grep -Eq '^(import|from) +(requests|yaml|numpy|zmq|paho|twisted)' talk/ai_talk.py; then
+            echo "::error file=talk/ai_talk.py::import de terceiro (o ai-talk usa so stdlib)"
+            exit 1
+          fi
           # A lista branca de acoes e o que impede "rode este comando pra mim":
           # a UI so consegue disparar alvos que existem neste dicionario.
           grep -q '^ACTIONS = {' webui/server.py

@@ -1,7 +1,7 @@
 # ROADMAP — ai-cpu-os
 
 > Documento vivo. Atualizado a cada mudança de estado.
-> **Última atualização:** 2026-10-12
+> **Última atualização:** 2026-10-20
 
 Legenda de status: ✅ Concluído · 🔄 Em Progresso · ⏳ Planejado · 💡 Ideia
 
@@ -78,7 +78,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | **`make ci-guards-test`** — `tests/test-ci-guards.sh`: planta cada violação numa cópia temporária e **exige** que o job falhe (14 casos, incluindo árvore limpa e a meta-guarda) | 2026-10-12 | 2026-10-12 |
 | **Falha intermitente de rede virava "pacote ausente"**: `Acquire::Retries` + **segunda tentativa só dos ausentes** (`repo_missing_packages`), custando segundos em vez de repetir 330 MB | 2026-10-12 | 2026-10-12 |
 | **O `verify-iso.sh` tinha viés de distro**: procurava o repo em uso só no `/autoinstall.yaml` e reprovava uma ISO **Debian correta** (run #10). Agora é **distro-aware** (autoinstall × preseed) | 2026-10-12 | 2026-10-12 |
-| **`make iso-verify-test`** — `tests/test-verify-iso-repo-distro.sh`: prova os dois caminhos do verificador e **reprova o verificador antigo** (bug provado, não suposto) | 2026-10-12 | 2026-10-12 |
+| **`make iso-verify-test`** — `tests/test-verify-iso-repo.sh`: prova os dois caminhos do verificador e **reprova o verificador antigo** (bug provado, não suposto) | 2026-10-12 | 2026-10-12 |
 | **Dependências implícitas do runner** (`openssl`, `gzip`, `ca-certificates`) passaram a ser instaladas pelo workflow — descobertas reproduzindo o build num container `ubuntu:24.04` limpo | 2026-10-12 | 2026-10-12 |
 | O passo de **diagnóstico** do `iso.yml` passou a capturar `[FAIL]`/`[erro]` do verificador (antes só via `[ERROR]`: entregava o sintoma sem a causa) | 2026-10-12 | 2026-10-12 |
 | **`iso/write-pendrive.sh`** — grava a ISO num pendrive com **9 travas** (recusa o disco com `/`, não-removível sem `--allow-internal`, não-disco-inteiro, partição montada; exige `CD001`, espaço e o nome do alvo; **lê de volta** com `cmp -n`) + `make pendrives`/`make pendrive` | 2026-10-14 | 2026-10-14 |
@@ -115,6 +115,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 
 | Item                                                        | Início     | Nota                                                        |
 |-------------------------------------------------------------|------------|-------------------------------------------------------------|
+| 🧭 **Simplificação: uma ISO Ubuntu + identidade por papel + `ai-talk`** | 2026-10-20 | Decisões em [`DECISIONS.md`](DECISIONS.md) (ADR-001 a ADR-005) e contrato em [`CHAT.md`](CHAT.md). ✅ **P2 (F1 do chat) feito**: `talk/ai_talk.py` + `make talk-test` (30 asserções). Pendem P0 (Debian), P1 (identidade), P3 (ISO/duas VMs) e P4 (bancada de 15 nós). |
 | Validação em hardware real (Xeon E5-2680 v4, família `intel-broadwell`)      | 2026-10-07 | Aguardando acesso ao servidor físico para rodar o smoke-test. **Parcial:** o fluxo já foi validado em metal numa 3ª máquina (A8-9600) — ver `STATE.md` § 3.6 |
 | Validação em hardware real (Ryzen 5 3500X, família `amd-zen2`)              | 2026-10-07 | Aguardando build da imagem + teste do registry/Gitea        |
 | Medição de baseline vs. pós-tuning com `llama-bench`        | 2026-10-07 | ✅ **Primeira medição feita em metal** (A8-9600: pp64 17,05 · tg32 10,40 t/s). Falta o **antes × depois** para medir o ganho do tuning e as máquinas de referência |
@@ -122,7 +123,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 | Executar o protocolo `docs/VALIDATION.md` (blocos A–L) | 2026-10-07 | Roteiro preenchível pronto; **resultados pendentes** |
 | ~~🎯 Construir e bootar a ISO de instalação numa VM~~ (Bloco M, Ubuntu) | 2026-10-07 | ✅ **FEITO na sessão #21** (2026-10-13): ISO gerada + `verify-iso` PASS=41 + `test-vm.sh` exit 0 (instalou + 1º boot aplicou). Ver `STATE.md` § 3.3 |
 | ~~ISO em base Ubuntu Server~~ (`--distro ubuntu` + autoinstall/Subiquity) | 2026-10-12 | ✅ **Executada contra uma ISO real (sessão #21).** |
-| ~~ISO em base Debian~~ (`--distro debian` + preseed) | 2026-10-12 | ✅ **EXECUTADA na sessão #35 (2026-10-18)**: instala, reinicia e o 1º boot aplica (VM qemu/KVM). Falta o modo **air-gapped** nessa distro |
+| ~~ISO em base Debian~~ (`--distro debian` + preseed) | 2026-10-12 | ✅ **EXECUTADA na sessão #35** (VM) e na #37 (metal). ⚠️ **DEPRECADA em 2026-10-20 (ADR-001):** não perseguir o air-gapped nessa distro; o caminho será **removido**. |
 | 🔴 **ISO em HARDWARE FÍSICO** (Xeon e Ryzen) | 2026-10-13 | O caminho funciona em VM; falta no hardware alvo (Blocos A–O) |
 | 🟡 **Rede do alvo pós-instalação** (Bloco M.5-b) | 2026-10-17 | ✅ **PROVADO EM VM (sessão #33):** o alvo pegou IP por DHCP sozinho (`DHCPv4 address 10.0.2.15/24 … acquired`), o netplan ficou intacto, o cloud-init desligado e o **SSH funcionou**. Falta o modo `static`, o reboot de persistência e o hardware físico |
 | **Flags do llama.cpp mudam entre versões** | 2026-10-17 | Bug real (sessão #33): `--no-mmap` foi removido do upstream e o `ai-server` entrava em loop. A unit usa `${LLAMA_EXTRA_ARGS}` e o `install.sh` detecta a sintaxe no binário |
@@ -134,15 +135,40 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 ## ⏳ Planejado
 
 ### Prioridade Alta
-- [x] **🎯 Gerar e bootar o caminho DEBIAN** (`--distro debian`: preseed +
-      `apt-setup/local0` + `mtools`/`isolinux`) — ✅ **#35** (instalou, reiniciou
-      e o 1º boot aplicou; ver `STATE.md` § 3.4).
+- [x] **P0 — Remover o caminho Debian da ISO** (ADR-001) — ✅ **FEITO
+      (sessão #42):** scripts compartilhados em `iso/common/`, `iso/preseed/`
+      apagado, `verify-iso.sh`/`Makefile`/CI/`webui/`/testes limpos e
+      `--distro debian` **aborta com exit 2** citando o ADR. `make validate`
+      verde (`ci-guards` 93). Ver `STATE.md` § 3.9.
+- [ ] **P5 — Gerar e bootar uma ISO Ubuntu depois da remoção do Debian** —
+      a dívida que a P0 deixou: o `--dry-run` e o `--check-templates` passam,
+      mas **não** há boot desde então (Regra 13). *(início previsto: pode ser
+      feito junto com a P3)*
+- [ ] **P1 — Identidade do sistema derivada do papel** (ADR-002) —
+      `inference`→`ai-inference`, `builder`→`ai-builder`, `auto`→
+      `ai-cpu-os` + aviso; `--username`/`--hostname` explícitos vencem;
+      `tests/test-role-identity.sh` + `make identity-test`. *(próxima sessão —
+      é o topo da fila)*
+- [x] **P2 — `ai-talk` fase 1** (ADR-003/004/005, [`CHAT.md`](CHAT.md)) —
+      ✅ **FEITO (sessão #41):** `talk/ai_talk.py` (stdlib) + CLI + **30
+      asserções** em loopback (`make talk-test`, no `validate` e no CI).
+      HMAC por nó, `ack` após `fsync`, espaçamento de 50 ms, fila 256 com
+      exit 5, dedupe 8.192 e teto de 15 peers.
+- [ ] **P3 — `ai-talk` fase 2/3** — ISO + unit + etapa 2.5 do `build.sh` +
+      teste de duas VMs + ponte opcional com o `llama-server` (sem executar
+      comandos remotos). *(início previsto: a definir)*
+- [ ] **P4 — validar o teto de 15 nós** — bancada de 15 containers
+      (`CHAT.md` §13.5): 14 conexões por nó, broadcast em ~2 RTTs, p99 ≤ 10 ms
+      com 280 msg/s de fundo. Se não couber, entra **relay/hub** (ADR-005).
+      *(início previsto: depois do P3)*
+- [x] ~~**🎯 Gerar e bootar o caminho DEBIAN** (`--distro debian`: preseed +
+      `apt-setup/local0` + `mtools`/`isolinux`)~~ — feito em **#35** (instalou,
+      reiniciou, 1º boot aplicou) e depois **removido** pelo ADR-001 (#42).
 - [x] **🎯 Gerar a ISO de verdade (Ubuntu)** e rodar o `verify-iso.sh` — ✅ #21.
 - [x] **🎯 Bootar a ISO em VM** (`iso/test-vm.sh`) — ✅ #21 (instalou + 1º boot).
 - [x] **Validar o caminho `--serial-console`** num boot real — ✅ #21 (marcadores
       no console serial, com o fix do `/dev/console`).
-- [ ] **Validar o boot UEFI** (`make iso-vm VM_ARGS="--boot-mode uefi"`) e o
-      `md5sum.txt` regenerado (Debian).
+- [ ] **Validar o boot UEFI** (`make iso-vm VM_ARGS="--boot-mode uefi"`).
 - [ ] **Repetir a ISO em hardware físico** (Xeon E5-2680 v4 e Ryzen 5 3500X):
       instalar, ver o 1º boot e medir. Bloco M do `VALIDATION.md`.
 - [ ] **Fechar o resíduo air-gapped** (download do UI do llama.cpp no build —
@@ -207,6 +233,9 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 
 | Data       | Mudança                                                        |
 |------------|----------------------------------------------------------------|
+| 2026-10-20 | 🧭 **Fase de simplificação aberta (sessão #39):** uma ISO **Ubuntu** (ADR-001), identidade por papel (ADR-002) e chat de frota **`ai-talk`** (ADR-003). Só decisões/desenho; implementação P0–P3 pendente. |
+| 2026-10-20 | 💬 **Contrato do `ai-talk` fechado (sessão #40):** **ADR-004** (50 ms entre `msg` do mesmo par, fila 256 com exit 5, p99 ≤ 10 ms, `fsync` por mensagem) e **ADR-005** (**teto de 15 nós** em malha completa, chave por nó). Corrigido o pior caso de ack (9 s) e adicionado `connect_timeout`. |
+| 2026-10-20 | 💬 **`ai-talk` F1 implementado (sessão #41):** `talk/ai_talk.py` + `tests/test-ai-talk.sh` (**30 asserções**, sem root e sem rede externa), `make talk-test` no `validate` e no CI; `ci-guards` 89 → 98. Faltam F2 (ISO/duas VMs), F3 (ponte) e P4 (bancada de 15 nós). |
 | 2026-10-16 | 🧬 **14 famílias** (Xeon Scalable v5–v9/Xeon 6 P + `amd-zen5`) e **AVX-512 como padrão** nas famílias que o têm (política `auto`, decisão do dono; `--no-avx512` para comparar com AVX2). |
 | 2026-10-18 | ⚡ **A ISO passou a instalar sem internet** (sessão #38): as 3 telas do d-i que paravam a instalação foram eliminadas e o `Release` do repositório local ganhou o codename real (com `./` o repo da mídia era descartado). Provado em VM isolada. |
 | 2026-10-18 | 🖥️ **Primeira validação em hardware físico** (sessão #37): A8-9600 + Debian 13, instalação automática, 1º boot sem rede (tarball local), tuning persistente, **SSH sobrevivendo ao reboot** e o **primeiro `llama-bench`** do projeto. As máquinas de referência seguem pendentes. |

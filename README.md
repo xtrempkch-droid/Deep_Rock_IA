@@ -398,6 +398,13 @@ cd .. && rm -rf Deep_Rock_IA
 > 🎯 **Este é o objetivo final do projeto:** uma **ISO de instalação** que já
 > traz tudo isso embutido — você dá boot, a instalação é automática e o sistema
 > **nasce afinado**. Sem clonar, sem rodar script.
+>
+> **Base única:** a ISO é **Ubuntu Server** (ADR-001). O caminho Debian foi
+> **removido** — `--distro debian` agora **aborta** com uma mensagem que aponta
+> o [`docs/DECISIONS.md`](docs/DECISIONS.md).
+> A **identidade pelo papel** (`ai-inference`/`ai-builder`) e o **chat da frota
+> `ai-talk`** estão **planejados**; veja [`docs/DECISIONS.md`](docs/DECISIONS.md)
+> e [`docs/CHAT.md`](docs/CHAT.md).
 
 ```bash
 # Gerar a ISO (precisa de xorriso: sudo apt install -y xorriso curl)
@@ -467,16 +474,17 @@ Como funciona, em três linhas:
 >
 > 💡 **A ISO já foi gerada e bootada numa VM** (Ubuntu Server 24.04, sessão #21):
 > instalou sozinha e o 1º boot aplicou o ai-cpu-os, sem rede. O que ainda **não**
-> foi validado (`docs/ISO.md` § 6): o caminho **Debian**, o boot **UEFI** e tudo
-> em **hardware físico**. O checklist do § 9 tem o caminho completo.
+> foi validado (`docs/ISO.md` § 6): o boot **UEFI** e tudo em **hardware
+> físico**. O checklist do § 9 tem o caminho completo.
 >
 > 💡 **A ISO APAGA o disco** indicado em `--disk`. Teste em máquina virtual
 > **primeiro**, sempre.
 >
 > ⚠️ **Estado atual:** a ISO **já foi gerada e bootada numa VM** (Ubuntu Server
 > 24.04, sessão #21) com o 1º boot aplicando o ai-cpu-os **sem rede**. O que
-> ainda **não** foi validado: o caminho **Debian**, o boot **UEFI** e qualquer
-> **hardware físico**. Detalhes em [`docs/ISO.md`](docs/ISO.md) § 6.
+> ainda **não** foi validado: o boot **UEFI** e qualquer **hardware físico**.
+> E, desde a remoção do caminho Debian (sessão #42), **nenhuma ISO foi gerada
+> nem bootada de novo**. Detalhes em [`docs/ISO.md`](docs/ISO.md) § 6.
 
 ### Passo final: gravar num pendrive (bootável)
 

@@ -231,12 +231,19 @@ sempre que resolver um problema real (regra do `AGENTS.md`).
 
 ## ISO / Remasterização
 
+> 🗑️ **Nota (sessão #42):** os itens marcados **HISTÓRICO** descrevem o caminho
+> **Debian/preseed**, removido no **ADR-001**. Não há nada para consertar ali: o
+> texto fica porque o *modo de falha* (instalador automático que para pedindo
+> entrada) continua sendo a classe de bug a evitar no caminho Ubuntu.
+
 ### ⚠️ SINALIZADO: a instalação automática pode não acontecer
 
-> **Estado:** o **Modo 1 está RESOLVIDO** (2026-10-16, sessão #31). Os modos
-> **2 (UEFI)** e **3 (Debian)** continuam **abertos**. O gatilho do autoinstall
-> foi auditado inteiro e **nenhum defeito novo foi confirmado** (sessão #30).
-> Abaixo: o que **está** provado, o que foi corrigido e o que **não** foi.
+> **Estado:** o **Modo 1 está RESOLVIDO** (2026-10-16, sessão #31). O **Modo 2
+> (UEFI)** continua **aberto**. O **Modo 3 (Debian)** deixou de existir: o
+> caminho foi **removido** no ADR-001 (sessão #42) — o texto fica como
+> histórico. O gatilho do autoinstall foi auditado inteiro e **nenhum defeito
+> novo foi confirmado** (sessão #30). Abaixo: o que **está** provado, o que foi
+> corrigido e o que **não** foi.
 
 **Evidência (lida da ISO oficial 24.04.5 por **HTTP Range**, sem baixar 3 GB):**
 
@@ -278,11 +285,11 @@ trouxer menu próprio embutido, o UEFI sobe a entrada 0 (interativa) e a
 instalação automática **não acontece, sem erro nenhum**.
 *Como confirmar:* `bash iso/test-vm.sh --iso … --boot-mode uefi --yes` (precisa de `ovmf`).
 
-**Modo 3 — Debian/preseed nunca foi executado.** O caminho `--distro debian`
-(`isolinux` + `preseed/file=`) **nunca foi bootado** — só o Ubuntu foi.
-*Auditado e **descartado** como bug:* o `prompt 1` que o `patch_isolinux`
-escreve **não** desliga o `timeout` (a doc do syslinux diz que `PROMPT` **não**
-cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout).
+**Modo 3 — Debian/preseed. 🗑️ NÃO EXISTE MAIS (ADR-001, sessão #42).** O
+caminho `--distro debian` (`isolinux` + `preseed/file=`) chegou a ser executado
+em VM (#35) e em metal (#37) e depois foi **removido**: hoje `--distro debian`
+aborta com `exit 2` citando o ADR. O que se aprendeu com ele — *instalador
+automático que para pedindo entrada* — virou guarda no caminho Ubuntu.
 
 ### O build da ISO morre com `exit code 22` (e nenhuma mensagem)
 
@@ -296,8 +303,8 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
   nome (`*ubuntu-24.04.5-live-server-amd64.iso`), como faz o `md5sum -b`. Sem
   remover o `*`, a URL montada era
   `.../24.04/*ubuntu-24.04.5-live-server-amd64.iso` → **404** → `exit 22`.
-  O `SHA256SUMS` do Debian **não** usa esse marcador — por isso o caminho
-  Debian funcionava e o Ubuntu não.
+  (O antigo caminho Debian não tinha esse problema porque o `SHA256SUMS` dele
+  não usa o marcador — foi por isso que ele funcionava e o Ubuntu não.)
 - **Como identificar:** a URL exata aparece nas linhas de `INFO` do log
   (`Baixando <url>`). Confirme à mão:
   `curl -sIL -o /dev/null -w '%{http_code}\n' '<a-url>'` → 404 confirma.
@@ -381,7 +388,7 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
   `apt-get update` da 2ª tentativa e (b) fazem o retry voltar a descartar a
   saída do `apt`. As duas têm de reprovar o job.
 
-### A ISO Debian é REPROVADA pelo verificador, mas está correta
+### 🗑️ HISTÓRICO: a ISO Debian era REPROVADA pelo verificador, mas estava correta
 
 - **Sintoma:** no caminho Debian com `--iso-repo`, o build **gera** a ISO e o
   `verify-iso.sh` a reprova com **2 problemas**, um deles dizendo
@@ -400,7 +407,7 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
 - **Lição:** o verificador tinha um viés de distro. Ao adicionar uma checagem,
   pergunte **em qual base** ela faz sentido — e cubra a outra.
 
-### A instalação PARA quando não há internet (telas do instalador)
+### 🗑️ HISTÓRICO: a instalação do Debian PARAVA quando não havia internet (telas do d-i)
 
 - **Sintoma:** numa rede local **sem internet** (o cabo funciona, o espelho não
   responde), a instalação automática para em uma destas telas:
@@ -429,7 +436,7 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
   Ubuntu gera .deb Ubuntu). Em host de outra base/ release o build **avisa** e
   segue sem repositório — é proteção, não defeito.
 
-### A ISO Debian NÃO instala sozinha: para no `boot:` ou pede o idioma para sempre
+### 🗑️ HISTÓRICO: a ISO Debian NÃO instalava sozinha (parava no `boot:` ou pedia idioma)
 
 - **Sintoma:** a ISO Debian boota mas a instalação automática **nunca
   acontece**. Dois quadros distintos, ambos *mudos* (nenhuma mensagem de erro):
@@ -501,7 +508,7 @@ cancela `TIMEOUT`; com vários labels, o `default` sobe sozinho após o timeout)
   `/dev/console` — sem ele, a falha só existia no log do instalador (tty4) e o
   sintoma era um `exit code 2` sem causa.
 
-### A ISO Debian instala, mas o **primeiro boot** falha (ou não reinicia)
+### 🗑️ HISTÓRICO: a ISO Debian instalava, mas o **primeiro boot** falhava (ou não reiniciava)
 
 - **Sintoma A:** a instalação termina, a máquina **não reinicia** e fica no
   menu principal do `debian-installer` (a tela com `2 shell / 3 shell / 4 log`).

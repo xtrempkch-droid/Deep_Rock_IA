@@ -123,7 +123,7 @@ packages: @@PACKAGES_BLOCK@@
 # ai-cpu-os-firstboot (que aplica as mods do conjunto 'system' e instala o
 # papel no hardware real). AI_CURTIN=1 faz o script usar `curtin in-target`.
 late-commands:
-  - AI_CURTIN=1 sh /cdrom/preseed/late-command.sh
+  - AI_CURTIN=1 sh /cdrom/ai-cpu-os-boot/late-command.sh
 
 # Reinicia ao fim da instalação — é o que faz o primeiro boot acontecer.
 shutdown: reboot

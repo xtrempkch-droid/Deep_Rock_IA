@@ -14,7 +14,7 @@
 # Opções:
 #   --iso PATH            ISO a verificar (usa xorriso, somente leitura).
 #   --dir PATH            Árvore já extraída (NÃO precisa de xorriso/root).
-#   --distro NAME         ubuntu (padrão) | debian | auto (deduz pelo conteúdo).
+#   --distro NAME         ubuntu | auto (deduz pelo conteúdo; 'debian' saiu — ADR-001).
 #   --disk PATH           Disco esperado na config (ex.: /dev/vda).
 #   --role NAME           Papel esperado no .iso-config (auto = não conferir).
 #   --family NAME         Família esperada no .iso-config (auto = não conferir).
@@ -69,7 +69,7 @@ Uso:
 Opções:
   --iso PATH     ISO a verificar (usa xorriso, somente leitura).
   --dir PATH     Árvore já extraída (não precisa de xorriso nem de root).
-  --distro NAME  ubuntu (padrão) | debian | auto.
+  --distro NAME  ubuntu | auto ('debian' foi removido: ADR-001).
   --disk PATH    Disco esperado na config (ex.: /dev/vda).
   --role NAME    Papel esperado (auto = não conferir).
   --family NAME  Família esperada (auto = não conferir).
@@ -101,8 +101,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$DISTRO" in
-  ubuntu|debian|auto) ;;
-  *) log_error "--distro inválido: '${DISTRO}' (use ubuntu, debian ou auto)."; exit 2 ;;
+  ubuntu|auto) ;;
+  debian)
+    log_error "--distro debian foi REMOVIDO: a base única da ISO é Ubuntu Server (ADR-001)."
+    exit 2 ;;
+  *) log_error "--distro inválido: '${DISTRO}' (use ubuntu ou auto)."; exit 2 ;;
 esac
 
 if [[ -z "$MODE" ]]; then
@@ -273,25 +276,22 @@ log_info "Verificando ${MODE}: ${INPUT}"
 if [[ "$DISTRO" == "auto" ]]; then
   if existe "/autoinstall.yaml"; then
     DISTRO="ubuntu"
-  elif existe "/preseed/ai-cpu-os.cfg"; then
-    DISTRO="debian"
   else
-    log_error "Não achei nem /autoinstall.yaml nem /preseed/ai-cpu-os.cfg."
-    log_error "A ISO não tem configuração de instalação automática. Abortando."
+    log_error "Não achei /autoinstall.yaml: a ISO não tem instalação automática."
+    log_error "A única base suportada é Ubuntu Server (autoinstall) — ADR-001."
     exit 1
   fi
-  log_info "Distro deduzida pelo conteúdo: ${DISTRO}"
+  log_info "Base deduzida pelo conteúdo: ubuntu"
 fi
 
 # ---------------------------------------------------------------------------
 # 2. Configuração de instalação
 # ---------------------------------------------------------------------------
-section "Configuração de instalação (${DISTRO})"
-if [[ "$DISTRO" == "ubuntu" ]]; then
-  check_file "/autoinstall.yaml" "autoinstall.yaml na raiz da ISO (ao lado de casper/)"
-else
-  check_file "/preseed/ai-cpu-os.cfg" "Preseed do debian-installer"
-fi
+section "Configuração de instalação (ubuntu)"
+check_file "/autoinstall.yaml" "autoinstall.yaml na raiz da ISO (ao lado de casper/)"
+check_file "/ai-cpu-os-boot/late-command.sh" "late-command.sh (copia o projeto e arma o 1º boot)"
+check_file "/ai-cpu-os-boot/firstboot.sh" "firstboot.sh (aplica o ai-cpu-os no 1º boot)"
+check_file "/ai-cpu-os-boot/ai-cpu-os-firstboot.service" "unit do primeiro boot"
 
 # ---------------------------------------------------------------------------
 # 3. Projeto embutido
@@ -314,12 +314,12 @@ done
 # 4. Templates compartilhados + marcadores
 # ---------------------------------------------------------------------------
 section "Templates e marcadores"
-for f in preseed/late-command.sh preseed/firstboot.sh preseed/ai-cpu-os-firstboot.service; do
+for f in ai-cpu-os-boot/late-command.sh ai-cpu-os-boot/firstboot.sh ai-cpu-os-boot/ai-cpu-os-firstboot.service; do
   check_file "/${f}" "template: ${f}"
 done
 
 LEFT=""
-for f in preseed/late-command.sh preseed/firstboot.sh; do
+for f in ai-cpu-os-boot/late-command.sh ai-cpu-os-boot/firstboot.sh; do
   d="$(fetch "/${f}" 2>/dev/null || true)"
   [[ -n "$d" ]] || continue
   # Só tokens reais do formato @@NOME@@ importam; comentários usam o mesmo
@@ -348,7 +348,7 @@ section "Modelo embutido (/models) e caminho offline"
 
 # (LATE_LOCAL é definido mais abaixo, para a seção de YAML; aqui buscamos de
 #  novo porque este trecho roda antes e a variável ainda não existe.)
-MODEL_LATE="$(fetch "/preseed/late-command.sh" 2>/dev/null || true)"
+MODEL_LATE="$(fetch "/ai-cpu-os-boot/late-command.sh" 2>/dev/null || true)"
 
 if [[ -n "$MODEL_LATE" ]] && grep -q '/models' "$MODEL_LATE"; then
   pass "late-command copia o modelo da mídia para o alvo"
@@ -361,7 +361,7 @@ else
   fail "late-command não registra MODEL_FILE no .iso-config"
 fi
 
-FIRST_LOCAL="$(fetch "/preseed/firstboot.sh" 2>/dev/null || true)"
+FIRST_LOCAL="$(fetch "/ai-cpu-os-boot/firstboot.sh" 2>/dev/null || true)"
 if [[ -n "$FIRST_LOCAL" ]] && grep -q 'AI_MODEL_FILE' "$FIRST_LOCAL"; then
   pass "firstboot repassa o modelo local (AI_MODEL_FILE) — sem download"
 else
@@ -412,8 +412,8 @@ fi
 # com o fonte?).
 section "Fonte do llama.cpp na midia (/llama-src.tar.gz)"
 
-SRC_LATE="$(fetch "/preseed/late-command.sh" 2>/dev/null || true)"
-SRC_FIRST="$(fetch "/preseed/firstboot.sh" 2>/dev/null || true)"
+SRC_LATE="$(fetch "/ai-cpu-os-boot/late-command.sh" 2>/dev/null || true)"
+SRC_FIRST="$(fetch "/ai-cpu-os-boot/firstboot.sh" 2>/dev/null || true)"
 
 # Elos da corrente (o firstboot foi substituido: deve conter a variavel LLAMA_SRC).
 if [[ -n "$SRC_LATE" ]] && grep -q 'llama-src' "$SRC_LATE"; then
@@ -492,38 +492,18 @@ section "Repositório apt local (/apt-repo)"
 
 REPO_GZ="$(fetch "/apt-repo/Packages.gz" 2>/dev/null || true)"
 
-# ⚠️ A CONFIGURAÇÃO É DISTRO-DEPENDENTE — e conferir só o autoinstall dava
-# FALSO POSITIVO no caminho Debian (run #10 do CI: "2 problema(s)", sendo um
-# deles "o repositório está na mídia mas o autoinstall NÃO o usa"). O repositório
-# estava na mídia e a preseed O USAVA; simplesmente não existe autoinstall numa
-# ISO Debian. Sintoma confuso: o build gerava a ISO e o verificador a reprovava.
-#   - Ubuntu: fonte extra na seção `sources` do curtin, dentro do autoinstall;
-#   - Debian: `d-i apt-setup/local0/repository` na preseed.
-# O modo de falha que a checagem existe para pegar (config sem a fonte extra,
-# deixando a instalação dependente de rede) continua coberto nos dois caminhos.
-if [[ "$DISTRO" == "debian" ]]; then
-  CFG_FOR_REPO="$(fetch "/preseed/ai-cpu-os.cfg" 2>/dev/null || true)"
-  CFG_REPO_MARKER='apt-setup/local0/repository'
-  CFG_NAME="a preseed"
-  if [[ -n "$CFG_FOR_REPO" ]] && grep -q "$CFG_REPO_MARKER" "$CFG_FOR_REPO"; then
-    AI_WANTS_REPO=1
-  else
-    AI_WANTS_REPO=0
-  fi
+# A fonte local NÃO entra no apt do INSTALADOR (o curtin roda o `apt-get
+# update` dentro de um chroot no alvo, sem /cdrom — foi bug real ao bootar a
+# ISO). O repositório é carregado para o alvo pelo late-command.sh
+# (/opt/apt-repo) e usado no PRIMEIRO BOOT. Então a "config" que importa é o
+# late-command, e ele só é exigido quando o repositório VEIO na mídia.
+CFG_FOR_REPO="$(fetch "/ai-cpu-os-boot/late-command.sh" 2>/dev/null || true)"
+CFG_REPO_MARKER='/opt/apt-repo'
+CFG_NAME="o late-command"
+if [[ -n "$REPO_GZ" ]] && [[ -n "$CFG_FOR_REPO" ]]; then
+  AI_WANTS_REPO=1
 else
-  # Ubuntu: a fonte local NÃO entra no apt do INSTALADOR (o curtin roda o
-  # `apt-get update` dentro de um chroot no alvo, sem /cdrom — foi bug real ao
-  # bootar a ISO). O repositório é carregado para o alvo pelo late-command.sh
-  # (/opt/apt-repo) e usado no PRIMEIRO BOOT. Então a "config" que importa é o
-  # late-command, e ele só é exigido quando o repositório VEIO na mídia.
-  CFG_FOR_REPO="$(fetch "/preseed/late-command.sh" 2>/dev/null || true)"
-  CFG_REPO_MARKER='/opt/apt-repo'
-  CFG_NAME="o late-command"
-  if [[ -n "$REPO_GZ" ]] && [[ -n "$CFG_FOR_REPO" ]]; then
-    AI_WANTS_REPO=1
-  else
-    AI_WANTS_REPO=0
-  fi
+  AI_WANTS_REPO=0
 fi
 
 if [[ -z "$REPO_GZ" ]]; then
@@ -600,11 +580,10 @@ fi
 # 5. Conteúdo específico da distro
 # ---------------------------------------------------------------------------
 AI_LOCAL="$(fetch "/autoinstall.yaml" 2>/dev/null || true)"
-PRESEED_LOCAL="$(fetch "/preseed/ai-cpu-os.cfg" 2>/dev/null || true)"
-LATE_LOCAL="$(fetch "/preseed/late-command.sh" 2>/dev/null || true)"
+LATE_LOCAL="$(fetch "/ai-cpu-os-boot/late-command.sh" 2>/dev/null || true)"
 
 section "Coerência da configuração"
-if [[ "$DISTRO" == "ubuntu" && -n "$AI_LOCAL" ]]; then
+if [[ -n "$AI_LOCAL" ]]; then
   # Parse de verdade com PyYAML (yamllint valida estilo, não semântica).
   if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null; then
     PY_ERR="$(python3 - "$AI_LOCAL" "$EXPECT_DISK" "$EXPECT_ROLE" "$EXPECT_FAMILY" <<'PY' 2>&1
@@ -651,7 +630,7 @@ else:
 lc = doc.get("late-commands")
 need(isinstance(lc, list) and lc, "late-commands ausente ou vazio")
 need(any("late-command.sh" in str(c) for c in (lc or [])),
-     "late-commands não chama /cdrom/preseed/late-command.sh")
+     "late-commands não chama /cdrom/ai-cpu-os-boot/late-command.sh")
 need(any("AI_CURTIN=1" in str(c) for c in (lc or [])),
      "late-commands não passa AI_CURTIN=1 (o wrapper in_target falharia)")
 
@@ -687,43 +666,15 @@ PY
   fi
 fi
 
-if [[ "$DISTRO" == "debian" && -n "$PRESEED_LOCAL" ]]; then
-  if grep -q 'preseed/late_command' "$PRESEED_LOCAL"; then
-    pass "preseed chama preseed/late_command (copia o projeto e arma o 1º boot)"
-  else
-    fail "preseed sem preseed/late_command"
-  fi
-  if [[ -n "$EXPECT_DISK" ]]; then
-    if grep -q "partman-auto/disk string ${EXPECT_DISK}\$" "$PRESEED_LOCAL"; then
-      pass "preseed fixa o disco em ${EXPECT_DISK}"
-    else
-      fail "preseed não fixa o disco em ${EXPECT_DISK} (verifique --disk no build)"
-    fi
-  else
-    # Sem --disk não há o que comparar; o que importa é o preseed não deixar a
-    # pergunta do particionamento em aberto SEM aviso. Fixar um disco é ótimo —
-    # este ramo é o de quem só quer saber se a instalação é determinística.
-    pre_disk="$(sed -nE 's/^d-i[[:space:]]+partman-auto\/disk[[:space:]]+string[[:space:]]+([^[:space:]]+).*/\1/p' "$PRESEED_LOCAL" | head -1)"
-    if [[ -n "$pre_disk" ]]; then
-      pass "preseed fixa o disco em ${pre_disk} (instalação determinística)"
-    elif grep -qE '^#.*--allow-any-disk' "$PRESEED_LOCAL"; then
-      pass "preseed sem disco fixo (--allow-any-disk explícito)"
-    else
-      fail "preseed sem disco fixo e sem o comentário de --allow-any-disk"
-    fi
-  fi
-fi
-
 section "Senha do root"
 # O root é BLOQUEADO por padrão. Com --root-password-hash, o late-command
-# aplica o hash via `chpasswd -e` (Ubuntu e Debian) e, no Debian, a preseed
-# também habilita o login (root-login true). Aqui conferimos a COERÊNCIA entre
-# os dois — é o tipo de coisa que o build não pega sozinho.
+# aplica o hash via `chpasswd -e`. Aqui conferimos a forma do hash e a
+# presença do comando — é o tipo de coisa que o build não pega sozinho.
 if [[ -n "$LATE_LOCAL" ]]; then
   # A linha tem de usar ASPAS SIMPLES: o hash crypt contém `$` (`$6$sal$…`) e,
   # entre aspas duplas, o shell expandiria `$6` ao ler o arquivo — sob `set -u`
   # o late-command.sh morre com exit 2 antes de copiar qualquer coisa
-  # (sintoma: "Failed to run preseeded command … exit code 2", sessão #35).
+  # (sintoma: "failed to run late-command", sessão #35).
   if grep -qE '^ROOT_PASSWORD_HASH="\$[0-9]+\$' "$LATE_LOCAL"; then
     fail "hash de root em ASPAS DUPLAS: o shell expande \$6 e o late-command morre em exit 2"
   elif grep -qE "^ROOT_PASSWORD_HASH='\\\$[0-9]+\\\$" "$LATE_LOCAL"; then
@@ -733,24 +684,8 @@ if [[ -n "$LATE_LOCAL" ]]; then
     else
       fail "hash de root sem o 'chpasswd -e' (o root ficaria bloqueado mesmo com hash)"
     fi
-    if [[ "$DISTRO" == "debian" && -n "$PRESEED_LOCAL" ]]; then
-      if grep -q 'passwd/root-login boolean true' "$PRESEED_LOCAL"; then
-        pass "preseed: root-login true (coerente com o hash)"
-      else
-        fail "preseed com hash de root mas root-login false (incoerente)"
-      fi
-      if grep -qE 'passwd/root-password-crypted password \$' "$PRESEED_LOCAL"; then
-        pass "preseed: senha do root como hash crypt"
-      else
-        fail "preseed sem root-password-crypted (ou o valor não é um hash crypt)"
-      fi
-    fi
   elif grep -qE "^ROOT_PASSWORD_HASH=''$" "$LATE_LOCAL"; then
     pass "root bloqueado (padrão: sem --root-password-hash)"
-    if [[ "$DISTRO" == "debian" && -n "$PRESEED_LOCAL" ]] \
-       && grep -q 'passwd/root-login boolean true' "$PRESEED_LOCAL"; then
-      fail "preseed com root-login true mas SEM hash de root (incoerente)"
-    fi
   else
     fail "late-command sem a linha ROOT_PASSWORD_HASH (template antigo?)"
   fi
@@ -761,132 +696,63 @@ fi
 section "Rede do sistema instalado"
 # O Subiquity NÃO grava rede persistente no alvo quando o autoinstall não tem
 # `network:` — o sistema sobe com a placa DOWN (bug real, sessão #33). A ISO
-# agora carrega o netplan pronto em /preseed/ai-cpu-os-netplan.yaml e o
+# agora carrega o netplan pronto em /ai-cpu-os-boot/ai-cpu-os-netplan.yaml e o
 # late-command o copia para /etc/netplan/99-ai-cpu-os.yaml.
 #
-# ⚠️ DISTRO-AWARE, como o resto deste verificador: no **Debian** NÃO existe
-# netplan no caminho — o d-i responde `netcfg` na preseed e escreve
-# /etc/network/interfaces no alvo. Cobrar o netplan de uma ISO Debian reprovava
-# uma ISO CORRETA (foi o que derrubou o build `--distro debian`, sessão #34).
-# Cada distro é conferida pelo mecanismo que ela REALMENTE usa.
+# O mecanismo é UM só agora (ADR-001): netplan na mídia + bloco `network:` no
+# autoinstall (ADR-001: base única). O ramo Debian (`netcfg`/preseed) saiu.
 if [[ -n "$LATE_LOCAL" ]]; then
   if ! grep -qE "^NETWORK_MODE=['\"]" "$LATE_LOCAL"; then
     fail "late-command sem NETWORK_MODE (template antigo? o alvo pode subir sem rede)"
   else
     NETMODE="$(sed -n "s/^NETWORK_MODE=['\"]\\([^'\"]*\\)['\"].*/\\1/p" "$LATE_LOCAL" | head -1)"
-    NETPLAN_ISO="$(fetch "/preseed/ai-cpu-os-netplan.yaml" 2>/dev/null || true)"
+    NETPLAN_ISO="$(fetch "/ai-cpu-os-boot/ai-cpu-os-netplan.yaml" 2>/dev/null || true)"
 
-    if [[ "$DISTRO" == "ubuntu" ]]; then
-      # ---- Ubuntu: netplan na mídia + bloco network: no autoinstall ----
-      case "$NETMODE" in
-        auto|dhcp)
-          pass "rede: modo ${NETMODE} (DHCP)"
-          if [[ -z "$NETPLAN_ISO" ]]; then
-            fail "rede ${NETMODE} sem /preseed/ai-cpu-os-netplan.yaml (o alvo subiria sem DHCP)"
-          elif grep -q 'dhcp4: true' "$NETPLAN_ISO"; then
-            pass "netplan do alvo tem dhcp4: true"
-          else
-            fail "netplan do alvo sem dhcp4: true (não pegaria IP por DHCP)"
-          fi
-          if [[ -n "$AI_LOCAL" ]]; then
-            if grep -qE '^network:' "$AI_LOCAL" && grep -q 'dhcp4: true' "$AI_LOCAL"; then
-              pass "autoinstall: bloco network com dhcp4 (instalador e alvo iguais)"
-            else
-              fail "autoinstall sem o bloco network/dhcp4 (instalador ficaria sem rede)"
-            fi
-          fi
-          ;;
-        static)
-          pass "rede: modo static"
-          if [[ -z "$NETPLAN_ISO" ]]; then
-            fail "rede static sem /preseed/ai-cpu-os-netplan.yaml"
-          elif grep -qE 'addresses: \[[0-9]' "$NETPLAN_ISO" && grep -q 'via: ' "$NETPLAN_ISO"; then
-            pass "netplan do alvo tem endereço fixo e rota default"
-          else
-            fail "netplan static sem addresses/via"
-          fi
-          ;;
-        none)
-          pass "rede: modo none (comportamento antigo, sem configuração persistente)"
-          if [[ -n "$AI_LOCAL" ]] && grep -qE '^network:' "$AI_LOCAL"; then
-            fail "modo none mas o autoinstall tem bloco network (incoerente)"
-          fi
-          ;;
-        *)
-          fail "NETWORK_MODE desconhecido no late-command: '${NETMODE}'"
-          ;;
-      esac
-
-      if [[ "$NETMODE" != "none" ]]; then
-        if grep -q 'cloud.cfg.d/99-ai-cpu-os-disable-network.cfg' "$LATE_LOCAL"; then
-          pass "cloud-init com a rede desligada (não reescreve o netplan)"
+    # netplan na mídia + bloco network: no autoinstall
+    case "$NETMODE" in
+      auto|dhcp)
+        pass "rede: modo ${NETMODE} (DHCP)"
+        if [[ -z "$NETPLAN_ISO" ]]; then
+          fail "rede ${NETMODE} sem /ai-cpu-os-boot/ai-cpu-os-netplan.yaml (o alvo subiria sem DHCP)"
+        elif grep -q 'dhcp4: true' "$NETPLAN_ISO"; then
+          pass "netplan do alvo tem dhcp4: true"
         else
-          fail "sem cloud-init network disable: ele pode sobrescrever o netplan"
+          fail "netplan do alvo sem dhcp4: true (não pegaria IP por DHCP)"
         fi
-      fi
+        if [[ -n "$AI_LOCAL" ]]; then
+          if grep -qE '^network:' "$AI_LOCAL" && grep -q 'dhcp4: true' "$AI_LOCAL"; then
+            pass "autoinstall: bloco network com dhcp4 (instalador e alvo iguais)"
+          else
+            fail "autoinstall sem o bloco network/dhcp4 (instalador ficaria sem rede)"
+          fi
+        fi
+        ;;
+      static)
+        pass "rede: modo static"
+        if [[ -z "$NETPLAN_ISO" ]]; then
+          fail "rede static sem /ai-cpu-os-boot/ai-cpu-os-netplan.yaml"
+        elif grep -qE 'addresses: \[[0-9]' "$NETPLAN_ISO" && grep -q 'via: ' "$NETPLAN_ISO"; then
+          pass "netplan do alvo tem endereço fixo e rota default"
+        else
+          fail "netplan static sem addresses/via"
+        fi
+        ;;
+      none)
+        pass "rede: modo none (comportamento antigo, sem configuração persistente)"
+        if [[ -n "$AI_LOCAL" ]] && grep -qE '^network:' "$AI_LOCAL"; then
+          fail "modo none mas o autoinstall tem bloco network (incoerente)"
+        fi
+        ;;
+      *)
+        fail "NETWORK_MODE desconhecido no late-command: '${NETMODE}'"
+        ;;
+    esac
 
-    else
-      # ---- Debian: preseed (netcfg) é o mecanismo; netplan não entra ----
-      if [[ -z "$PRESEED_LOCAL" ]]; then
-        fail "preseed ausente: não há como conferir a rede do Debian"
+    if [[ "$NETMODE" != "none" ]]; then
+      if grep -q 'cloud.cfg.d/99-ai-cpu-os-disable-network.cfg' "$LATE_LOCAL"; then
+        pass "cloud-init com a rede desligada (não reescreve o netplan)"
       else
-        case "$NETMODE" in
-          auto|dhcp)
-            pass "rede: modo ${NETMODE} (DHCP)"
-            if grep -q 'netcfg/disable_autoconfig boolean false' "$PRESEED_LOCAL"; then
-              pass "preseed: DHCP explícito (disable_autoconfig false)"
-            else
-              fail "preseed sem netcfg/disable_autoconfig false (rede indefinida)"
-            fi
-            if grep -q 'netcfg/dhcp_timeout' "$PRESEED_LOCAL"; then
-              pass "preseed: dhcp_timeout definido (não trava esperando DHCP)"
-            else
-              fail "preseed sem netcfg/dhcp_timeout (boot pode travar esperando DHCP)"
-            fi
-            ;;
-          static)
-            pass "rede: modo static"
-            if grep -q 'netcfg/disable_autoconfig boolean true' "$PRESEED_LOCAL"; then
-              pass "preseed: autoconfig desligado (usa os campos estáticos)"
-            else
-              fail "preseed static sem netcfg/disable_autoconfig true"
-            fi
-            if grep -q 'netcfg/get_ipaddress string ' "$PRESEED_LOCAL" \
-               && grep -q 'netcfg/get_gateway string ' "$PRESEED_LOCAL"; then
-              pass "preseed: IP fixo + gateway definidos"
-            else
-              fail "preseed static sem get_ipaddress/get_gateway"
-            fi
-            if grep -q 'netcfg/get_netmask string ' "$PRESEED_LOCAL"; then
-              pass "preseed: netmask definida (o d-i pede máscara, não /N)"
-            else
-              fail "preseed static sem get_netmask"
-            fi
-            if grep -q 'netcfg/get_nameservers string ' "$PRESEED_LOCAL"; then
-              pass "preseed: nameservers definidos"
-            else
-              fail "preseed static sem get_nameservers (DNS não resolveria)"
-            fi
-            ;;
-          none)
-            pass "rede: modo none (o d-i decide sozinho, como antes)"
-            ;;
-          *)
-            fail "NETWORK_MODE desconhecido no late-command: '${NETMODE}'"
-            ;;
-        esac
-
-        if grep -qE '^d-i netcfg/choose_interface select ' "$PRESEED_LOCAL"; then
-          pass "preseed: interface de rede escolhida explicitamente"
-        else
-          fail "preseed sem netcfg/choose_interface (o d-i pode perguntar)"
-        fi
-      fi
-
-      # O netplan na mídia seria inútil no Debian; se aparecer, é sinal de que
-      # alguém misturou os caminhos (e o late-command do Debian nem o lê).
-      if [[ -n "$NETPLAN_ISO" && "$NETMODE" != "none" ]]; then
-        pass "netplan na mídia (ignorado no Debian — a rede vem da preseed)"
+        fail "sem cloud-init network disable: ele pode sobrescrever o netplan"
       fi
     fi
   fi
@@ -930,209 +796,46 @@ fi
 # 6. Entrada de boot automática
 # ---------------------------------------------------------------------------
 section "Boot"
-if [[ "$DISTRO" == "ubuntu" ]]; then
-  GRUB_LOCAL="$(fetch "/boot/grub/grub.cfg" 2>/dev/null || true)"
-  if [[ -z "$GRUB_LOCAL" ]]; then
-    skip "sem /boot/grub/grub.cfg para conferir (o menu vem de outro lugar)"
-  else
-    # `set default="ai-cpu-os-auto"` só resolve se existir uma menuentry com
-    # esse `--id`. Sem ele o GRUB cai na entrada 0 (a interativa) e a
-    # instalação automática não acontece — foi um bug REAL, invisível para um
-    # `grep ai-cpu-os-auto` (que casava com o próprio `set default`).
-    if grep -qE 'menuentry[^"]*"[^"]*"[^\{]*--id[ =]ai-cpu-os-auto' "$GRUB_LOCAL"; then
-      pass "/boot/grub/grub.cfg tem a menuentry com --id 'ai-cpu-os-auto'"
-    else
-      fail "/boot/grub/grub.cfg SEM menuentry com --id 'ai-cpu-os-auto' (o 'set default' não casaria; o GRUB subiria a entrada interativa)"
-    fi
-    if grep -q 'set default="ai-cpu-os-auto"' "$GRUB_LOCAL"; then
-      pass "set default aponta para 'ai-cpu-os-auto'"
-    else
-      fail "set default não aponta para 'ai-cpu-os-auto' (não instalaria sozinho)"
-    fi
-    if grep -q 'autoinstall' "$GRUB_LOCAL"; then
-      pass "entrada usa o parâmetro de kernel 'autoinstall'"
-    else
-      fail "entrada sem o parâmetro 'autoinstall' (o Subiquity perguntaria tudo)"
-    fi
-    if grep -q 'casper/vmlinuz' "$GRUB_LOCAL"; then
-      pass "entrada aponta para o kernel do live (/casper/vmlinuz)"
-    else
-      fail "entrada não aponta para /casper/vmlinuz"
-    fi
-  fi
+GRUB_LOCAL="$(fetch "/boot/grub/grub.cfg" 2>/dev/null || true)"
+if [[ -z "$GRUB_LOCAL" ]]; then
+  skip "sem /boot/grub/grub.cfg para conferir (o menu vem de outro lugar)"
 else
-  ISO_LOCAL="$(fetch "/isolinux/isolinux.cfg" 2>/dev/null || true)"
-  if [[ -z "$ISO_LOCAL" ]]; then
-    fail "sem /isolinux/isolinux.cfg (o Debian boota por isolinux)"
+  # `set default="ai-cpu-os-auto"` só resolve se existir uma menuentry com
+  # esse `--id`. Sem ele o GRUB cai na entrada 0 (a interativa) e a
+  # instalação automática não acontece — foi um bug REAL, invisível para um
+  # `grep ai-cpu-os-auto` (que casava com o próprio `set default`).
+  if grep -qE 'menuentry[^"]*"[^"]*"[^\{]*--id[ =]ai-cpu-os-auto' "$GRUB_LOCAL"; then
+    pass "/boot/grub/grub.cfg tem a menuentry com --id 'ai-cpu-os-auto'"
   else
-    if grep -q 'ai-cpu-os-auto' "$ISO_LOCAL"; then
-      pass "isolinux.cfg tem o label 'ai-cpu-os-auto'"
-    else
-      fail "isolinux.cfg SEM o label 'ai-cpu-os-auto'"
-    fi
-    if grep -q 'preseed/file=' "$ISO_LOCAL"; then
-      pass "label passa preseed/file= (instalação automática)"
-    else
-      fail "label sem preseed/file="
-    fi
-    # `prompt 1` mostra "boot:" e ESPERA UMA TECLA — o `timeout` não vale nesse
-    # modo. A ISO ficava parada nessa tela e o instalador nunca começava (VM
-    # muda, disco intocado). Descoberto bootando a ISO Debian pela 1ª vez.
-    if grep -qE '^[[:space:]]*prompt[[:space:]]+0' "$ISO_LOCAL"; then
-      pass "isolinux.cfg com 'prompt 0' (boota sozinho, sem tecla)"
-    else
-      fail "isolinux.cfg sem 'prompt 0' (com 'prompt 1' o isolinux espera tecla e não instala)"
-    fi
-    # O `localechooser` é dos PRIMEIROS componentes do menu e roda ANTES de a
-    # mídia ser montada, então idioma/teclado têm de vir na cmdline
-    # (`env2debconf`, via /etc/preseed_aliases); o preseed ainda não foi lido.
-    for _k in language keymap; do
-      if grep -qE "^[[:space:]]*append[[:space:]].*[[:space:]]${_k}=[^[:space:]]+" "$ISO_LOCAL"; then
-        pass "cmdline leva ${_k}= (o localechooser roda antes do preseed)"
-      else
-        fail "cmdline sem ${_k}= (o instalador pergunta e a instalação para)"
-      fi
-    done
+    fail "/boot/grub/grub.cfg SEM menuentry com --id 'ai-cpu-os-auto' (o 'set default' não casaria; o GRUB subiria a entrada interativa)"
   fi
-
-  # A pergunta que o instalador REALMENTE exibe é `localechooser/languagelist`
-  # (a lista), não `debian-installer/language`. Ela só é pulada quando o
-  # idioma está entre as ESCOLHAS da lista, e a lista depende do nível de
-  # exibição: em console serial o nível é 0 e só existe `en`. Sem responder a
-  # lista, a interface ficava em português e MESMO ASSIM a pergunta aparecia e
-  # travava tudo. Ver docs/TROUBLESHOOTING.md.
-  PRE_LOCAL="$(fetch "/preseed/ai-cpu-os.cfg" 2>/dev/null || true)"
-  if [[ -z "$PRE_LOCAL" ]]; then
-    skip "sem /preseed/ai-cpu-os.cfg para conferir idioma do instalador"
+  if grep -q 'set default="ai-cpu-os-auto"' "$GRUB_LOCAL"; then
+    pass "set default aponta para 'ai-cpu-os-auto'"
   else
-    pre_lang="$(sed -nE 's/^d-i[[:space:]]+debian-installer\/language[[:space:]]+(string|select)[[:space:]]+(.*[^[:space:]])[[:space:]]*$/\2/p' "$PRE_LOCAL" | head -1)"
-    pre_list="$(sed -nE 's/^d-i[[:space:]]+localechooser\/languagelist[[:space:]]+(string|select)[[:space:]]+(.*[^[:space:]])[[:space:]]*$/\2/p' "$PRE_LOCAL" | head -1)"
-    if [[ -z "$pre_list" ]]; then
-      fail "preseed NÃO responde localechooser/languagelist (a lista de idiomas aparece e a instalação trava)"
-    elif [[ "$pre_list" != "$pre_lang" ]]; then
-      fail "localechooser/languagelist ('${pre_list}') difere de debian-installer/language ('${pre_lang}')"
-    else
-      pass "preseed responde localechooser/languagelist = '${pre_list}' (não pergunta o idioma)"
-    fi
+    fail "set default não aponta para 'ai-cpu-os-auto' (não instalaria sozinho)"
   fi
-
-  # `grub-installer/bootdev` é pergunta CRÍTICA e o d-i a faz DEPOIS de copiar
-  # o sistema inteiro: sem resposta, a instalação automática para em
-  # "[!!] Configurando grub-pc" esperando um dispositivo (medido em VM).
-  pre_bootdev="$(sed -nE 's/^d-i[[:space:]]+grub-installer\/bootdev[[:space:]]+(string|select)[[:space:]]+(.*[^[:space:]])[[:space:]]*$/\2/p' "$PRE_LOCAL" | head -1)"
-  if [[ -z "$pre_bootdev" ]]; then
-    fail "preseed NÃO responde grub-installer/bootdev (trava em 'Configurando grub-pc')"
+  if grep -q 'autoinstall' "$GRUB_LOCAL"; then
+    pass "entrada usa o parâmetro de kernel 'autoinstall'"
   else
-    pass "preseed responde grub-installer/bootdev = '${pre_bootdev}'"
+    fail "entrada sem o parâmetro 'autoinstall' (o Subiquity perguntaria tudo)"
   fi
-
-  # `deb cdrom:` é gravado pelo PRÓPRIO instalador (`apt-cdrom-setup`) e não
-  # tem relação com --iso-repo. Depois da instalação a mídia não existe mais:
-  # `apt-get update` falha ("não tem um arquivo Release") e o primeiro boot do
-  # papel `inference` aborta com rc=100 antes de instalar qualquer coisa.
-  LATE_LOCAL="$(fetch "/preseed/late-command.sh" 2>/dev/null || true)"
-  if [[ -z "$LATE_LOCAL" ]]; then
-    skip "sem /preseed/late-command.sh para conferir a limpeza do apt"
+  if grep -q 'casper/vmlinuz' "$GRUB_LOCAL"; then
+    pass "entrada aponta para o kernel do live (/casper/vmlinuz)"
   else
-    if grep -qF "deb(-src)?[[:space:]]+cdrom:" "$LATE_LOCAL"; then
-      pass "late-command.sh remove fontes 'cdrom:' do alvo (o 1º boot não quebra no apt update)"
-    else
-      fail "late-command.sh NÃO remove a fonte 'cdrom:' do alvo (o 1º boot aborta no apt update)"
-    fi
-    # Sem substituir o `20final-message` do d-i, o `finish-install` interpreta
-    # o "back" da nota final como `exit 10` e ABORTA a instalação no menu
-    # principal, em vez de reiniciar (medido em console serial).
-    if grep -qF '20final-message' "$LATE_LOCAL"; then
-      pass "late-command.sh substitui o 20final-message do d-i (reinicia em vez de parar no menu)"
-    else
-      fail "late-command.sh NÃO substitui o 20final-message (a instalação para no menu do d-i)"
-    fi
-    # O patch acima é só cinto de segurança: o `20final-message` é desempacotado
-    # do udeb DEPOIS deste hook, então ele pode não estar lá a tempo. Quem
-    # garante o reinício é a chamada explícita no fim do late-command.
-    if grep -qE '^[[:space:]]*reboot -f' "$LATE_LOCAL"; then
-      pass "late-command.sh reinicia o d-i explicitamente (não depende do finish-install)"
-    else
-      fail "late-command.sh NÃO reinicia explicitamente (a VM fica parada no menu do d-i)"
-    fi
-  fi
-
-  # O marcador do 1º boot tem de chegar ao console SERIAL: no sistema
-  # instalado `/dev/console` aponta para o ÚLTIMO `console=` da cmdline, e o
-  # d-i grava `console=ttyS0,115200 console=tty1` (ou seja: tty1). Sem escrever
-  # no ttyS0, o `test-vm.sh` fica esperando para sempre — medido na sessão #35,
-  # com o trabalho JÁ concluído. Só os MARCADORES vão ao serial: espelhar o
-  # build inteiro travou o console da VM.
-  FIRSTBOOT_LOCAL="$(fetch "/preseed/firstboot.sh" 2>/dev/null || true)"
-  if [[ -z "$FIRSTBOOT_LOCAL" ]]; then
-    skip "sem /preseed/firstboot.sh para conferir o marcador no console serial"
-  elif grep -qF '/dev/ttyS0' "$FIRSTBOOT_LOCAL"; then
-    pass "firstboot.sh escreve o marcador no console serial (o teste de VM o vê)"
-  else
-    fail "firstboot.sh NÃO escreve no console serial (o teste de VM nunca vê o marcador)"
-  fi
-  # E o espelho do build INTEIRO no serial não pode voltar: megabytes no tty
-  # travam o console da VM (nem as mensagens do kernel saem mais).
-  if [[ -n "$FIRSTBOOT_LOCAL" ]] && grep -qF 'tee -a "$LOG" > /dev/ttyS0' "$FIRSTBOOT_LOCAL"; then
-    fail "firstboot.sh espelha TODO o build no serial (trava o console da VM)"
-  fi
-
-  # `sudo` não vem na instalação padrão do Debian: sem ele, o usuário da ISO
-  # (que é do grupo `sudo`) não administra nada, e com o root bloqueado o
-  # sistema fica SEM acesso administrativo.
-  #
-  # ⚠️ SEM repositório local, o `pkgsel/include` fica VAZIO de propósito (ver
-  # `expand_apt_offline_block`): sem internet, pedir pacotes ao pkgsel faz a
-  # instalação PARAR em "[!!] Select and install software". Nesse caso o
-  # pacote tem de vir do `late-command`/1º boot — então o que se cobra aqui
-  # não é a linha do preseed, e sim que o late-command tenha o remédio.
-  if [[ -z "$PRE_LOCAL" ]]; then
-    skip "sem preseed para conferir o pacote sudo"
-  else
-    pre_pkgs="$(sed -nE 's|^d-i[[:space:]]+pkgsel/include[[:space:]]+string[[:space:]]*(.*)$|\1|p' "$PRE_LOCAL" | head -1)"
-    pkgsel_off="$(sed -nE 's|^d-i[[:space:]]+pkgsel/run_tasksel[[:space:]]+boolean[[:space:]]+(.*)$|\1|p' "$PRE_LOCAL" | head -1)"
-    if [[ -z "${pre_pkgs// /}" && "$pkgsel_off" == "false" ]]; then
-      pass "sem repositório local: pkgsel esvaziado de propósito (não trava a instalação sem rede)"
-      if grep -qF 'sudo' "$LATE_LOCAL" 2>/dev/null; then
-        pass "late-command cobre o 'sudo' quando o pkgsel é esvaziado"
-      else
-        fail "pkgsel esvaziado e o late-command não instala 'sudo' (usuário sem admin)"
-      fi
-    elif grep -qw 'sudo' <<< "$pre_pkgs"; then
-      pass "preseed instala 'sudo' (o usuário da ISO consegue administrar)"
-    else
-      fail "preseed NÃO instala 'sudo' (Debian não o traz; o usuário fica sem admin)"
-    fi
-  fi
-
-  # Sem o preseed dentro do initrd, o `S30initrd-preseed` não acha nada: ele lê
-  # literalmente `/preseed.cfg` NA RAIZ do initramfs (`preseed/file=` sozinho
-  # só é aplicado depois, quando o udeb file-preseed instala — tarde demais).
-  INITRD_LOCAL="$(fetch "/install.amd/initrd.gz" 2>/dev/null || true)"
-  if [[ -z "$INITRD_LOCAL" ]]; then
-    skip "sem /install.amd/initrd.gz para conferir o preseed embutido no initrd"
-  else
-    # Sem `grep -q` de propósito: com `pipefail`, sair cedo fecha o cano e o
-    # gzip morre por SIGPIPE (141), derrubando um check que na verdade passou.
-    n_pre="$(gzip -dc "$INITRD_LOCAL" 2>/dev/null | grep -acF 'preseed.cfg' || true)"
-    if [[ "${n_pre:-0}" -gt 0 ]]; then
-      pass "initrd tem /preseed.cfg na raiz (o S30initrd-preseed só lê a raiz)"
-    else
-      fail "initrd SEM /preseed.cfg na raiz (o preseed nunca é aplicado)"
-    fi
+    fail "entrada não aponta para /casper/vmlinuz"
   fi
 fi
 
-# --- SSH: vale para OS DOIS instaladores (o late-command é compartilhado) -----
+# --- SSH: garantia do late-command -------------------------------------------
 # Sem `sshd` o alvo instalado fica INACESSÍVEL: ele sobe, pega IP e não tem
 # nenhum serviço escutando — e sem teclado/tela não há como entrar para
-# consertar. O `ssh: install-server` (Ubuntu) e o `openssh-server` do `pkgsel`
-# (Debian) falham EM SILÊNCIO quando não há rede na instalação (medido numa
+# consertar. O `ssh: install-server` falha EM SILÊNCIO quando não há rede na
+# instalação (medido numa
 # instalação real, sessão #36: 65535 portas TCP em RST). Por isso o
 # late-command tem de VERIFICAR e, se preciso, instalar o SSH.
-SSH_GUARD="$(fetch "/preseed/late-command.sh" 2>/dev/null || true)"
+SSH_GUARD="$(fetch "/ai-cpu-os-boot/late-command.sh" 2>/dev/null || true)"
 if [[ -z "$SSH_GUARD" ]]; then
-  skip "sem /preseed/late-command.sh para conferir a garantia de SSH"
+  skip "sem /ai-cpu-os-boot/late-command.sh para conferir a garantia de SSH"
 elif grep -qF 'openssh-server' "$SSH_GUARD" && grep -qF 'LEIA-SSH.md' "$SSH_GUARD"; then
   pass "late-command.sh GARANTE o SSH no alvo (instala e avisa se não conseguir)"
 else
@@ -1170,7 +873,7 @@ fi
 section "Permissões"
 if [[ "$MODE" == "dir" ]]; then
   for f in build.sh detect-hardware.sh llama-build.sh families/resolve.sh \
-           mods/apply.sh preseed/late-command.sh preseed/firstboot.sh; do
+           mods/apply.sh ai-cpu-os-boot/late-command.sh ai-cpu-os-boot/firstboot.sh; do
     if [[ -x "${INPUT}/ai-cpu-os/${f}" || -x "${INPUT}/${f}" ]]; then
       pass "executável: ${f}"
     else

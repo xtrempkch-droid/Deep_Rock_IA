@@ -78,11 +78,10 @@
     <!-- ================= CRIAR ISO ================= -->
     <section class="card">
       <h2>📀 Criar a ISO</h2>
-      <label for="distro">Base do sistema</label>
-      <select id="distro">
-        <option value="ubuntu">Ubuntu Server (autoinstall) — padrão</option>
-        <option value="debian">Debian (preseed) — legado</option>
-      </select>
+      <p class="muted" style="margin:0 0 8px">
+        Base do sistema: <b>Ubuntu Server</b> (autoinstall). É a única base da
+        ISO desde o ADR-001.
+      </p>
 
       <label for="disk">Disco da instalação (gravado na ISO)</label>
       <input id="disk" value="/dev/vda" spellcheck="false">
@@ -328,7 +327,7 @@ function renderIsos(isos) {
     b1.onclick = () => startJob("/api/iso-check", {iso: iso.name});
     td.append(b1, document.createTextNode(" "));
     const b2 = el("button", "ghost", "Conteúdo");
-    b2.onclick = () => startJob("/api/iso-verify", {iso: iso.name, distro: $("distro").value});
+    b2.onclick = () => startJob("/api/iso-verify", {iso: iso.name});
     td.append(b2);
     tr.append(td);
     tb.append(tr);
@@ -352,7 +351,6 @@ async function loadOptions() {
     builder: "builder — build/registry/Gitea",
   });
   fill("family", OPTIONS.families);
-  $("distro").value = OPTIONS.defaults.distro;
   $("disk").value = OPTIONS.defaults.disk;
   const repo = $("repo").textContent;
   const m = repo.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
@@ -410,7 +408,7 @@ async function startJob(path, body) {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(body),
     });
-    watchJob(r.job, (body.distro ? body.distro + " · " : "") +
+    watchJob(r.job,
       ({"/api/preview":"Simulação","/api/build":"Gerando a ISO",
         "/api/iso-check":"Conferência","/api/iso-verify":"Verificação de conteúdo"}[path] || "Executando"));
   } catch (e) {
@@ -425,7 +423,7 @@ $("btn-build").onclick = () => {
   const v = formValues();
   const ok = confirm(
     "Gerar a ISO agora?\n\n" +
-    "Base: " + v.distro + "\n" +
+    "Base: Ubuntu Server (ADR-001)\n" +
     "Papel: " + v.role + " · Família: " + v.family + "\n" +
     "Conteúdo: " + (v.payload === "auto" ? "tudo na mídia (air-gapped)" : "nenhum") + "\n" +
     "Rede: " + (v.network === "static"
@@ -445,7 +443,7 @@ $("btn-check").onclick = () => {
 $("btn-verify").onclick = () => {
   const p = $("iso-path").value.trim();
   if (!p) { alertBox("warn", "Informe o caminho da ISO."); return; }
-  startJob("/api/iso-verify", {iso: p, distro: $("distro").value});
+  startJob("/api/iso-verify", {iso: p});
 };
 $("btn-clear").onclick = () => { $("log").textContent = ""; };
 $("btn-copy").onclick = async () => {
@@ -465,7 +463,6 @@ $("btn-pendrives").onclick = async () => {
 
 function formValues() {
   return {
-    distro: $("distro").value,
     disk: $("disk").value.trim(),
     role: $("role").value,
     family: $("family").value,

@@ -2,8 +2,9 @@ name: iso
 
 # Gera a ISO de instalação do ai-cpu-os a partir da ISO oficial do SO base.
 #
-# Base padrão: **Ubuntu Server live** + autoinstall (Subiquity). A remasterização
-# Debian (netinst + preseed) continua disponível em `--distro debian`.
+# Base ÚNICA (ADR-001): **Ubuntu Server live** + autoinstall (Subiquity). O
+# caminho Debian (netinst + preseed) foi **REMOVIDO** — `--distro debian`
+# aborta com exit 2. Não há mais input de distro: só existe uma base.
 #
 # Disparo: manual (workflow_dispatch) e em tags (v*) — igual ao build-llama,
 # porque baixar a ISO base (~2,6 GB no Ubuntu) + remasterizar leva minutos e
@@ -24,12 +25,6 @@ name: iso
 on:
   workflow_dispatch:
     inputs:
-      distro:
-        description: "Base do SO"
-        required: false
-        default: ubuntu
-        type: choice
-        options: [ubuntu, debian]
       role:
         description: "Papel gravado na ISO (auto = detecta no hardware real)"
         required: false
@@ -63,14 +58,13 @@ concurrency:
 
 jobs:
   build-iso:
-    name: Gerar ISO (${{ inputs.distro || 'ubuntu' }} · ${{ inputs.role || 'auto' }})
+    name: Gerar ISO (ubuntu · ${{ inputs.role || 'auto' }})
     # ubuntu-24.04 (noble) FIXO, e não ubuntu-latest: o `--iso-repo auto` monta o
     # repositório a partir da release DESTA máquina, e a ISO base padrão é a
     # 24.04. Com ubuntu-latest o label muda sozinho (migra para Ubuntu 26 em
     # 2026-10-19) e o repositório deixaria de ser montado por um motivo invisível.
     runs-on: ubuntu-24.04
     env:
-      ISO_DISTRO: ${{ inputs.distro || 'ubuntu' }}
       ISO_ROLE: ${{ inputs.role || 'auto' }}
       ISO_FAMILY: ${{ inputs.family || 'auto' }}
       ISO_DISK: ${{ inputs.disk || 'auto' }}
@@ -89,12 +83,10 @@ jobs:
       - name: Instalar ferramentas de remasterização
         run: |
           sudo apt-get update -qq
-          # xorriso -> remasterização (as duas distros)
-          # No caminho ubuntu  NÃO são precisos: os setores de boot da ISO
-          #   oficial são preservados via `xorriso -indev/-outdev -map`.
-          # No caminho debian precisamos de:
-          #   isolinux -> isohdpfx.bin (boot híbrido BIOS+EFI)
-          #   mtools   -> patch do grub.cfg dentro da efi.img (boot UEFI)
+          # xorriso -> remasterização. `isolinux`/`mtools` eram do caminho
+          # Debian (removido no ADR-001): os setores de boot da ISO oficial do
+          # Ubuntu são preservados via `xorriso -indev/-outdev -map`, então
+          # nenhum dos dois é necessário.
           #
           # `openssl` NÃO é opcional: o build o usa para gerar o hash da senha
           # aleatória, e aborta sem ele ("openssl não encontrado"). Ele existe
@@ -103,7 +95,7 @@ jobs:
           # (curl HTTPS) entram pelo mesmo motivo: dependência implícita do
           # runner é dependência que some quando o runner muda.
           sudo apt-get install -y --no-install-recommends \
-            xorriso isolinux mtools curl coreutils yamllint \
+            xorriso curl coreutils yamllint \
             openssl gzip ca-certificates
           xorriso --version | head -1
 
@@ -115,7 +107,7 @@ jobs:
           # O dry-run também recebe as flags do payload para EXERCITAR os
           # caminhos novos (validação de release, checagem dos pacotes, etc.)
           # sem baixar nada -- é o que pega regressão cedo.
-          make iso-dry-run DISK="$ISO_DISK" DISTRO="$ISO_DISTRO" \
+          make iso-dry-run DISK="$ISO_DISK" \
             ROLE="$ISO_ROLE" FAMILY="$ISO_FAMILY" \
             ISO_ARGS="--iso-source $ISO_PAYLOAD --iso-model $ISO_PAYLOAD --iso-repo $ISO_PAYLOAD"
 
@@ -123,7 +115,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo bash iso/build-iso.sh \
-            --distro "$ISO_DISTRO" \
+            --distro ubuntu \
             --disk "$ISO_DISK" \
             --role "$ISO_ROLE" \
             --family "$ISO_FAMILY" \
@@ -131,10 +123,10 @@ jobs:
             --iso-model "$ISO_PAYLOAD" \
             --iso-repo "$ISO_PAYLOAD" \
             --yes \
-            --out "$GITHUB_WORKSPACE/iso/out/ai-cpu-os-${ISO_DISTRO}.iso" \
+            --out "$GITHUB_WORKSPACE/iso/out/ai-cpu-os-ubuntu.iso" \
           2>&1 | tee /tmp/iso-build.log
 
-          iso="iso/out/ai-cpu-os-${ISO_DISTRO}.iso"
+          iso="iso/out/ai-cpu-os-ubuntu.iso"
           test -f "$iso" || { echo "::error::ISO não foi gerada"; exit 1; }
           ls -la "$iso"
           sha256sum "$iso" | tee "$iso.sha256"
@@ -144,7 +136,7 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          iso="iso/out/ai-cpu-os-${ISO_DISTRO}.iso"
+          iso="iso/out/ai-cpu-os-ubuntu.iso"
           # ATENÇÃO: o limite de 2 GiB vale para ASSET DE RELEASE, não para
           # ARTIFACT. A primeira versão desta checagem derivava o artifact do
           # mesmo booleano, e o resultado era cruel: a ISO air-gapped (~4 GB)
@@ -185,24 +177,24 @@ jobs:
           {
             echo "## ISO de instalação (ai-cpu-os)"
             echo
-            echo "- Base do SO: \`$ISO_DISTRO\`"
+            echo "- Base do SO: \`ubuntu\`"
             echo "- Papel gravado: \`$ISO_ROLE\` (\`auto\` = detecta o hardware no 1º boot)"
             echo "- Família gravada: \`$ISO_FAMILY\` (\`auto\` = detecta o hardware no 1º boot)"
             echo "- Disco do autoinstall: \`$ISO_DISK\`"
             echo "- Payload embutido (fonte/modelo/repo): \`$ISO_PAYLOAD\`"
-            iso_file="iso/out/ai-cpu-os-${ISO_DISTRO}.iso"
+            iso_file="iso/out/ai-cpu-os-ubuntu.iso"
             size="$( [ -f "$iso_file" ] && du -h "$iso_file" | cut -f1 || echo n/a )"
             echo "- Tamanho: \`$size\`"
             echo
-            if [ -f "iso/out/ai-cpu-os-${ISO_DISTRO}.iso" ]; then
+            if [ -f "iso/out/ai-cpu-os-ubuntu.iso" ]; then
               echo "### Artefato"
               echo '```'
-              ls -lh "iso/out/ai-cpu-os-${ISO_DISTRO}.iso"
+              ls -lh "iso/out/ai-cpu-os-ubuntu.iso"
               # O .sha256 e criado DEPOIS do build ter dado certo; se o build
               # falhou, o .iso existe mas o .sha256 nao — e este `cat` derrubava
               # o proprio passo de RELATORIO, escondendo a causa real (foi o que
               # aconteceu no run #6: dois passos vermelhos, e o segundo era eco).
-              cat "iso/out/ai-cpu-os-${ISO_DISTRO}.iso.sha256" 2>/dev/null \
+              cat "iso/out/ai-cpu-os-ubuntu.iso.sha256" 2>/dev/null \
                 || echo "(sha256 nao gerado — o build falhou antes)"
               echo '```'
             fi
@@ -277,7 +269,7 @@ jobs:
         # e grava com `make pendrive`. O limite de 2 GiB e da Release, nao do
         # artifact (ver o passo anterior).
         with:
-          name: ai-cpu-os-iso-${{ env.ISO_DISTRO }}
+          name: ai-cpu-os-iso-ubuntu
           path: |
             iso/out/*.iso
             iso/out/*.iso.sha256

@@ -23,6 +23,8 @@ lugar errado:
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | diagramas e fluxos visuais | mudar o desenho do fluxo entre componentes |
 | [`docs/STATE.md`](docs/STATE.md) | o que está provado **hoje** + próxima ação | **ao fim de toda** sessão |
 | [`docs/JOURNAL.md`](docs/JOURNAL.md) | histórico de sessões, threads abertas, armadilhas | **ao fim de toda** sessão |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | **decisões firmadas (ADRs)**: contexto, consequências, plano e critérios de aceite | tomar/mudar uma decisão de arquitetura ou contrato |
+| [`docs/CHAT.md`](docs/CHAT.md) | contrato do **`ai-talk`** (chat da frota) | mudar protocolo/config/segurança do chat |
 | [`docs/TUNING.md`](docs/TUNING.md) | a justificativa técnica de cada ajuste | mudar/adicionar um ajuste |
 | [`docs/VALIDATION.md`](docs/VALIDATION.md) | o protocolo de teste em hardware | adicionar uma área que precisa de validação manual |
 
@@ -125,16 +127,15 @@ ai-cpu-os/
 │   │   └── (cada uma: mod.conf + apply.sh + revert.sh)
 │
 ├── iso/                    # 🎯 ENTREGÁVEL FINAL
-│   ├── build-iso.sh        # remasteriza (--distro ubuntu|debian)
+│   ├── build-iso.sh        # remasteriza (base única: Ubuntu)
 │   ├── verify-iso.sh       # prova o CONTEÚDO (--iso ou --dir)
 │   ├── test-vm.sh          # prova o COMPORTAMENTO (qemu + console serial)
 │   ├── write-pendrive.sh   # grava num pendrive (9 travas; o passo mais perigoso)
 │   ├── check-iso.sh        # confere uma ISO BAIXADA sem xorriso (dd/od/sha256)
-│   ├── autoinstall/autoinstall.yaml   # config do Ubuntu (padrão)
-│   └── preseed/            # templates compartilhados + legado Debian
-│       ├── ai-cpu-os.cfg       # (só Debian)
-│       ├── late-command.sh     # compartilhado (d-i e Subiquity)
-│       ├── firstboot.sh        # compartilhado — aplica no 1º boot
+│   ├── autoinstall/autoinstall.yaml   # config do Ubuntu (única base)
+│   └── common/             # scripts do instalador (ADR-001)
+│       ├── late-command.sh     # passo final do instalador
+│       ├── firstboot.sh        # aplica no 1º boot
 │       └── ai-cpu-os-firstboot.service
 │
 ├── tests/
@@ -142,7 +143,7 @@ ai-cpu-os/
 │   ├── test-families.sh    # casamento CPU → família (sem hardware)
 │   ├── test-iso-selection.sh # escolha da ISO oficial no SHA256SUMS
 │   ├── test-iso-repo-filter.sh # repo apt: filtro + fallback (stubs)
-│   ├── test-verify-iso-repo-distro.sh # verificador distro-aware (autoinstall × preseed)
+│   ├── test-verify-iso-repo.sh # verificador cobra o repo local no late-command
 │   ├── test-ci-guards.sh   # os guardas do CI reprovam mesmo?
 │   ├── test-write-pendrive.sh # as travas do pendrive (alvo = ARQUIVO)
 │   ├── test-check-iso.sh   # conferência de ISO baixada (fixtures byte a byte)
@@ -240,7 +241,10 @@ Estes são os pontos que, se violados, quebram de forma silenciosa e cara.
 
 | Invariante | Por quê |
 |---|---|
-| A config de instalação **tem** de chegar na ISO | Sem `/autoinstall.yaml` (Ubuntu) ou `/preseed/ai-cpu-os.cfg` (Debian), a instalação deixa de ser automática — e o usuário descobre só no meio do processo. |
+| **Base única: Ubuntu Server** (ADR-001, executado na sessão #42) | Um caminho de boot/instalador/templates. O Debian/preseed foi **removido**: `--distro debian` aborta e o CI reprova se `preseed/` voltar. O runtime Debian (`build.sh`/`mods/`) continua suportado. |
+| **Identidade = papel** (ADR-002, planejado) | `inference`→`ai-inference`, `builder`→`ai-builder`; `--username`/`--hostname` explícitos vencem; `auto` mantém `ai-cpu-os` + aviso (o papel só é conhecido no 1º boot). |
+| **`ai-talk` vai na ISO; `webui/` não** (ADR-003) | O chat é runtime da frota; a UI é ferramenta da máquina que gera a mídia. O `ai-talk` é stdlib, air-gapped e mensagem **nunca** vira comando. |
+| A config de instalação **tem** de chegar na ISO | Sem `/autoinstall.yaml` na raiz (ao lado de `casper/`), a instalação deixa de ser automática — e o usuário descobre só no meio do processo. |
 | Nenhum `@@TOKEN@@` pode sobrar | Um token não substituído gera comportamento indefinido no instalador. |
 | Senha **só** como hash crypt | Nunca texto puro numa mídia. |
 | Tuning acontece no **1º boot**, nunca no late-command | Durante a instalação não há systemd do alvo, o kernel é outro e o hardware real não está visível. Detalhes: `docs/ISO.md` § 3. |
@@ -258,8 +262,8 @@ Estes são os pontos que, se violados, quebram de forma silenciosa e cara.
 
 - Todo script Bash: `set -euo pipefail`.
 - Exceção única: POSIX `sh` que roda **dentro do instalador** usa `set -eu`
-  (o `/bin/sh` do debian-installer é dash, sem `pipefail`) —
-  `iso/preseed/late-command.sh`. O guarda do CI distingue por shebang.
+  (o `/bin/sh` do ambiente do instalador é dash, sem `pipefail`) —
+  `iso/common/late-command.sh`. O guarda do CI distingue por shebang.
 - `--dry-run`, `--yes`, idempotência e confirmação antes de ação destrutiva.
 
 ---
@@ -275,7 +279,7 @@ bash build.sh --list-families             # apareceu?
 bash tests/test-families.sh               # não quebrou o corpus?
 bash tests/test-iso-selection.sh          # a escolha da ISO oficial ainda está certa?
 bash tests/test-iso-repo-filter.sh        # o repo apt não perde lote em silêncio?
-bash tests/test-verify-iso-repo-distro.sh # o verificador entende as duas distros?
+bash tests/test-verify-iso-repo.sh # o verificador cobra o repo local?
 bash tests/test-ci-guards.sh              # os guardas do CI reprovam mesmo?
 bash tests/test-check-iso.sh              # a conferência de ISO baixada acerta?
 bash tests/test-webui.sh                  # a interface web continua contida?
@@ -428,7 +432,7 @@ make iso-yaml        # autoteste das ferramentas da ISO (com teste negativo)
 bash tests/test-families.sh
 bash tests/test-iso-selection.sh     # escolha da ISO oficial (sem rede)
 bash tests/test-iso-repo-filter.sh   # repo apt: filtro e fallback (sem rede)
-bash tests/test-verify-iso-repo-distro.sh # verificador distro-aware (sem xorriso)
+bash tests/test-verify-iso-repo.sh # verificador do repo local (sem xorriso)
 bash tests/test-ci-guards.sh         # os guardas do CI reprovam? (cópia temporária)
 bash tests/test-check-iso.sh         # conferência de ISO baixada (sem xorriso)
 bash tests/test-webui.sh             # interface web: API + salvaguardas
@@ -487,7 +491,7 @@ Esta seção é um **playbook**. Todos os itens abaixo aconteceram de verdade.
 | `exit code 22` no `build-iso.sh` | É código do **`curl`** (HTTP ≥ 400 sob `-f`), não do script. Caso real: o `SHA256SUMS` do Ubuntu marca o modo binário com `*` e o `*` ia para a URL → **404** | A URL sai no log (`Baixando <url>`); confirme com `curl -sIL -o /dev/null -w '%{http_code}'` |
 | `Pacote pedido está AUSENTE no repositório: X` | `apt-get download a b c` **aborta o lote inteiro** se um nome não tiver candidato (pacote virtual). O `|| true` engolia até 25 pacotes por lote | `make iso-repo-test` reproduz o caso offline |
 | Um guarda do CI "não reprova" quando você planta a violação | Guarda na forma `! cmd`: o `set -e` **ignora** o status de comandos invertidos com `!` | `make ci-guards-test` planta as violações e exige que o job falhe |
-| A ISO **Debian** é reprovada pelo verificador, mas está correta | O `verify-iso.sh` procurava o repo em uso **só no autoinstall** — que não existe no Debian (que usa preseed). Falso positivo | `make iso-verify-test` roda o verificador nas duas distros, e falha se voltar o viés |
+| ~~A ISO **Debian** é reprovada pelo verificador~~ (histórico) | O `verify-iso.sh` procurava o repo em uso **só no autoinstall** — que não existia no Debian (que usava preseed). Falso positivo, corrigido na sessão #20. O caminho Debian foi **removido** (ADR-001) | `make iso-verify-test` garante o contrário hoje: o verificador **não** pode voltar a conferir preseed |
 | `openssl não encontrado` no build da ISO | Dependência **implícita do runner**: o build usa `openssl passwd -6` e o workflow não o instalava. Descobri num container `ubuntu:24.04` limpo | O workflow agora instala `openssl`, `gzip` e `ca-certificates` |
 | O run da ISO falha **depois** de gerar a ISO, com `exit 127` | Uma mensagem de aviso tinha a linha partida: a 2ª linha virava **comando solto** (`command not found`). Só aparecia com ISO > 2 GiB (o caso air-gapped) | Monte a mensagem numa **variável**; nunca deixe string solta no `run: \|` |
 | A ISO air-gapped é gerada mas **não dá para baixar** | O mesmo booleano gateava artifact **e** Release. O limite de 2 GiB é de **asset de Release**; artifact não tem esse limite (só nº por job e perda de permissões) | O artifact sobe **sempre**; só a Release é gateada (`release_too_big`). Há guarda no CI |
@@ -635,7 +639,7 @@ Leia isto **antes** de afirmar que algo funciona.
 | Build do llama.cpp | ✅ | ✅ CI compila **e executa** (14 famílias) | ❌ |
 | Build **offline** (`--source`) | ✅ | ⚠️ `--dry-run` (dir + tarball) e extração real com ferramentas de build **simuladas**; **compilação real de um fonte do llama.cpp não executada** | ❌ |
 | Modelo **embutido na ISO** (`--iso-model`) | ✅ | ✅ **validado num boot real (sessão #21)**: o `late-command` copiou para `/opt/models` e o 1º boot o usou via `AI_MODEL_FILE`, sem rede | ❌ (só na VM) |
-| Repositório apt **na mídia** (`--iso-repo`) | ✅ | ✅ **validado (sessão #21, era bug)**: a seção `sources` do Subiquity **não funciona** (o curtin roda `apt-get update` num chroot sem `/cdrom`); agora o late-command carrega o repo para o **alvo** (`/opt/apt-repo`) e o 1º boot o usa — sem rede. ⚠️ O caminho **Debian** (`apt-setup/local0/*`) segue **suposição** | ❌ (só na VM) |
+| Repositório apt **na mídia** (`--iso-repo`) | ✅ | ✅ **validado (sessão #21, era bug)**: a seção `sources` do Subiquity **não funciona** (o curtin roda `apt-get update` num chroot sem `/cdrom`); agora o late-command carrega o repo para o **alvo** (`/opt/apt-repo`) e o 1º boot o usa — sem rede. 🗑️ O caminho **Debian** foi **removido** (ADR-001) | ❌ (só na VM) |
 | Fonte **na mídia** (`--iso-source`) | ✅ | ✅ **validado num boot real (sessão #21)**: o llama.cpp foi compilado do tarball da mídia, sem rede (`/opt/llama.cpp/build/bin/llama-server`) | ❌ (só na VM) |
 | Ajustes de kernel (mods) | ✅ | ⚠️ só `--dry-run`/sintaxe | ❌ |
 | Revert das mods | ✅ | ⚠️ não exercitado de ponta a ponta | ❌ |
@@ -643,7 +647,9 @@ Leia isto **antes** de afirmar que algo funciona.
 | Papel `builder` (Docker/registry/Gitea) | ✅ | ❌ | ❌ |
 | ISO (conteúdo) | ✅ | ✅ `verify-iso.sh` (com teste negativo) — **na ISO real: PASS=41/FAIL=0** | ❌ |
 | ISO (boot/instalação, **Ubuntu**) | ✅ | ✅ **executado (sessão #21)**: `test-vm.sh` exit 0 — instalou sozinha e o 1º boot aplicou (`status=ok`, família `intel-haswell`) | ❌ (só na VM) |
-| ISO (boot/instalação, **Debian**) | ✅ | ❌ **nunca executado** | ❌ |
+| ~~ISO (boot/instalação, **Debian**)~~ | 🗑️ removido | ✅ executado em VM (#35) e em metal (#37) **antes** da remoção (ADR-001, sessão #42) | — |
+| Identidade por papel (ADR-002) | ✅ plano | ❌ **não implementada** | ❌ |
+| Chat da frota `ai-talk` (ADR-003) | ✅ desenho (`docs/CHAT.md`) | ❌ **não implementado** | ❌ |
 | Boot **UEFI** da ISO | ✅ | ❌ nunca testado | ❌ |
 | GPU (qualquer backend) | ✅ | ❌ | ❌ |
 
@@ -692,9 +698,10 @@ em `docs/FAMILIES.md` § 9.3. Se você melhorar qualquer linha desta tabela,
 4. **Validação em hardware físico ainda zero** até a data desta revisão (ver § 11)
    — é a lacuna maior. **A ISO, porém, já foi gerada e bootada em VM** (#21).
 5. **x86-64 apenas.**
-6. **A ISO foi bootada em VM (Ubuntu, sessão #21), mas não em hardware e não no
-   Debian.** É o critério de conclusão do projeto: satisfeito para o caminho
-   Ubuntu em VM; faltam Debian, UEFI e hardware físico.
+6. **A ISO foi bootada em VM (Ubuntu, sessão #21), mas não em hardware
+   físico.** É o critério de conclusão do projeto: satisfeito para o caminho
+   Ubuntu em VM; faltam UEFI e hardware físico. E, desde a remoção do caminho
+   Debian (sessão #42), **nenhuma ISO foi gerada nem bootada de novo**.
 
 ---
 

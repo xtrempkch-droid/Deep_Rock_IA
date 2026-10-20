@@ -1,9 +1,12 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-17 (🌐 **rede do sistema instalado na ISO** —
-> `--network auto|dhcp|static|none`, netplan persistente no alvo e cloud-init
-> desligado; corrige o alvo que subia **sem DHCP**. Ver `JOURNAL.md` sessão #28)
+> **Última atualização:** 2026-10-20 (🗑️ **o caminho Debian da ISO foi
+> REMOVIDO** — ADR-001 executado na sessão #42: `iso/common/` no lugar de
+> `iso/preseed/`, `--distro debian` aborta, CI com guardas provados,
+> `make validate` verde. 💬 O `ai-talk` F1 (sessão #41) segue no código.
+> **Pendentes: identidade por papel (ADR-002), F2 do chat e um boot de ISO
+> depois da remoção.** Ver `JOURNAL.md` sessões #39–#42.)
 
 ---
 
@@ -13,13 +16,23 @@
   (a `0.2.0` foi o marco de CI/CD). **Nenhuma validação nova de hardware** foi
   feita nesta refatoração — ver § 2.
 - **Commit de referência:** `1d14cbb` (último commit verde antes da refatoração)
-- **Sistema operacional alvo:** **Ubuntu Server 22.04+/24.04+** (referência do
-  projeto); Debian 12+ continua suportado como base das mods.
+- **Sistema operacional alvo:** **Ubuntu Server 22.04+/24.04+** — **base ÚNICA
+  da ISO** desde 2026-10-20 (ADR-001). Debian 12+ continua suportado apenas
+  como **sistema hospedeiro** de `build.sh`/`mods/`; o caminho Debian/preseed
+  da ISO está **DEPRECADO** e será removido.
 - **Suporte de hardware:** por **família de microarquitetura** (14 famílias, com
   herança — incluindo Xeon Scalable v5–v9/Xeon 6, EPYC Naples→Turin e Zen 5,
   com **AVX-512 como padrão** nas famílias que o têm, decisão do dono de
   2026-10-16) — ver [`docs/FAMILIES.md`](FAMILIES.md). O modelo “um perfil por
   processador” foi descontinuado.
+- **Decisões da próxima fase (2026-10-20, sessão #39)** — detalhes em
+  [`docs/DECISIONS.md`](DECISIONS.md):
+  - **Uma ISO, base Ubuntu** (ADR-001): remoção do caminho Debian é **P0**;
+    até lá ele funciona, mas avisa que está deprecado.
+  - **Identidade pelo papel** (ADR-002): `inference` → `ai-inference`,
+    `builder` → `ai-builder`; `auto` → `ai-cpu-os` + aviso. **Não implementada.**
+  - **`ai-talk`** (ADR-003): chat da frota em TCP/JSON lines + HMAC, Python
+    stdlib. Desenho em [`docs/CHAT.md`](CHAT.md); **não implementado**.
 
 ---
 
@@ -74,7 +87,8 @@
 | `iso/check-iso.sh` (ISO baixada, sem xorriso) | ✅ | ✅ shellcheck | ✅ **20 asserções, fixtures byte a byte**; ❌ nunca rodou contra um artifact real do GitHub |
 | `iso/write-pendrive.sh` (grava o pendrive) | ✅ | ✅ shellcheck | ⚠️ 16 asserções gravando num **ARQUIVO**; ❌ **nenhum pendrive físico gravado** |
 | `webui/server.py` + `webui/index.html` (interface web) | ✅ | ⚠️ py_compile | ⚠️ **34 asserções pela API**; ❌ **nunca aberta num navegador** |
-| `iso/preseed/*` (preseed, 1º boot)    | ✅      | ⚠️ (templating)    | ✅ **instalado em VM (Ubuntu) e em VM (Debian 13, 2026-10-18)** — ver § 3.4 |
+| `talk/ai_talk.py` (**chat da frota**, F1) | ✅ | ✅ py_compile + **30 asserções** (`make talk-test`) | ❌ só loopback; **sem duas VMs e sem ISO** |
+| `iso/common/*` (late-command, 1º boot) | ✅     | ⚠️ (templating)    | ✅ **instalado em VM (Ubuntu)**; a instalação Debian (#35/#37) foi feita **antes** da remoção (ADR-001) — ver § 3.4 |
 | `docs/ISO.md`                         | ✅      | ⚠️ (revisão manual)| ❌                  |
 | `docs/JOURNAL.md` (continuidade)      | ✅      | ⚠️ (revisão manual)| ☐ **em uso contínuo** |
 
@@ -382,6 +396,101 @@ AI-CPU-OS-BUILD.txt:
 > ⚠️ **Não provado:** Ubuntu sem internet (só Debian), rede sem DHCP, e o
 > mesmo teste em hardware físico.
 
+### 3.8 🧭 Preparação da próxima fase (2026-10-20, sessões #39–#42)
+
+Três decisões foram firmadas pelo dono e registradas em
+[`docs/DECISIONS.md`](DECISIONS.md):
+
+| ADR | Decisão | Estado |
+|-----|---------|--------|
+| **ADR-001** | Uma única base de ISO: **Ubuntu Server**; caminho Debian/preseed **removido** | ✅ **EXECUTADO (P0, sessão #42)** — ver § 3.9 |
+| **ADR-002** | Identidade do sistema derivada do papel (`ai-inference`/`ai-builder`) | **Não implementada** (próxima) |
+| **ADR-003** | Chat de frota **`ai-talk`** (TCP 7331, JSON lines, HMAC, stdlib) | **F1 no código** — `talk/ai_talk.py` + `docs/CHAT.md` |
+| **ADR-004** | Latência/espaçamento/durabilidade do chat: 50 ms por par, fila 256, p99 ≤ 10 ms, `fsync` por mensagem | ✅ **no código e provado** (`make talk-test`, 30 asserções) |
+| **ADR-005** | **Teto de 15 nós** em malha completa (chave por nó, dedupe 8.192) | ✅ **F1 no código** — provado por `make talk-test` |
+
+**O que já existe:**
+
+- `docs/DECISIONS.md` — contexto, decisão, consequências, mapa de impacto,
+  plano e critérios de aceite de cada ADR.
+- `docs/CHAT.md` — contrato do `ai-talk`: protocolo v1, envelope, HMAC,
+  config, CLI, systemd, segurança, testes, fases e alternativas descartadas
+  (incluindo o `talk` do netkit). Inclui **§5.2 (teto de 15 nós)**,
+  **§6.7 (latência/espaçamento)** e **§6.8 (durabilidade)**.
+- `talk/ai_talk.py` (daemon + CLI, **só stdlib**) e `tests/test-ai-talk.sh`
+  (30 asserções, loopback, sem root nem rede externa), no `validate` e no CI.
+- `docs/VALIDATION.md` — **Bloco R** (chat da frota) como roteiro a executar na
+  fase F2; nenhum passo executado.
+- `Makefile` (`make docs`) e `.github/workflows/validate.yml` exigem
+  `docs/DECISIONS.md` e `docs/CHAT.md`.
+
+**O que NÃO existe ainda (não confunda plano com fato):**
+
+- Nenhuma derivação de usuário/hostname por papel (ADR-002).
+- O `talk/` está em **F1**: **não** há `talk/install.sh`, unit systemd,
+  integração na ISO, teste com duas VMs nem bancada de 15 nós.
+- Nenhuma ISO nova foi gerada ou bootada **depois da remoção do Debian**
+  (sessão #42).
+
+---
+
+### 3.9 🗑️ O caminho Debian da ISO foi removido (2026-10-20, sessão #42)
+
+**Objetivo:** executar o **ADR-001** — a ISO passa a ter **uma** base (Ubuntu
+Server). A motivação do dono foi objetiva: *"esse projeto está ficando
+complicado demais com 2 imagens de ISO"*.
+
+**O que mudou:**
+
+| Antes | Depois |
+|---|---|
+| `iso/preseed/` (preseed + scripts + unit) | **`iso/common/`** só com `late-command.sh`, `firstboot.sh` e o unit — nenhum ramo Debian |
+| `--distro ubuntu\|debian` | `--distro ubuntu`; qualquer outro valor **aborta com exit 2** citando o ADR-001 |
+| Templates em `/preseed/` na mídia | Templates em **`/ai-cpu-os-boot/`** |
+| `verify-iso.sh` com dois caminhos (autoinstall × preseed) | **um** caminho (autoinstall) + recusa explícita do Debian |
+| `Makefile` com `DISTRO` e `iso-dry-run-both` | sem `DISTRO`; alvo único **`iso-dry-run`** |
+| `webui` com seletor de distro | `DISTROS = ("ubuntu",)`; a página mostra uma nota |
+| `tests/test-verify-iso-repo-distro.sh` | `tests/test-verify-iso-repo.sh` (6 asserções) |
+
+**Funções e dependências apagadas do `iso/build-iso.sh`:**
+`extract_iso_debian`, `expand_apt_offline_block`, `expand_root_preseed_block`,
+`expand_network_preseed_block`, `inject_preseed_initrd`, `patch_isolinux`,
+`patch_efi_debian`, `debian_locale_args`, `grub_bootdev_line`, `repack_iso`,
+`regenerate_md5sums`, `backup_file`, `--mirror-host`, `--mirror-dir`, e as
+dependências `isolinux`/`mtools`.
+
+**Como isso é cobrado (guardas provados por violação plantada em
+`make ci-guards-test`):**
+
+- `--distro debian` sai com **exit 2** e a mensagem cita o **ADR-001**.
+- O `build-iso.sh` **não** pode voltar a mencionar `preseed/`.
+- O diretório `iso/preseed/` **não** pode reaparecer.
+- O `verify-iso.sh` **não** pode voltar a conferir `apt-setup/local0`.
+- Os invariantes do instalador automático que o Debian ensinou continuam
+  guardados no caminho Ubuntu: `autoinstall quiet` na cmdline, `autoinstall.yaml`
+  em **`-map … /autoinstall.yaml`**, `shutdown: reboot`, `refresh-installer
+  update: false`, `geoip: false`, `ssh.install-server: true`, `synс` no
+  `firstboot.sh` e marcador no `/dev/ttyS0`.
+
+**Resultado:** `make validate` **verde** — `ci-guards` **93** (era 98 antes de
+supressão dos casos Debian), `ai-talk` 30, `webui` 46, `iso-lint` OK,
+`iso-selection` 10, `verify-repo` 6, `iso-lock` 13, `iso-disk` 16,
+`iso-release` 10, `verify-iso-space` 6, `mod-network` 41, `mod-apt-sources`
+17, `write-pendrive` 16, `check-iso` 20, `avx512` 61, `docs` OK.
+
+**O que NÃO foi feito / não foi testado:**
+
+- ❌ **Nenhuma ISO foi gerada nem bootada depois da remoção.** O `--dry-run`
+  roda e o `--check-templates` valida o `autoinstall.yaml` substituído, mas
+  isso **não** é boot. A prova de comportamento continua sendo a da sessão #21
+  (anterior à mudança).
+- ❌ Nada foi instalado em hardware físico com a ISO nova.
+- ❌ O modo `static` de rede continua só testado por template.
+
+---
+
+---
+
 ## 4. Problemas conhecidos no momento
 
 1. **Risco em hardware físico não medido.** O caminho ISO foi provado em VM; o
@@ -433,6 +542,18 @@ AI-CPU-OS-BUILD.txt:
     console** (`apt-get install -y openssh-server`). Ver § 3.5.
 14. **O `md5sum.txt` regenerado nunca foi validado** por um instalador real
     (o debian-installer usa esse arquivo para checar a integridade da mídia).
+15. **O caminho Debian da ISO está DEPRECADO (ADR-001).** Ele continua
+    funcional por compatibilidade, mas **não recebe feature nem teste novo** e
+    será removido. O runtime Debian (`build.sh`/`mods/`) **não** está em
+    discussão.
+16. **A identidade por papel ainda não existe (ADR-002).** Hoje o padrão
+    continua `ai-cpu-os`; `ai-inference`/`ai-builder` são a decisão, não um
+    fato. `--role auto` não pode derivar identidade (o papel só é conhecido no
+    1º boot).
+17. **O `ai-talk` está em F1 (ADR-003/004/005).** Existe `talk/ai_talk.py`
+    (transporte + CLI) e `make talk-test` (**30 asserções** em loopback), mas
+    **não** há `talk/install.sh`, unit, `--chat-*` na ISO, duas VMs nem a
+    bancada de 15 nós. A latência real e o teto continuam **não medidos**.
 
 ---
 
@@ -478,6 +599,50 @@ da rede).
 
 > **👉 ESTA É A SEÇÃO REFERENCIADA PELO `AGENTS.md`.**
 
+**🧭 PRÓXIMA AÇÃO (sessão #42, 2026-10-20) — P1: identidade derivada do
+papel (ADR-002).**
+
+Estado da fila: **P0 ✅ feita** (§ 3.9) e **P2/F1 do `ai-talk` ✅ feita**. O que
+resta, em ordem:
+
+1. **P1 — identidade derivada do papel (ADR-002).** ← **é aqui que se começa**
+   - `inference` → `ai-inference`; `builder` → `ai-builder`; `auto` →
+     `ai-cpu-os` + aviso; `--username`/`--hostname` explícitos vencem.
+   - Adicionar `resolve_identity()` no `build-iso.sh`, linha testável no
+     `--dry-run`, `tests/test-role-identity.sh` + `make identity-test` + CI.
+   - **Aceite:** os 8 critérios do ADR-002; `verify-iso.sh` confere a
+     coerência identidade × papel.
+2. **P2 — `ai-talk` fase 1 (transporte + CLI + teste offline).** ✅ **FEITO
+   (sessão #41).**
+   - `talk/ai_talk.py` (stdlib), CLI `ai-talk`, `tests/test-ai-talk.sh`; dois
+     daemons em loopback; HMAC (chave por nó), ack, dedupe, peer offline,
+     limites e **espaçamento** (ADR-004/ADR-005).
+   - **Aceite cumprido:** 30 asserções no `make validate` e no CI; nenhum
+     download; nenhuma dependência Python externa (`ci-guards` 89 → 98).
+3. **P3 — `ai-talk` fase 2/3 (ISO + duas VMs + ponte com o modelo).**
+   - `talk/install.sh` idempotente, unit `ai-talk.service`, etapa 2.5 do
+     `build.sh` (antes do papel, para relatar falha), flags `--chat-*` na ISO
+     (incluindo `--chat-peers-file`/`--chat-keydir`), seção no `verify-iso.sh`
+     e Bloco R no `VALIDATION.md`.
+   - **Aceite:** ISO dry-run/yaml verdes; duas VMs trocam mensagens; a ponte
+     com o `llama-server` é opcional e **não executa comandos** recebidos.
+4. **P4 (só se a bancada exigir) — `ai-talk` no teto de 15 nós.**
+   - Bancada de 15 containers (§13.5 do `CHAT.md`): 14 conexões por nó,
+     broadcast em ~2 RTTs, p99 ≤ 10 ms com 280 msg/s de fundo.
+   - **Aceite:** teto confirmado por medição. Se não couber, entra o
+     **relay/hub** (ADR-005) — não se aumenta o teto.
+5. **P5 (dívida aberta pela P0) — gerar e bootar uma ISO Ubuntu** depois da
+   remoção do caminho Debian, para provar que o comportamento não regrediu
+   (`make iso-vm`). É a **única** forma de afirmar que a ISO continua boa
+   (Regra 13). Enquanto isso não acontecer, o que existe é `verify-iso`
+   (conteúdo) + `--check-templates` — **não** é boot.
+
+**Critérios de aceite da fase inteira:** `make validate` verde; `docs/ISO.md`
+com uma única base; `AGENTS.md` com as Regras 17/18; nenhuma afirmação de
+“pronto” sem execução (Regras 10 e 13 do `AGENTS.md`).
+
+### Histórico da seção (não apagar)
+
 **✅ Recém-fechado (sessão #35, 2026-10-18) — a ISO Debian funciona.** O pedido
 "a criação de ISO Debian está apresentando falhas, corrija" foi fechado **por
 execução**: a ISO instala sozinha, **reinicia sozinha** e o 1º boot aplica o
@@ -519,8 +684,14 @@ v4 e Ryzen 5 3500X) — o *fluxo* já foi validado em metal, o que falta é o
 máquina: `llama-bench` → `mods/apply.sh revert` → reboot → `llama-bench`). Antes disso, os dois itens de menor esforço
 e maior retorno:
 
-1. **Debian air-gapped** — gerar `--distro debian` com `--iso-model auto
-   --iso-source auto --iso-repo auto` e repetir o `test-vm.sh`. É o único
+> ⚠️ **Atualização (2026-10-20, sessão #39):** o caminho **Debian foi
+> DEPRECADO** (ADR-001). O item **1 (Debian air-gapped)** e a parte Debian do
+> **Bloco M** abaixo estão **CANCELADOS**; a prioridade agora é P0–P3 do topo
+> desta seção.
+
+1. ~~**Debian air-gapped** — gerar `--distro debian` com `--iso-model auto
+   --iso-source auto --iso-repo auto` e repetir o `test-vm.sh`.~~ **Cancelado
+   (ADR-001).** Era o único
    requisito do `docs/ISO.md` § 3.1 ainda **não exercitado no Debian** (no
    Ubuntu ele está provado desde a sessão #21).
 2. **Boot UEFI** (`--boot-mode uefi`) — nunca bootado em nenhuma das duas
@@ -645,7 +816,8 @@ de a automação falhar, detalhados em `docs/TROUBLESHOOTING.md` § "SINALIZADO"
 **(1)** `--disk` fixado que não existe no alvo (o **default do CI é `/dev/vda`**
 — em hardware real pode não existir → Subiquity cai em erro e o `verify-iso` não
 pega); **(2)** **UEFI nunca bootado** (`--boot-mode uefi` exige `ovmf`);
-**(3)** **Debian/preseed nunca executado**.
+**(3)** ~~**Debian/preseed nunca executado**~~ — superado nas sessões #35/#37
+(VM e metal); hoje o caminho está **deprecado** (ADR-001).
 
 **Passo 1-e — ✅ FEITO (2026-10-17, sessão #33). Rede do sistema instalado na
 ISO — corrige o alvo que subia SEM DHCP.**
@@ -716,7 +888,9 @@ pergunta ao binário qual sintaxe vale (`--load-mode none` vs `--no-mmap`).
 Também corrigido o `shell-ia.py`, que devolvia a linha do **protocolo**
 (`RESULT: …`) como resposta final.
 
-**NÃO provado:** modo `static`, hardware físico, caminho Debian, UEFI.
+**NÃO provado (naquela sessão):** modo `static`, hardware físico e UEFI. O
+caminho Debian foi provado depois (#35/#37) e hoje está **deprecado**
+(ADR-001).
 
 **Passo 2 (AGORA) — validar em HARDWARE FÍSICO (Xeon E5-2680 v4 e Ryzen 5 3500X).**
 
@@ -724,8 +898,9 @@ O que falta não é código: é rodar os blocos preenchíveis de
 [`docs/VALIDATION.md`](VALIDATION.md) **nas duas máquinas reais** e trazer os
 resultados. Prioridades:
 
-- **Bloco M** (ISO): repetir o passo 1 no Xeon/Ryzen e ver o efeito do tuning;
-  **gerar também `--distro debian`** (o caminho preseed **nunca foi testado**).
+- **Bloco M** (ISO): repetir o passo 1 no Xeon/Ryzen **com Ubuntu** e ver o
+  efeito do tuning. ~~Gerar também `--distro debian`~~ — **cancelado**
+  (ADR-001; o preseed foi provado nas #35/#37 e será removido).
 - **Bloco M.5-b (novo)**: uma ISO gerada com o código atual tem de fazer o
   alvo pegar IP **sozinho** (DHCP e `static`) e continuar assim após reboot.
 - **Bloco N**: `bash families/resolve.sh`, `./detect-hardware.sh` e
@@ -769,6 +944,9 @@ Ao terminar qualquer tarefa:
 
 | Data       | Mudança                                                    |
 |------------|------------------------------------------------------------|
+| 2026-10-20 | 🧭 **Preparação da fase “uma ISO, duas funções, uma frota” (sessão #39).** Decisões em `docs/DECISIONS.md` (ADR-001 Ubuntu-only; ADR-002 identidade por papel; ADR-003 `ai-talk`) e contrato do chat em `docs/CHAT.md`. `--distro debian` ganhou aviso de depreciação; `make docs` e o CI passaram a exigir os dois documentos. **Nada de identidade/chat implementado; nenhuma ISO gerada.** |
+| 2026-10-20 | 💬 **Contrato do chat fechado (sessão #40):** **ADR-004** — espaçamento de **50 ms** entre `msg` do mesmo par (20 msg/s), fila de **256** com exit 5 no overflow, meta **p99 ≤ 10 ms**, `fsync` por mensagem; **ADR-005** — **teto de 15 nós** em malha completa, com chave por nó, `dedupe_window=8192` e `max_out_per_sec=120`. Corrigido o pior caso do ack (**9 s**, não 6 s) e adicionado `connect_timeout`. `CHAT.md` §5.2/§6.7/§6.8. **Nada implementado; nenhuma medição feita.** |
+| 2026-10-20 | 💬 **`ai-talk` F1 implementado e testado (sessão #41):** `talk/ai_talk.py` (stdlib) com daemon + CLI, HMAC por nó, `ack` após `fsync`, `TCP_NODELAY`, espaçamento de 50 ms por par, fila 256 (exit 5), dedupe 8.192 e teto de 15 peers. `make talk-test` (**30 asserções**, loopback) no `validate` e no CI; `ci-guards` 89 → **98**. **Não feito:** `talk/install.sh`, unit, ISO, duas VMs, ponte com o modelo e bancada de 15 nós. |
 | 2026-10-18 | ⚡ **A ISO não instalava sem internet (sessão #38).** Três telas do d-i paravam a instalação (espelho inacessível, `pkgsel` falhando, DHCP sem gateway) + o `Release` do repositório local tinha `Codename: ./`, então o `late-command` **recusava** o repo da mídia e o alvo dependia de rede. Correções: `use_mirror false`, `pkgsel` esvaziado sem repo, `Codename` real. **PROVADO SEM INTERNET**: instalação + 1º boot `status=ok` + `Rede: não usada (fonte local)`. `ci-guards` 86 → **89**. |
 | 2026-10-18 | 🔌 **A máquina instalada não aceitava SSH (sessão #36).** Diagnóstico por rede: não havia DHCP no cabo (host em IP fixo) → subi `dnsmasq`; o alvo apareceu como `192.168.0.113`/`ai-cpu-os` e a varredura mostrou **65535 portas TCP fechadas** — **sem `sshd`**. Causa raiz: o `ssh: install-server`/`pkgsel` **falham em silêncio sem rede**. Correção: `late-command.sh` verifica/instala o SSH e avisa no `/etc/motd` + `/root/LEIA-SSH.md`; `build.sh` ganhou `ensure_ssh`; o build avisa quando a ISO sai sem repositório local. `ci-guards` 76 → **78**. § 3.5 + TROUBLESHOOTING. |
 | 2026-10-17 | 🌐 **Rede do sistema instalado na ISO (sessão #33).** Uma instalação real subia **sem DHCP** — o Subiquity não grava rede persistente no alvo quando o autoinstall não tem `network:`. Novo `--network auto\|dhcp\|static\|none` (+ `--network-ip`, `--network-gateway`, `--network-dns`, `--network-interface`); o **mesmo** netplan vai para o `autoinstall.yaml` e para `/preseed/ai-cpu-os-netplan.yaml`, e o `late-command.sh` o instala em `/etc/netplan/99-ai-cpu-os.yaml`, move o netplan do instalador/cloud-init e desliga a rede do cloud-init. No Debian as flags alimentam o `netcfg` da preseed (e o hostname da preseed passou a usar `@@HOSTNAME@@`). O verificador confere os três elos; a UI ganhou o seletor de rede. ✅ **PROVADO EM VM** (alvo pegou IP por DHCP sozinho e aceitou SSH). + **3 bugs reais** achados ao executar: arquivos de **0 byte** no 1º boot (unit vazio = `masked`), `--no-mmap` removido do llama.cpp e o `shell-ia.py` devolvendo a linha do protocolo. `ci-guards` 43 → **46**, `webui` 38 → **46**. |

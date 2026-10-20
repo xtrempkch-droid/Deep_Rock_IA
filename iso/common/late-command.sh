@@ -1,15 +1,14 @@
 #!/bin/sh
 #
-# iso/preseed/late-command.sh — executado PELO INSTALADOR, já no fim da
+# iso/common/late-command.sh — executado PELO INSTALADOR, já no fim da
 # instalação (com o sistema instalado montado em /target).
 # -----------------------------------------------------------------------------
 # Este arquivo é um TEMPLATE: `iso/build-iso.sh` substitui os marcadores
 # (nomes entre arrobas duplas) antes de gravá-lo na ISO.
 #
-# Serve os DOIS instaladores suportados:
-#   * Debian  → debian-installer, chamado por `d-i preseed/late_command`
-#   * Ubuntu  → Subiquity/autoinstall, chamado pelo `late-commands:` do
-#               autoinstall.yaml, com AI_CURTIN=1 (ver `in_target` abaixo)
+# Base ÚNICA (ADR-001): **Ubuntu Server**. O instalador é o Subiquity, que
+# chama este script pelo `late-commands:` do autoinstall.yaml com AI_CURTIN=1
+# (ver `in_target` abaixo).
 #
 # O que ele faz:
 #   1. Copia o projeto ai-cpu-os (que veio na ISO) para /opt/ai-cpu-os do
@@ -29,8 +28,8 @@
 #     pior.
 #   Isso está documentado em docs/ISO.md § "Por que primeiro boot".
 #
-# Shell POSIX (`sh`): é o que o debian-installer garante. O Subiquity executa
-# late-commands via `sh -c`, então o mesmo arquivo serve aos dois.
+# Shell POSIX (`sh`): o Subiquity executa late-commands via `sh -c`. Mantemos
+# POSIX por disciplina (e porque o CI roda `sh -n`), não por causa do d-i.
 # -----------------------------------------------------------------------------
 
 set -eu
@@ -38,17 +37,16 @@ set -eu
 log() { echo "[ai-cpu-os/iso-late] $*"; }
 
 ## Se algo falhar, o console serial precisa DIZER isso. Sem o trap, um erro
-## aqui só aparecia no log do instalador (tty4) e o sintoma visível era o
-## genérico "Failed to run preseeded command … exit code 2" (sessão #35).
+## aqui só aparece no log do instalador (tty4) e o sintoma visível é o genérico
+## "failed to run late-command" (sessão #35).
 rc=0   # só para o shellcheck: o trap abaixo é quem atribui, em tempo de saída
 trap 'rc=$?; if [ "$rc" -ne 0 ]; then
         printf "[ai-cpu-os/iso-late] ERRO: falhou com exit %s (veja o log do instalador em tty4)\n" "$rc" > /dev/console 2>/dev/null || true
       fi' EXIT
 
-## Onde está o projeto? No Ubuntu a mídia está em /cdrom; no Debian o
-## cdrom-detect monta em /media/cdrom (e /cdrom só passa a existir como
-## symlink depois). Um teste em VM (sessão #35) mostrou que depender de um
-## caminho fixo é frágil — então procuramos nos candidatos conhecidos.
+## Onde está o projeto? No Ubuntu a mídia está em /cdrom. Procuramos também
+## nos outros pontos de montagem conhecidos: depender de um caminho fixo é
+## frágil (um teste em VM mostrou montagens diferentes entre cenários).
 SRC=""
 for _cand in /cdrom /media/cdrom /hd-media /media/usb; do
     if [ -d "${_cand}/ai-cpu-os" ]; then
@@ -79,23 +77,18 @@ ISO_SOURCE_NAME='@@LLAMA_SRC_NAME@@'
 SOURCE_DST="/opt/llama-src.tar.gz"
 
 ## Senha do ROOT (hash crypt) — vazia = root continua BLOQUEADO (padrão).
-## O autoinstall/Subiquity nao tem campo de root, entao o caminho dos DOIS
-## instaladores e aqui: `chpasswd -e` espera um hash crypt (nunca texto puro)
-## e o aplica dentro do alvo via in_target/curtin.
+## O autoinstall/Subiquity não tem campo de root, então o caminho é aqui:
+## `chpasswd -e` espera um hash crypt (nunca texto puro) e o aplica dentro do
+## alvo via `curtin in-target`.
 ## Aspas SIMPLES (ver a nota acima): o `$` do hash tem de chegar ao chpasswd.
 ROOT_PASSWORD_HASH='@@ROOT_PASSWORD_HASH@@'
 
 ## ---------------------------------------------------------------------------
 ## Executar um comando DENTRO do sistema instalado.
-##   d-i:       `in-target` já faz o chroot.
-##   Subiquity: `curtin in-target --` faz o mesmo (chamado com AI_CURTIN=1).
+## O Subiquity (AI_CURTIN=1) usa `curtin in-target --` como chroot.
 ## ---------------------------------------------------------------------------
 in_target() {
-    if [ "${AI_CURTIN:-0}" = "1" ]; then
-        curtin in-target -- "$@"
-    else
-        in-target "$@"
-    fi
+    curtin in-target -- "$@"
 }
 
 log "iniciando o pós-instalação do ai-cpu-os"
@@ -275,19 +268,18 @@ fi
 ## de rede persistente no alvo quando a chave `network:` está ausente. O
 ## sistema instalava e subia com a placa DOWN (sem DHCP) até alguém rodar
 ## `ip link set ... up`/`dhclient` à mão — foi o que aconteceu numa instalação
-## real. A ISO agora traz o netplan PRONTO em /preseed/ai-cpu-os-netplan.yaml
+## real. A ISO agora traz o netplan PRONTO em /ai-cpu-os-boot/ai-cpu-os-netplan.yaml
 ## (gerado pelo build-iso.sh a partir de --network) e nós o copiamos para o
 ## alvo. É o MESMO YAML que o instalador usou: uma fonte de verdade só.
 NETWORK_MODE='@@NETWORK_MODE@@'
-DISTRO_NAME='@@DISTRO@@'
 NET_IP='@@NET_IP@@'
 NET_GATEWAY='@@NET_GATEWAY@@'
 NET_DNS='@@NET_DNS@@'
 
 if [ "${NETWORK_MODE}" = "none" ]; then
     log "rede: --network none (nenhuma configuracao gravada; a placa pode subir DOWN)"
-elif [ "${DISTRO_NAME}" = "ubuntu" ]; then
-    NETPLAN_SRC="${SRC}/preseed/ai-cpu-os-netplan.yaml"
+else
+    NETPLAN_SRC="${SRC}/ai-cpu-os-boot/ai-cpu-os-netplan.yaml"
     NETPLAN_DST="/target/etc/netplan/99-ai-cpu-os.yaml"
     if [ -f "${NETPLAN_SRC}" ]; then
         mkdir -p /target/etc/netplan
@@ -321,18 +313,14 @@ CFG
     else
         log "AVISO: ${NETPLAN_SRC} ausente na midia; o alvo pode subir sem rede"
     fi
-else
-    # Debian: a rede vem da preseed (netcfg) e o d-i escreve
-    # /etc/network/interfaces no alvo. Nada a fazer aqui.
-    log "rede: configuracao do Debian vem da preseed (netcfg)"
 fi
 
 ## ---------------------------------------------------------------------------
 ## 3. Serviço de primeiro boot
 ## ---------------------------------------------------------------------------
 log "instalando o serviço de primeiro boot"
-cp "${SRC}/preseed/firstboot.sh" "${DST}/iso/firstboot.sh"
-cp "${SRC}/preseed/ai-cpu-os-firstboot.service" "/target${UNIT}"
+cp "${SRC}/ai-cpu-os-boot/firstboot.sh" "${DST}/iso/firstboot.sh"
+cp "${SRC}/ai-cpu-os-boot/ai-cpu-os-firstboot.service" "/target${UNIT}"
 
 # Permissões de execução (alguns arquivos vêm da ISO sem o bit de execução).
 chmod 0755 "${DST}/build.sh" "${DST}/detect-hardware.sh" \
@@ -373,15 +361,15 @@ ISSUE
 ## ---------------------------------------------------------------------------
 ## São dois casos distintos, e os dois quebram `apt-get update` no alvo:
 ##
-##  (a) `cdrom:[Debian …]` — esta é gravada pelo próprio instalador
-##      (`apt-cdrom-setup`) e NÃO tem nada a ver com --iso-repo. Depois da
+##  (a) `cdrom:[…]` — gravada pelo próprio instalador e NÃO tem nada a ver
+##      com --iso-repo. Depois da
 ##      instalação a mídia não existe mais, e todo `apt-get update` falha com
 ##      "o repositório cdrom://… não tem um arquivo Release". Era isso que
 ##      derrubava o PRIMEIRO BOOT no papel `inference` (rc=100 antes de instalar
 ##      qualquer dependência) — medido numa VM de verdade, sessão #35.
 ##  (b) `file:///cdrom/…` (o repositório local de --iso-repo), tratado abaixo.
 ##
-## O espelho oficial (`deb.debian.org`/`archive.ubuntu.com`) NUNCA é tocado: é
+## O espelho oficial (`archive.ubuntu.com`) NUNCA é tocado: é
 ## o `primary` e é o que faz o sistema continuar atualizável.
 log "removendo fontes de apt do tipo 'cdrom:' do alvo (a mídia não existe mais)"
 for _f in /target/etc/apt/sources.list /target/etc/apt/sources.list.d/*.list; do
@@ -437,9 +425,8 @@ fi
 ## 4-c2. Servidor SSH: GARANTIR que ele exista no alvo
 ## ---------------------------------------------------------------------------
 ## POR QUE (medido numa instalação real, sessão #36): a ISO pede
-## `ssh: install-server: true` (Ubuntu) e `openssh-server` no `pkgsel`/
-## `packages` (Debian), mas **os dois falham em silêncio quando não há rede
-## durante a instalação**. O resultado é o pior tipo de máquina: ela instala,
+## `ssh: install-server: true` e `openssh-server` em `packages`, mas **isso
+## falha em silêncio quando não há rede durante a instalação**. O resultado é o pior tipo de máquina: ela instala,
 ## sobe, pega IP (ou não) e **não tem NENHUM serviço escutando** — nem SSH. Sem
 ## tela e sem teclado, não há como entrar nela para consertar. Verificado com
 ## uma varredura de portas na máquina instalada: 65535 portas em RST, nenhum
@@ -450,10 +437,10 @@ fi
 ## montada e, se houver rede, o espelho oficial responde). Se mesmo assim
 ## falhar, o alvo recebe um aviso no `/etc/motd` e no `/root/LEIA-SSH.md` —
 ## quem chegar no console descobre o que fazer em 5 segundos.
-## ANTES do SSH: o `sudo`. Sem repositório local o `pkgsel` é esvaziado (para
-## não travar a instalação sem rede), então `sudo` — que o Debian NÃO traz por
-## padrão — pode não estar no alvo. Sem ele e com o root bloqueado, o usuário
-## do grupo `sudo` não administra NADA. Mesmo tratamento do SSH: tentar de
+## ANTES do SSH: o `sudo`. Sem repositório local, a instalação de pacotes pode
+## não ter acontecido, então `sudo` pode faltar no alvo. Sem ele e com o root
+## bloqueado, o usuário do grupo `sudo` não administra NADA. Mesmo tratamento
+## do SSH: tentar de
 ## verdade e, se não der, avisar de forma impossível de não ver.
 if ! in_target sh -c 'command -v sudo >/dev/null 2>&1 || [ -x /target/usr/bin/sudo ]' 2>/dev/null \
    && [ ! -x /target/usr/bin/sudo ]; then
@@ -472,10 +459,10 @@ if ! in_target sh -c 'command -v sudo >/dev/null 2>&1 || [ -x /target/usr/bin/su
 fi
 
 _ssh_ok=0
-## `[ -x /target/usr/sbin/sshd ]` é o teste que NÃO depende de chroot: tanto o
-## `in-target` do d-i quanto o `curtin in-target` podem não existir no PATH em
-## alguns pontos da instalação, e um teste que falha por falta do utilitário
-## daria falso negativo (e instalaríamos o pacote de novo, sem mal).
+## `[ -x /target/usr/sbin/sshd ]` é o teste que NÃO depende de chroot: o
+## `curtin in-target` pode não estar no PATH em alguns pontos da instalação, e
+## um teste que falha por falta do utilitário daria falso negativo (e
+## instalaríamos o pacote de novo, sem mal).
 if in_target true >/dev/null 2>&1 && in_target sh -c 'command -v sshd >/dev/null 2>&1'; then
     _ssh_ok=1
 elif [ -x /target/usr/sbin/sshd ]; then
@@ -553,34 +540,6 @@ if [ "${SERIAL_CONSOLE}" = "yes" ]; then
 fi
 
 ## ---------------------------------------------------------------------------
-## 4-e. Reboot determinístico no fim da instalação (só no d-i/Debian)
-## ---------------------------------------------------------------------------
-## O d-i termina com `finish-install.d/20final-message`, que PERGUNTA a nota
-## "Installation complete" e trata um `db_go` que devolva "back" como `exit 10`.
-## O `finish-install` do d-i interpreta 10 como "backed up": ele ABORTA a
-## sequência, volta ao MENU PRINCIPAL e a máquina fica parada — não reinicia
-## (medido numa VM de verdade em console serial, sessão #35; de quebra, os
-## hooks seguintes, inclusive o 99reboot e o 94save-logs, nunca rodam).
-##
-## Como este script roda no hook 07preseed (antes do 20), podemos substituir o
-## hook por um no-op: nada é perguntado e o 99reboot padrão reinicia a máquina
-## como uma instalação automática precisa. Em Ubuntu não existe esse diretório
-## (o fim é do curtin), então o bloco é ignorado lá.
-FINISH_DIR="/usr/lib/finish-install.d"
-if [ -d "${FINISH_DIR}" ] && [ -f "${FINISH_DIR}/20final-message" ]; then
-    cat > "${FINISH_DIR}/20final-message" <<'FINALHOOK'
-#!/bin/sh
-# ai-cpu-os: substitui o 20final-message do debian-installer.
-# A nota final do d-i pode devolver "back" (exit 10), o que faz o
-# finish-install abortar e a instalação parar no menu em vez de reiniciar.
-# Não perguntamos nada: o 99reboot padrão reinicia a máquina.
-exit 0
-FINALHOOK
-    chmod 0755 "${FINISH_DIR}/20final-message"
-    log "hook final do d-i substituído (reinicia em vez de parar no menu)"
-fi
-
-## ---------------------------------------------------------------------------
 ## 5. Registro
 ## ---------------------------------------------------------------------------
 cat > "${DST}/ISO-INFO.txt" <<INFO
@@ -610,8 +569,8 @@ INFO
 ## 3-c. Senha do ROOT (hash crypt) — opcional
 ## ---------------------------------------------------------------------------
 ## Sem hash, o root fica BLOQUEADO (padrão e mais seguro). Com hash, o
-## `chpasswd -e` aplica a senha DENTRO do alvo — o caminho serve aos DOIS
-## instaladores (d-i e Subiquity), porque o autoinstall não tem campo de root.
+## `chpasswd -e` aplica a senha DENTRO do alvo — o autoinstall não tem campo
+## de root, então este é o único caminho.
 ## O `-e` é o que garante que o valor é um hash crypt, nunca texto puro.
 if [ -n "${ROOT_PASSWORD_HASH}" ]; then
     if echo "root:${ROOT_PASSWORD_HASH}" | in_target chpasswd -e; then
@@ -631,26 +590,3 @@ log "pós-instalação concluído; o ai-cpu-os será aplicado no primeiro boot"
 ## com --serial-console). Sem isto o teste headless ficava mudo na instalação.
 printf '[ai-cpu-os/iso-late] pós-instalação concluído\n' > /dev/console 2>/dev/null || true
 
-## ---------------------------------------------------------------------------
-## 3-d. Reinício determinístico no d-i (Debian)
-## ---------------------------------------------------------------------------
-## Por que reiniciar AQUI e não deixar o `finish-install` reiniciar: no Debian o
-## hook `/usr/lib/finish-install.d/20final-message` mostra uma tela final e, num
-## console serial, o `db_go` devolve "back"; o `finish-install` interpreta isso
-## como "backed up", ABORTA a sequência (nem `95umount` nem `99reboot` rodam) e
-## a máquina para no MENU PRINCIPAL do instalador com a instalação já pronta.
-## Observado em VM duas vezes (sessão #35) — inclusive com o hook substituído
-## (bloco 4-e), porque o `20final-message` só é desempacotado depois deste ponto.
-## Reiniciar daqui é o único ponto do fluxo que depende só de nós mesmos; o
-## patch do bloco 4-e fica como cinto de segurança caso o reboot falhe.
-if [ "${AI_CURTIN:-0}" != "1" ]; then
-    log "instalação concluída: reiniciando o sistema instalado (d-i)"
-    printf '[ai-cpu-os/iso-late] reiniciando\n' > /dev/console 2>/dev/null || true
-    sync || true
-    umount /target 2>/dev/null || true
-    umount /cdrom 2>/dev/null || true
-    umount /media/cdrom 2>/dev/null || true
-    sync || true
-    reboot -f 2>/dev/null || /sbin/reboot -f 2>/dev/null \
-        || /lib/debian-installer/exit 20 2>/dev/null || true
-fi

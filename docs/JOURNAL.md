@@ -36,9 +36,10 @@ git log --oneline -12     # os últimos passos dados
 #    - validate         ✅ verde
 #    - build-llama      ✅ verde (compila e roda de verdade)
 #    - container        ✅ verde (imagem no GHCR)
-#    - ISO (sessão #21) ✅ GERADA e BOOTADA em VM (KVM) — instalou + 1º boot OK
-#    - webui (sessão #24) ⚠️ 34 asserções de API; 🔴 NUNCA aberta num navegador
-#    - ISO: Debian/preseed 🔴 NUNCA executado · hardware físico 🔴 NUNCA
+#    - ISO Ubuntu (#21) ✅ GERADA e BOOTADA em VM (KVM) — hardware Ubuntu 🔴
+#    - ISO Debian (#35/#37) ✅ VM + metal, mas DEPRECADA (ADR-001)
+#    - webui (#24) ⚠️ 34 asserções de API; 🔴 NUNCA aberta num navegador
+#    - identidade por papel / ai-talk 🔴 só decisão/desenho (sessão #39)
 ```
 
 **Depois disso**, vá para a "Próxima ação imediata" em `docs/STATE.md` § 6.
@@ -49,8 +50,15 @@ git log --oneline -12     # os últimos passos dados
 
 > 🎉 **A ISO existe e roda (2026-10-13).** O critério de conclusão do projeto
 > (uma ISO que instala sozinha e aplica o ai-cpu-os no 1º boot) **foi cumprido
-> numa VM**. O que falta é repetir em **hardware físico** (Xeon/Ryzen) e no
-> caminho **Debian**. Ver `STATE.md` § 3.3.
+> numa VM** e o fluxo já foi validado em metal (A8-9600, Debian). O que falta é
+> repetir em **hardware físico com Ubuntu** (Xeon/Ryzen) e validar o **UEFI**.
+> O caminho Debian foi executado (#35/#37), mas está **deprecado** (ADR-001) e
+> será removido. Ver `STATE.md` § 3.3/§ 3.6.
+>
+> 🧭 **Decisões de 2026-10-20 (sessão #39), ainda não implementadas:** uma ISO
+> **Ubuntu** (ADR-001), **identidade pelo papel** (ADR-002) e chat de frota
+> **`ai-talk`** (ADR-003). Leia `docs/DECISIONS.md` e `docs/CHAT.md` antes de
+> propor trabalho nessas áreas; a ordem é P0→P3 em `STATE.md` § 6.
 
 > ⚠️ **Regra de ouro da retomada:** não confie na memória — confie no
 > `STATE.md` § 6. Ele é reescrito ao fim de cada sessão justamente para isto.
@@ -1428,7 +1436,7 @@ o que dava a impressão de que o negativo funcionava.
     **sintoma** ("não passou na verificação"), sem dizer **o quê**. Agora captura
     `[FAIL]`/`[erro]` e mostra os `[WARN]` (que dizem **qual** pacote falhou).
   - **Teste novo:** `make iso-verify-test`
-    (`tests/test-verify-iso-repo-distro.sh`, 6 asserções): monta árvores mínimas
+    (`tests/test-verify-iso-repo.sh`, 6 asserções): monta árvores mínimas
     das **duas** distros e roda o verificador de verdade — sem xorriso, root,
     rede ou Docker. Inclui o **negativo** (config sem a fonte extra → reprova) e
     a **prova de regressão**: pega o verificador do `git` e exige que ele
@@ -2394,6 +2402,230 @@ garante os arquivos íntegros acima.
   (basta rodar na máquina de teste).
 - **Commits:** *(ver `git log`)*.
 
+### Sessão #42 — 2026-10-20 · 🗑️ ADR-001 executado: o caminho Debian da ISO saiu
+
+- **Objetivo:** o dono disse *"esse projeto está ficando complicado demais com 2
+  imagens de ISO. Vamos ficar só com o UBUNTU"*. A sessão #39 registrou a
+  decisão (ADR-001); esta sessão a **executou**.
+- **O que foi feito:**
+  - `iso/preseed/` **removido** (`git rm -r`). Os três arquivos que serviam os
+    dois instaladores foram para **`iso/common/`** (`late-command.sh`,
+    `firstboot.sh`, `ai-cpu-os-firstboot.service`) com os ramos Debian
+    apagados; o caminho na mídia passou de `/preseed/` para
+    **`/ai-cpu-os-boot/`** (inclusive no `autoinstall.yaml`).
+  - `iso/build-iso.sh`: 14 funções/opções Debian apagadas (constantes,
+    `extract_iso_debian`, `expand_apt_offline_block`,
+    `expand_root_preseed_block`, `expand_network_preseed_block`,
+    `inject_preseed_initrd`, `patch_isolinux`, `patch_efi_debian`,
+    `debian_locale_args`, `grub_bootdev_line`, `repack_iso`,
+    `regenerate_md5sums`, `backup_file`, `--mirror-host`/`--mirror-dir`), mais
+    as dependências `isolinux`/`mtools`. `--distro debian` agora **sai com
+    exit 2** e cita o ADR (entrada do usuário → erro fatal é permitido, Regra
+    13-a).
+  - `iso/verify-iso.sh`: um caminho só; recusa `--distro debian`; cobra os
+    caminhos novos; as checagens de preseed/initrd/md5sum/localechooser/
+    grub-bootdev saíram.
+  - `Makefile`: `DISTRO` e `iso-dry-run-both` fora; `iso-dry-run` é o alvo
+    único; `iso-lint` aponta para `iso/common/`.
+  - `webui/`: `DISTROS = ("ubuntu",)`, seletor de distro trocado por uma nota.
+  - Testes: `test-verify-iso-repo-distro.sh` → **`test-verify-iso-repo.sh`**
+    (6 asserções), `test-iso-selection.sh` sem os casos Debian,
+    `test-ci-guards.sh` com ~14 violações plantadas reescritas.
+- **Decisões:**
+  - O **diretório compartilhado** chama-se `iso/common/` (e não
+    `iso/shared/`): "common" já é o vocabulário do repositório.
+  - O que o Debian ensinou **não foi jogado fora**: virou guarda no caminho
+    Ubuntu (`autoinstall quiet`, `-map … /autoinstall.yaml`,
+    `shutdown: reboot`, `refresh-installer update: false`, `geoip: false`,
+    `ssh.install-server`, `sync` no firstboot, marcador no `ttyS0`).
+  - O CI ganhou **dois guardas negativos** que não existiam: `preseed/` não
+    pode voltar ao `build-iso.sh` nem reaparecer como diretório.
+- **Problemas encontrados (todos por execução, não por revisão):**
+  1. **Guarda apontando para o texto errado:** `grep -q 'late_command'` no
+     `autoinstall.yaml` — o arquivo tem `late-commands:`. O `test-ci-guards`
+     reprovou a árvore **limpa** e denunciou.
+  2. **`no-mmap` sumiu junto:** ao substituir um bloco grande do
+     `validate.yml` eu levei um guarda **inteiro** embora. Só apareceu porque
+     `test-ci-guards` exige que a violação plantada **reprove** — o guarda
+     tinha virado decorativo por ausência.
+  3. **Guarda preso a texto que não existe mais:** `ISO_REPO_ALLOW_MISMATCH …
+     "$DISTRO" == "ubuntu"` (a condição deixou de ter o `$DISTRO`). Trocado
+     pelo invariante real: o mismatch **degrada** (`ISO_REPO="none"`).
+  4. **Três guardas novos que não reprovavam** (decorativos por construção):
+     `-map` da raiz da ISO, `geoip` e `--no-mmap`. Os dois primeiros foram
+     ancorados no valor (`-map … /autoinstall.yaml`, `geoip: false`).
+  5. **`shellcheck` pegou código morto:** `DISTRO_NAME` ficou sem uso depois de
+     o ramo Debian sair (SC2034) — removido.
+  6. **`make iso-lint` apontava para um arquivo apagado** (`iso/preseed/…`).
+- **Resultado:** `make validate` **verde** — `ci-guards` **93**, `ai-talk` 30,
+  `webui` 46, `iso-lint` OK, `iso-selection` 10, `verify-repo` 6, `iso-lock`
+  13, `iso-disk` 16, `iso-release` 10, `verify-iso-space` 6, `mod-network` 41,
+  `mod-apt-sources` 17, `write-pendrive` 16, `check-iso` 20, `avx512` 61.
+  `make iso-dry-run` gera o plano do caminho Ubuntu sem erro.
+- **O que NÃO foi provado:** **nenhuma ISO foi gerada nem bootada** depois da
+  remoção, e nada foi instalado em hardware físico. A prova de comportamento
+  continua sendo a da sessão #21 (anterior à mudança). `--check-templates` e
+  `verify-iso --dir` provam **conteúdo**, não boot (Regra 13).
+  **Dívida registrada como P5 no `STATE.md` § 6.**
+- **Commits:** *(ver `git log`)*.
+
+### Sessão #41 — 2026-10-20 · 💬 O `ai-talk` virou código: F1 implementada e testada
+
+- **Objetivo:** “vamos testar essa solução; se não for satisfatória, futuramente
+  trocamos”. Para **testar de verdade**, a F1 saiu do papel.
+- **O que foi implementado (`talk/ai_talk.py`, stdlib):**
+  - daemon (`serve`) + CLI (`status`, `peers`, `send`, `ping`, `hello`,
+    `listen`, `tail`, `check-config`, `shutdown`);
+  - TCP 7331, JSON por linha, envelope v1 e **HMAC-SHA256 canônico**;
+  - **chave por nó** (`peers[nome].key_file`), com a chave global como
+    fallback; `read_key` **recusa** chave legível por “outros”;
+  - `ack` **depois** do append + `fsync` (sem ack se a gravação falhar);
+  - `TCP_NODELAY`, conexão persistente por peer, `connect_timeout` e
+    `ack_timeout` com 3 tentativas e backoff 1 s/2 s;
+  - **espaçamento de 50 ms por par** (msg e ping), `hello`/`ack` isentos,
+    fila de 256 com **exit 5** no overflow e teto global de 120/s;
+  - dedupe de **8.192** IDs, `log.control=false`, rotação em 32 MB × 5;
+  - **teto de 15 peers** no `load_config` (ADR-005), com mensagem que aponta
+    para relay/hub;
+  - Unix socket de controle por onde o CLI fala (o daemon é o único que abre
+    porta de rede).
+- **Três pontos que a implementação tornou mais precisos (corrigidos no
+  contrato):**
+  1. **`ping` CONTA no throttle** (só `ack`/`hello` são isentos). O teste
+     anterior supunha o contrário; o contrato já dizia “msg e ping”.
+  2. **`queue_max` conta só quem AGUARDA** — a mensagem em trânsito não ocupa
+     vaga. Sem essa definição o teste da fila ficava ambíguo (era o único
+     vermelho da primeira rodada).
+  3. **`--no-wait` retorna após ENFILEIRAR**, não após o write TCP.
+- **Provas (`make talk-test`, 30 asserções, loopback, sem root, sem rede):**
+  entrega + ack + log; espaçamento medido (548 ms para 2 mensagens com
+  intervalo de 400 ms); `hello` em 0,8 ms (isento) e `ping` em 399 ms
+  (throttled); dedupe (2 acks, 1 linha); assinatura inválida sem ack e sem
+  gravar; peer desconhecido (4) e corpo grande (5); fila (3 aceitas, 4ª com
+  5); `ECONNREFUSED` → exit 3 em **106 ms**; `listen`/`tail`; chave 0644 → 2;
+  16 peers → 2; “somente stdlib” por AST.
+- **Dois bugs reais achados ao EXECUTAR (não ao revisar):**
+  1. `accept(ctl, control_loop)` passava o socket como primeiro argumento —
+     a assinatura é `(daemon, sock)`, então **todo** `status` travava com
+     `TypeError` na thread. Só apareceu ao rodar o daemon de verdade.
+  2. `--config` só era aceito **antes** do subcomando; o systemd e o próprio
+     contrato usam `ai-talk serve --config …`. Agora os dois funcionam
+     (`parents=` com `SUPPRESS` para não sobrescrever o global).
+- **Guardas:** `ci-guards` 89 → **98**, com violação plantada para
+  `compare_digest`, `TCP_NODELAY`, `os.fsync`, `MAX_PEERS = 15`,
+  `dedupe_window = 8192`, chave frouxa e import de terceiro. Duas guardas
+  nasceram **decorativas** (casavam com o nome/valor e não com o código) e o
+  próprio `make ci-guards-test` as denunciou — corrigidas para âncora no
+  valor (`"dedupe_window": 8192`) e no check (`stat.S_IROTH`).
+- **Arquivos:** `talk/ai_talk.py`, `talk/README.md`, `tests/test-ai-talk.sh`,
+  `Makefile` (`talk-test` + no `validate` + `compileall`), `validate.yml`
+  (passo + arquivos obrigatórios + guardas), `tests/test-ci-guards.sh`,
+  `docs/CHAT.md`, `docs/CI.md`, `docs/DECISIONS.md`, `docs/STATE.md`,
+  `docs/ROADMAP.md`, `AGENTS.md`.
+- **Verificado:** `make talk-test` **PASS=30 FAIL=0** (3 execuções seguidas,
+  sem flakiness e sem daemon órfão); `ci-guards` **98**; **`make validate`
+  inteiro verde** (lint, docs, famílias 85, AVX-512 61, ISO, rede 41, apt 17,
+  pendrive 16, check-iso 20, webui 46, ai-talk 30, dry-run Ubuntu+Debian).
+- **O que NÃO foi provado:** latência em **rede real** (o loopback não mede
+  LAN), duas VMs (Bloco R), bancada de 15 nós, `talk/install.sh`, unit e
+  integração na ISO (F2), ponte com o modelo (F3).
+
+### Sessão #40 — 2026-10-20 · 💬 O contrato do `ai-talk`: delay, durabilidade e teto de 15 nós
+
+- **Objetivo:** “como fica o delay entre as mensagens?” e depois “será possível
+  outras máquinas entrarem na mesma conversa (umas 30)?” → “mantenha um teto de
+  15 máquinas, assim fica confortável”.
+- **Decisões (todas do dono, via formulário):**
+  - **Delay = intervalo mínimo entre `msg` do mesmo nó para o mesmo peer.** Não
+    é atraso por mensagem, nem inclui `ack`/`hello`.
+  - **50 ms por par** (= 20 msg/s), com fila **FIFO de 256** e **exit 5** no
+    overflow (nunca descarte silencioso).
+  - **Meta de latência: p99 ≤ 10 ms** em LAN cabeada.
+  - **`fsync` por mensagem** (durável): o `ack` significa “gravado no disco”.
+  - **Teto de 15 nós** em malha completa; acima disso, **relay/hub
+    obrigatório**.
+- **Lacunas e inconsistências corrigidas no contrato:**
+  - O §8 dizia “~6 s no pior caso”; a conta do §6.4 dá **9 s**
+    (2 s + 1 s + 2 s + 2 s + 2 s). O contrato passou a declarar **9 s** e a
+    explicar em §6.7.3.
+  - Faltava **`connect_timeout`**: com IP obsoleto/ARP pendurado, o `connect`
+    pode levar ~2 min e o timeout de ack nunca vale. Agora é 1 s.
+  - Faltava **`TCP_NODELAY`**: Nagle + delayed ACK podem injetar ~40 ms numa
+    mensagem pequena — sozinho estourava a meta.
+  - Faltava definir o **escopo do throttle** (por par, não global) e a
+    **isenção** de `ack`/`hello` — sem ela, cada envio pagaria +50 ms.
+- **Ajustes que o teto de 15 exige (ADR-005):** janela de dedupe **1024 →
+  8.192** (cobrir o retry de 9 s a 280 msg/s), **chave por nó** (evita
+  impersonação; revoga um nó sem trocar a chave de todos), `log.control=false`
+  (não gravar ack/hello/ping), `max_out_per_sec=120` (teto global além do
+  20/s por par) e configuração por **`--chat-peers-file`/`--chat-keydir`**.
+- **Números calculados (15 nós, no teto de 280 msg/s por nó):** 14 conexões por
+  nó (105 no cluster), ~106 KB/s (~0,85 Mbit/s), `fsync` ~84 ms/s (~8% de 1
+  core), broadcast em **2 RTTs** (concorrência 8), log de 32 MB girando a cada
+  ~5 min no pior caso.
+- **Arquivos:** `docs/CHAT.md` (§1, §5.2, §6.1, §6.4, §6.7, §6.8, §7, §9,
+  §13.1, §13.5, §14, §15, §16), `docs/DECISIONS.md` (ADR-004 e ADR-005,
+  índice), `AGENTS.md` (Regra 18 + resumo da fase), `docs/STATE.md`
+  (§ 3.8/§ 4/§ 6/histórico), `docs/ROADMAP.md`.
+- **Verificado:** `make validate` (lint, docs, famílias, AVX-512, ISO, rede,
+  UI, guardas 89, dry-run Ubuntu+Debian). **Nada de código do chat foi escrito**
+  — é contrato; nenhuma medição de latência foi feita.
+- **O que NÃO foi provado:** os números de escala e de latência são **cálculo**,
+  não medição. O teto de 15 só vale como decisão depois da bancada de 15 nós
+  (`CHAT.md` §13.5), que **não foi executada**.
+- **Commits:** nenhum nesta sessão (árvore para revisão).
+
+### Sessão #39 — 2026-10-20 · 🧭 Preparar “uma ISO, duas funções, uma frota”
+
+- **Objetivo:** “o projeto está ficando complicado demais com 2 imagens de ISO;
+  vamos ficar só com o Ubuntu; o usuário será definido pela função (builder ou
+  inference); precisamos de um chat pela rede para as IAs se comunicarem
+  (talk ou algo do tipo). Prepare o ambiente para implantar isso num futuro
+  não muito distante.”
+- **O que foi feito (preparação, sem implementar as três mudanças):**
+  - **`docs/DECISIONS.md`** — três ADRs com contexto, decisão, consequências,
+    mapa de impacto, plano e critérios de aceite:
+    - **ADR-001:** base **única Ubuntu Server**; Debian/preseed **deprecado**,
+      remoção **P0**. O runtime Debian (`build.sh`/`mods/`) continua suportado.
+    - **ADR-002:** identidade por papel — `inference`→`ai-inference`,
+      `builder`→`ai-builder`, `auto`→`ai-cpu-os` + aviso; `--username`/
+      `--hostname` explícitos vencem.
+    - **ADR-003:** chat de frota **`ai-talk`** (TCP 7331, JSON lines, HMAC,
+      Python stdlib), com alternativas descartadas.
+  - **`docs/CHAT.md`** — contrato do `ai-talk`: envelope v1, assinatura
+    canônica, handshake/ack/retry, config, CLI, systemd, segurança, log,
+    falhas, testes (offline/ISO/duas VMs/ponte com o modelo), fases e
+    alternativas. Deixa explícito por que o `talk` do netkit **não** será usado.
+  - **`iso/build-iso.sh`** — `--distro debian` agora emite **aviso de
+    depreciação** (sem quebrar o build, Regra 13-a); help e comentários
+    apontam o ADR-001 e a futura identidade por papel. Nenhuma remoção de
+    código.
+  - **`Makefile` + `.github/workflows/validate.yml`** — `docs/DECISIONS.md` e
+    `docs/CHAT.md` passam a ser obrigatórios (`make docs` e o job
+    `project-rules`), para a preparação não desaparecer em silêncio.
+  - **`AGENTS.md`, `docs/STATE.md`, `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`,
+    `docs/ISO.md`, `README(s)`** — fontes de verdade apontam para a nova fase;
+    `STATE.md` § 6 foi reescrita com a ordem P0→P3.
+- **Decisões de arquitetura (resumo):**
+  - A ISO é **Ubuntu-only**; o Debian continua como **hospedeiro** das mods,
+    não como base de mídia.
+  - A identidade segue a **função**, não o hardware; `--role auto` não pode
+    derivar identidade porque o papel só é conhecido no 1º boot.
+  - O chat é **transporte**, não orquestrador: mensagem é dado, nunca comando;
+    a ponte com o modelo é opcional (fase 3) e não executa tool calls remotas.
+- **O que NÃO foi feito (de propósito):**
+  - Nenhum código Debian foi removido; `--distro debian` ainda funciona.
+  - Nenhuma identidade por papel foi implementada.
+  - Não existe `talk/` nem `ai-talk`; nenhum teste de chat foi escrito.
+  - Nenhuma ISO foi gerada/bootada nesta sessão.
+- **Estado do repositório:** o `main` local já estava no commit `bf2117f`
+  (“a ISO instala sem internet — sessão #38”), à frente do `AGENTS.md`; a
+  preparação foi feita sobre esse estado. O `AGENTS.md` foi atualizado junto.
+- **Próximo:** P0 (remover Debian) → P1 (identidade) → P2/P3 (`ai-talk`). Ver
+  `docs/STATE.md` § 6.
+- **Commits:** nenhum nesta sessão — as mudanças ficaram na árvore para
+  revisão; o commit deve ser feito depois de `make validate`.
+
 ### Sessão #38 — 2026-10-18 · ⚡ "sem internet não instala": 4 defeitos, um deles engana
 
 - **Objetivo:** "ambas as distribuições não instalaram automaticamente se não
@@ -2851,12 +3083,37 @@ journal e no arquivo de log:
 - Assinatura GPG da ISO.
 - Imagem de VM (`qcow2`) via Packer.
 
+### 5.5 Decisões firmadas em 2026-10-20 (estado real)
+
+| Thread | Decisão | Estado |
+|--------|---------|--------|
+| **Uma ISO Ubuntu** | Debian/preseed **removido**. O runtime Debian continua suportado. | ✅ **FEITO (#42)** — `iso/common/`, `--distro debian` aborta. **Falta** um boot de ISO depois da remoção (P5) |
+| **Identidade por papel** | `inference`→`ai-inference`; `builder`→`ai-builder`; `auto`→`ai-cpu-os` + aviso; flags explícitas vencem. | ❌ **não implementada** — é o topo da fila (P1) |
+| **Chat da frota** | `ai-talk`: TCP 7331, JSON lines, HMAC, stdlib; fases F1/F2/F3. | ⚠️ **F1 no código** (`talk/ai_talk.py` + `make talk-test`); F2/F3 pendentes |
+| **Delay entre mensagens** | Intervalo mínimo de **50 ms** entre `msg` do mesmo par (20 msg/s); `ack`/`hello` isentos; fila **256** com **exit 5** no overflow; p99 ≤ 10 ms; `fsync` por mensagem. | ✅ **no código e provado** (`make talk-test`) |
+| **Teto de nós** | **15 nós** em malha completa (14 conexões/nó); acima disso, **relay/hub obrigatório**. Chave por nó, `dedupe_window=8192`, `max_out_per_sec=120`. | ⚠️ **no código**, mas **nunca medido** com 15 nós (P4) |
+| **Ordem** | P0 (Debian) ✅ → P1 (identidade) ← **agora** → P3 (ISO/duas VMs/ponte) → P4 (bancada) e P5 (boot da ISO). | `docs/STATE.md` § 6 |
+
+> ⚠️ **Não confunda plano com fato.** O usuário padrão ainda é `ai-cpu-os`;
+> o `ai-talk` não está na ISO e não tem unit systemd; e **não há medição** de
+> latência nem do teto de 15 nós — os números são cálculo.
+> ⚠️ E, desde a remoção do caminho Debian, **nenhuma ISO foi bootada**.
+
 ---
 
 ## 6. 🕳️ Armadilhas já pisadas (não repita)
 
 | Armadilha | O que acontece | Como evitar |
 |-----------|----------------|-------------|
+| Confundir **`talk` do netkit** com o **`ai-talk`** | Instalar `talkd`/UDP 517 reintroduz um protocolo obsoleto, sem auth/cripto, e não é o desenho aprovado | O componente é `talk/` + binário `ai-talk` (TCP 7331, JSON lines, HMAC). Ver `docs/CHAT.md` § 3 |
+| Prometer **latência** ou **teto de nós** sem medir | Os números de §5.2 e §6.7 são **cálculo** (fsync ~0,3 ms, envelope ~380 B); uma máquina com HDD, VM sobrecarregada ou Wi-Fi estoura a meta | Medir na bancada de 15 nós (§13.5) e no Bloco R antes de afirmar; se não couber, cai o teto ou entra o relay — não se ajusta a tabela |
+| Dimensionar `dedupe_window` pela **taxa média** | A janela precisa cobrir o **retry de 9 s** na taxa **de pico** (280 msg/s a 15 nós) → 1024 IDs cobrem ~3,7 s e um retry legítimo vira duplicata no log | `dedupe_window = taxa_de_entrada × 20 s` (mínimo 1024; padrão 8.192) |
+| **Apagar um diretório da mídia** (`iso/preseed/`) sem varrer os guardas | Guardas que fazem `grep` num arquivo inexistente **derrubam o job com rc 2** — e o `test-ci-guards` acusa "o job falha numa árvore LIMPA". Pior: ao substituir um bloco grande do workflow, você leva guardas embora **sem perceber** (foi o caso do `--no-mmap`), e o único sinal é uma violação plantada que **para de reprovar** | Depois de mover/apagar arquivo da mídia: rode `make ci-guards-test` **antes** de olhar o `validate`. Ele é o detector de guarda quebrado **e** de guarda ausente |
+| Trocar o **nome** de um invariante e deixar o guarda ancorado no texto antigo | `grep -q 'late_command'` passou a apontar para um arquivo que tem `late-commands:` — o guarda nunca reprovava e ainda assim "passava" | Ancore no **valor** que importa (`-map … /autoinstall.yaml`, `geoip: false`, `dedupe_window": 8192`), nunca num nome solto |
+| Usar **uma chave** para a frota inteira | Qualquer nó assina como outro (`from` é só um campo) | Chave **por nó** (`peers[nome].key_file`) quando a frota passa de 2–3 máquinas; o receptor verifica com a chave do `from` |
+| Derivar o **usuário do papel** com `--role auto` | O papel `auto` só é conhecido no **1º boot**; nessa hora o usuário do instalador já foi criado | Identidade derivada exige `--role inference|builder` (ADR-002); `auto` mantém `ai-cpu-os` + aviso |
+| Adicionar **feature/teste ao caminho Debian** | Ele está **deprecado** e será removido (ADR-001); o esforço vira retrabalho e o CI cresce | Trabalhe só em `--distro ubuntu`; o Debian continua apenas como **hospedeiro** das mods |
+| Assumir que a preparação da sessão #39 **já removeu** o Debian ou criou o chat | `--distro debian` ainda funciona, o usuário ainda é `ai-cpu-os` e não existe `talk/` | Leia `docs/STATE.md` § 3.8/§ 6 e `docs/DECISIONS.md`; a implementação é P0–P3 |
 | Assumir que **`autoinstall` sem `network:`** configura a rede do alvo | O Subiquity usa DHCP para si mesmo, mas **não grava netplan no alvo** → o sistema instalado sobe **sem IP** (placa DOWN) até configurar à mão | O build grava `network:` no autoinstall **e** o netplan em `/preseed/ai-cpu-os-netplan.yaml`; o late-command copia para `/etc/netplan/99-ai-cpu-os.yaml`, move o netplan do instalador/cloud-init e desliga a rede do cloud-init. Ver `docs/ISO.md` § 4.3 (sessão #33) |
 | `grep` **sem arquivo** no terminal | Ele lê o **stdin** e **trava a sessão** | Sempre passe arquivo/glob, ou use `grep ... <<<"$var"` |
 | Matar o **qemu logo após o marcador** do firstboot | O guest não descarregou o disco → arquivos de **0 byte**; um `unit` vazio vira **`masked`** no systemd (parece "serviço mascado", não "arquivo corrompido") | `sync` no `firstboot.sh` e 15 s de espera antes de encerrar (`test-vm.sh`). Idem numa queda de energia real |
@@ -2989,6 +3246,9 @@ Ao **fim de cada sessão**, faça nesta ordem:
 
 | Data | Mudança |
 |------|---------|
+| 2026-10-20 | Sessão #41 — 💬 **`ai-talk` F1 implementado e testado:** `talk/ai_talk.py` (stdlib) + `make talk-test` (**30 asserções**, loopback). Dois bugs achados só ao executar (thread do controle e `--config` após o subcomando). `ci-guards` 89 → **98**. Faltam F2/F3, duas VMs e a bancada de 15 nós. |
+| 2026-10-20 | Sessão #40 — 💬 **contrato do `ai-talk` fechado:** delay = **50 ms** entre `msg` do mesmo par (20 msg/s), fila **256** com exit 5, **p99 ≤ 10 ms**, **`fsync` por mensagem** (ADR-004); **teto de 15 nós** em malha completa, com chave por nó (ADR-005); corrigido o pior caso de ack (**9 s**, não 6 s) e adicionado `connect_timeout`/`TCP_NODELAY`. Nada implementado; sem medição. |
+| 2026-10-20 | Sessão #39 — 🧭 **preparação da fase “uma ISO, duas funções, uma frota”**: `docs/DECISIONS.md` (ADR-001 Ubuntu-only, ADR-002 identidade por papel, ADR-003 `ai-talk`) e `docs/CHAT.md` (contrato do chat); aviso de depreciação do Debian no `build-iso.sh`; `make docs`/CI passam a exigir os dois documentos. Nada de identidade/chat implementado. |
 | 2026-10-16 | Sessão #28 — 🔴 `build-llama` com **SIGILL**: AVX-512 `auto` (sessão #26) + cross-build gerava binário AVX-512 que o runner **sem AVX-512** executava. Famílias AVX-512 viraram **compile-only** (`exec: false` na matriz); smoke de execução só nas AVX2. |
 | 2026-10-16 | Sessão #27 — 🔑 **senha de usuário/root na webui**: campos `type=password` + 🎲/👁; hash crypt no servidor (stdlib `crypt`, fallback `openssl passwd -6 -stdin`); só o hash entra no argv. Root: `--root-password-hash` no build, `chpasswd -e` no late-command (Ubuntu e Debian), `@@ROOT_PRESEED@@` na preseed; bloqueado por padrão. `verify-iso.sh` ganhou a seção "Senha do root"; guardas do CI 33→35; webui 38 asserções. Regra 16 atualizada (senhas DA ISO sim; senha de sudo jamais). |
 | 2026-10-16 | Sessão #26 — 🧬 **14 famílias** (Xeon Scalable v5–v9, Xeon 6 P-cores, `amd-zen5`) e **AVX-512 por padrão** (`auto`) nas famílias que o têm — decisão do dono. `--no-avx512` + `FAMILY_MARCH_HAS_AVX512` (troca o `-march` pelo fallback sem AVX-512). Corpus 85 CPUs; matrix do CI 7→14. |

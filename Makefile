@@ -19,8 +19,6 @@ NET_IFACE ?=
 NET_IP   ?=
 NET_GW   ?=
 FAMILY   ?= auto
-# Base da ISO: ubuntu (autoinstall, padrão) | debian (preseed, legado)
-DISTRO   ?= ubuntu
 # ISO a verificar/bootar (make iso-verify ISO=... / make iso-vm ISO=...)
 ISO      ?=
 # Args extras para o build da ISO (ex.: ISO_ARGS=--serial-console)
@@ -42,12 +40,13 @@ SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
 
 .PHONY: help lint bashn shellcheck python yaml docs validate dry-run apply \
         build mods mods-check mods-test families families-test avx512-test gpu-check \
-        iso iso-dry-run iso-dry-run-both iso-lint iso-yaml iso-verify iso-vm \
+        iso iso-dry-run iso-lint iso-yaml iso-verify iso-vm \
         iso-select-test iso-repo-test iso-verify-test iso-release-test \
         iso-space-test ci-guards-test \
         iso-lock-test \
         pendrives pendrive pendrive-test iso-check iso-check-test \
         ui ui-test network-fix network-test apt-fix apt-test \
+        talk-test \
         docker docker-check ci clean
 
 help: ## Lista os alvos disponíveis
@@ -69,7 +68,7 @@ shellcheck: ## Roda shellcheck (severidade warning+)
 	@echo "shellcheck: OK"
 
 python: ## Compila os arquivos Python (checagem de sintaxe)
-	@python3 -m compileall -q roles/ webui/ && echo "python: OK"
+	@python3 -m compileall -q roles/ webui/ talk/ && echo "python: OK"
 
 yaml: ## Lint dos arquivos YAML
 	@command -v yamllint >/dev/null || { echo "yamllint ausente"; exit 1; }
@@ -83,12 +82,13 @@ docs: ## Verifica se os documentos obrigatórios existem
 	         docs/TROUBLESHOOTING.md docs/TUTORIAL.md docs/CI.md \
 	         docs/VALIDATION.md docs/ISO.md docs/JOURNAL.md \
 	         docs/FAMILIES.md docs/MODS.md docs/GPU.md \
+	         docs/DECISIONS.md docs/CHAT.md \
 	         docs/IMPLANTAR-EM-OUTRO-PC.md; do \
 	  [[ -f "$$f" ]] || { echo "FALTANDO: $$f"; exit 1; }; \
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test iso-dry-run-both ## Lint + docs + famílias + AVX-512 + testes de ISO + rede + UI + guardas + dry-run
+validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test talk-test iso-dry-run ## Lint + docs + famílias + AVX-512 + testes de ISO + rede + UI + chat + guardas + dry-run
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -125,35 +125,28 @@ iso: ## Gera a ISO (entregável final); requer DISK=/dev/xxx [ISO_ARGS=...]
 	@if [ -z "$(DISK)" ]; then \
 	  echo "Defina o disco alvo: make iso DISK=/dev/nvme0n1"; exit 1; \
 	fi
-	@bash iso/build-iso.sh --distro $(DISTRO) --disk $(DISK) \
+	@bash iso/build-iso.sh --disk $(DISK) \
 	  --role $(ROLE) --family $(FAMILY) $(ISO_ARGS)
 
-iso-dry-run: ## Simula a geração da ISO (seguro, não baixa nada)
-	@bash iso/build-iso.sh --distro $(DISTRO) \
-	  --disk "$(or $(DISK),/dev/nvme0n1)" \
-	  --role $(ROLE) --family $(FAMILY) $(ISO_ARGS) --dry-run
-
-iso-dry-run-both: ## Dry-run dos DOIS caminhos (ubuntu+debian) SEM flags extras
+iso-dry-run: ## Simula a geração da ISO (seguro, não baixa nada; igual ao CI)
 	@set -euo pipefail; \
-	bash iso/build-iso.sh --distro ubuntu --disk /dev/vda \
+	bash iso/build-iso.sh --disk /dev/vda \
 	  --role inference --family intel-broadwell --serial-console --dry-run >/dev/null; \
-	bash iso/build-iso.sh --distro debian --disk /dev/vda \
-	  --role builder --family amd-zen2 --dry-run >/dev/null; \
-	echo "iso-dry-run-both: OK (ubuntu + debian, sem flags extras)"
+	echo "iso-dry-run: OK (ubuntu, sem flags extras)"
 
 iso-yaml: ## Autoteste dos templates + das ferramentas da ISO (não gera ISO)
 	@bash iso/build-iso.sh --check-templates --yes
 
 iso-verify: ## Verifica uma ISO gerada: make iso-verify ISO=iso/out/x.iso
 	@if [ -z "$(ISO)" ]; then \
-	  echo "Defina a ISO: make iso-verify ISO=iso/out/ai-cpu-os-$(DISTRO)-<data>.iso"; \
+	  echo "Defina a ISO: make iso-verify ISO=iso/out/ai-cpu-os-ubuntu-<data>.iso"; \
 	  exit 1; \
 	fi
-	@bash iso/verify-iso.sh --iso "$(ISO)" --distro $(DISTRO) $(if $(DISK),--disk $(DISK))
+	@bash iso/verify-iso.sh --iso "$(ISO)" $(if $(DISK),--disk $(DISK))
 
 iso-vm: ## Boota a ISO numa VM e espera instalação + 1º boot (requer qemu)
 	@if [ -z "$(ISO)" ]; then \
-	  echo "Defina a ISO: make iso-vm ISO=iso/out/ai-cpu-os-$(DISTRO)-<data>.iso"; \
+	  echo "Defina a ISO: make iso-vm ISO=iso/out/ai-cpu-os-ubuntu-<data>.iso"; \
 	  exit 1; \
 	fi
 	@bash iso/test-vm.sh --iso "$(ISO)" --yes $(VM_ARGS)
@@ -219,6 +212,9 @@ network-fix: ## Conserta a rede DESTA máquina (DHCP); use NET_MODE/NET_IP/NET_G
 ui-test: ## Prova a interface web (API + salvaguardas; sem navegador, sem rede)
 	@bash tests/test-webui.sh
 
+talk-test: ## Prova o contrato do ai-talk (loopback, sem rede externa, sem root)
+	@bash tests/test-ai-talk.sh
+
 iso-lock-test: ## Prova a trava de instância única do gerador de ISO (flock real)
 	@bash tests/test-iso-lock.sh
 
@@ -227,10 +223,10 @@ iso-disk-test: ## Prova o tratamento do disco do autoinstall (auto/inválido/aus
 
 iso-lint: ## Verifica os scripts da ISO e valida templates + ferramentas
 	@bash -n iso/build-iso.sh iso/verify-iso.sh iso/test-vm.sh iso/write-pendrive.sh \
-	  iso/preseed/firstboot.sh
-	@sh -n iso/preseed/late-command.sh
+	  iso/common/firstboot.sh
+	@sh -n iso/common/late-command.sh
 	@shellcheck -x -S warning iso/build-iso.sh iso/verify-iso.sh iso/test-vm.sh \
-	  iso/write-pendrive.sh iso/preseed/late-command.sh
+	  iso/write-pendrive.sh iso/common/late-command.sh
 	@bash iso/build-iso.sh --check-templates --yes >/dev/null \
 	  && echo "iso-lint: templates e ferramentas OK"
 	@echo "iso-lint: OK"
@@ -241,8 +237,8 @@ iso-select-test: ## Prova a escolha da ISO oficial (SHA256SUMS reais; sem rede)
 iso-repo-test: ## Prova o download do repo apt local (stubs; sem rede nem apt real)
 	@bash tests/test-iso-repo-filter.sh
 
-iso-verify-test: ## Prova o verificador da ISO (distro-aware; sem xorriso nem rede)
-	@bash tests/test-verify-iso-repo-distro.sh
+iso-verify-test: ## Prova o verificador da ISO (uma base só; sem xorriso nem rede)
+	@bash tests/test-verify-iso-repo.sh
 
 ci-guards-test: ## Prova que os guardas do CI REALMENTE derrubam o job (cópia temporária)
 	@bash tests/test-ci-guards.sh

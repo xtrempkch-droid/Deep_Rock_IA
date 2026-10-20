@@ -1439,11 +1439,76 @@ llama-bench -m Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf -p 64 -n 32 -t 4
 
 ---
 
+## Bloco R — 💬 Chat da frota `ai-talk` (PLANEJADO — executar na fase F2)
+
+> **Status:** ❌ **não executado.** Só existe o desenho (ADR-003/004/005 em
+> [`docs/DECISIONS.md`](DECISIONS.md) e contrato em [`docs/CHAT.md`](CHAT.md)).
+> Este bloco é o roteiro para quando o `talk/` existir.
+
+**Objetivo:** provar que dois nós da frota trocam mensagens, recebem `ack`,
+recusam assinatura inválida, respeitam o espaçamento de 50 ms e não derrubam a
+inferência quando o chat falha.
+
+> **Teto de 15 nós (ADR-005):** este bloco mede **2 nós**. A bancada de **15
+> nós** é um teste de **carga** separado (`CHAT.md` §13.5, fase P4) — e é ela
+> que **valida o teto**. Não confunda “2 nós funcionam” com “15 nós cabem”.
+
+**Pré-requisitos**
+
+- [ ] Fase F1 concluída (`talk/` + CLI + `tests/test-ai-talk.sh` verdes).
+- [ ] Fase F2 concluída (unit, `talk/install.sh`, etapa 2.5 do `build.sh`,
+      flags `--chat-*` na ISO).
+- [ ] Duas VMs na **mesma bridge** (ou duas máquinas na mesma LAN), cada uma
+      com uma ISO e a **sua** chave (ADR-005) — o peer correspondente precisa
+      ter a chave do outro.
+- [ ] Papéis distintos (`--role inference` e `--role builder`) e peers
+      configurados (`--chat-peer` ou `--chat-peers-file`).
+
+**Passos**
+
+1. Gerar duas ISOs, cada uma com a **sua** chave e os peers cruzados; instalar
+   as duas VMs.
+2. Em cada nó: `systemctl status ai-talk` e `ai-talk status`.
+   - Esperado: nó/role corretos, config válido, chave com permissão restrita e
+     o modo de `fsync` ativo visível.
+3. `ai-talk send ai-builder "ping A→B"` em A; conferir no B com
+   `ai-talk tail -n 5` e `ai-talk listen`.
+4. Repetir B→A.
+5. Broadcast: `ai-talk send '*' "broadcast"`.
+6. **Espaçamento (ADR-004):** enviar 10 mensagens seguidas de A para B; a
+   última deve chegar ~450 ms depois da primeira (9 × 50 ms), não
+   instantaneamente. Medir com `time`.
+7. **Latência (ADR-004):** 20 `send` com ack; registrar p50 e p99 e comparar
+   com a meta de 10 ms. **Registrar o número real, mesmo que acima.**
+8. **Negativo:** parar o daemon em B (`systemctl stop ai-talk`) e enviar de A.
+   - Esperado: `ECONNREFUSED` → exit **3** rápido (< 1 s), sem travar; se o
+     host estiver mudo (firewall DROP), desistir em até **9 s**.
+9. Religar B e enviar de novo; esperado: entrega normal.
+10. **Assinatura inválida:** subir um terceiro daemon com **outra** chave e
+    tentar enviar; esperado: rejeição (exit 4 / `rejected` no log), sem gravar a
+    mensagem.
+11. **Ponte com o modelo (fase 3, opcional):** com `agent.enabled=false`, nada
+    responde automaticamente. Com um `llama-server` fake, a resposta cita
+    `reply_to` e **não** executa comando nenhum.
+12. Capturar de cada nó: `ai-talk status`, `messages.jsonl` (últimas linhas),
+    `journalctl -u ai-talk --no-pager` e o resultado de `smoke-test.sh`.
+
+**O que este bloco NÃO prova**
+
+- TLS/criptografia (v1 é LAN confiável + HMAC).
+- Escala (mais de ~8 nós), descoberta automática, canais/salas.
+- Que a ponte com o modelo é “inteligente”; ela só prova o encanamento e a
+  recusa de execução remota.
+
+---
+
 ## Histórico
 
 | Data | Mudança |
 |------|---------|
 | 2026-10-07 | Criação do protocolo (blocos A–L) para a versão `v0.2.0`; nenhum resultado preenchido ainda. |
+| 2026-10-20 | Adicionado o **Bloco R** (chat da frota `ai-talk`) — **planejado**, a executar na fase F2; nenhum passo executado. |
+| 2026-10-20 | Bloco R detalhado para as decisões do ADR-004/ADR-005: medição de **p50/p99**, **espaçamento de 50 ms**, *fail fast* por `ECONNREFUSED` e chave **por nó**. A bancada de **15 nós** (que valida o teto) fica em `CHAT.md` §13.5, fase P4 — **não** é este bloco. |
 | 2026-10-07 | Adicionado o **Bloco M** — geração e boot da ISO de instalação (entregável final do projeto). |
 | 2026-10-12 | Adicionados os **Blocos N e O** — famílias de CPU/papéis (casamento, `-march`, política de AVX-512) e mods portáveis (apply/idempotência/revert em Ubuntu e Debian). Nenhum resultado preenchido ainda. |
 | 2026-10-18 | **Bloco Q** — primeira execução em **hardware físico** (AMD A8-9600, Debian 13): instalação automática, 1º boot `status=ok`, llama.cpp compilado do tarball **sem rede**, tuning persistente após reboot, **SSH** funcionando (inclusive após reboot) e a **primeira medição de `llama-bench` do projeto** (pp64 17,05 t/s · tg32 10,40 t/s). Não cobre as máquinas de referência nem UEFI. |
