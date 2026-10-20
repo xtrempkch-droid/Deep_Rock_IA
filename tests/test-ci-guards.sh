@@ -331,6 +331,22 @@ planta "o verificador voltar a conferir a preseed" iso/verify-iso.sh \
 planta "o workflow da ISO voltar a passar DISTRO= ao make (variavel morta)" .github/workflows/iso.yml \
   app 'make iso-dry-run DISTRO="$ISO_DISTRO"' .github/workflows/iso.yml
 
+# --- Identidade derivada do papel (ADR-002) --------------------------------
+# O modo de falha e' silencioso: a ISO instala, o alvo sobe, e o usuario e'
+# outro. So se descobre ao tentar `ssh` ou ao ler um log de outra maquina.
+planta "a derivacao da identidade sumir (tudo vira ai-cpu-os)" iso/build-iso.sh \
+  sed_ 's|^    inference) printf .ai-inference.|    inference) printf "ai-cpu-os"|; s|^    builder)   printf .ai-builder.|    builder)   printf "ai-cpu-os"|' iso/build-iso.sh
+planta "o --username deixar de vencer o papel (a flag passaria a mentir)" iso/build-iso.sh \
+  sed_ 's|^  if \[\[ $USERNAME_EXPLICIT -eq 1 \]\]; then|  if \[\[ $USERNAME_EXPLICIT -eq 99 \]\]; then|' iso/build-iso.sh
+planta "a identidade deixar de chegar ao alvo (.iso-config)" iso/common/late-command.sh \
+  sed_ 's|ISO_USERNAME=%s||' iso/common/late-command.sh
+planta "a linha estavel do --dry-run mudar de formato" iso/build-iso.sh \
+  sed_ 's|usuario=%s hostname=%s papel=%s origem=%s|user=%s host=%s role=%s|' iso/build-iso.sh
+planta "o verificador deixar de conferir a derivacao do papel" iso/verify-iso.sh \
+  sed_ 's|derivação do ADR-002|identidade|' iso/verify-iso.sh
+planta "tirar identity-test do validate" Makefile \
+  sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test talk-test iso-dry-run|' Makefile
+
 # --- Acesso remoto: sem sshd a máquina instalada é um tijolo ---------------
 # Medido numa instalação real (sessão #36): o alvo subiu, pegou IP e não tinha
 # NENHUM listener (65535 portas em RST). Sem teclado/tela, não há conserto.

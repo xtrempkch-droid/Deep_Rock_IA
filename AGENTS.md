@@ -87,23 +87,22 @@ lá que `detect-hardware.sh` vê o SMBIOS completo e escolhe a família e o pape
 >   em 2026-10-20: `iso/preseed/` foi **removido**, os scripts compartilhados
 >   foram para `iso/common/`, `--distro debian` **aborta** (exit 2) citando o
 >   ADR. O runtime Debian (`build.sh`/`mods/`) **continua** suportado.
-> - **ADR-002 — identidade pelo papel.** `inference` → `ai-inference`;
->   `builder` → `ai-builder`; `auto` → `ai-cpu-os` + aviso; `--username` e
->   `--hostname` explícitos vencem. **Ainda não implementada.**
+> - **ADR-002 — identidade pelo papel.** ✅ **CONCLUÍDO (P1)** em 2026-10-20:
+>   `inference` → `ai-inference`; `builder` → `ai-builder`; `auto` →
+>   `ai-cpu-os` + aviso; `--username` e `--hostname` explícitos vencem.
 > - **ADR-003 — chat de frota `ai-talk`.** TCP 7331 na LAN, JSON lines,
 >   HMAC-SHA256, Python stdlib; contrato em [`docs/CHAT.md`](docs/CHAT.md).
->   **Ainda não implementado.**
+>   ⚠️ **Só a F1** (transporte + CLI + teste offline); F2/F3 pendentes.
 > - **ADR-004 — latência, espaçamento e durabilidade.** 50 ms entre `msg` do
 >   mesmo par (20 msg/s), fila de 256 com exit 5, p99 ≤ 10 ms e `fsync` por
 >   mensagem (§6.7/§6.8 do `CHAT.md`).
 > - **ADR-005 — teto de 15 nós** em malha completa; acima disso, relay/hub é
 >   obrigatório (`CHAT.md` §5.2).
 >
-> ⚠️ **Decisão não é fato:** o usuário padrão ainda é `ai-cpu-os` (ADR-002
-> **não** implementado), e o `talk/` existe só em **F1**
-> (transporte/CLI/loopback): não há serviço, ISO nem teste com duas VMs. As
-> duas coisas mais próximas são **P1 (identidade)** e depois **P2/P3**
-> (`docs/STATE.md` § 6).
+> ⚠️ **Decisão não é fato:** o `talk/` existe só em **F1**
+> (transporte/CLI/loopback): não há serviço, ISO nem teste com duas VMs. O
+> próximo passo é **P3 (ISO/duas VMs)** e a dívida **P5** (gerar e bootar uma
+> ISO depois das mudanças) — ver `docs/STATE.md` § 6.
 
 ---
 
@@ -470,6 +469,12 @@ Estas regras são **obrigatórias**:
     Não renomeie usuário depois da instalação e não crie dois usuários para
     “escolher depois”. A função é a identidade; o hardware continua sendo a
     **família**.
+    ✅ **Implementado (sessão #43)** — `resolve_identity()` no `build-iso.sh`,
+    `make identity-test` (22 asserções) e guardas no CI. A identidade viaja
+    para o alvo no `.iso-config` (`ISO_USERNAME`/`ISO_HOSTNAME`/
+    `IDENTITY_SOURCE`) e o `verify-iso.sh` cobra a **derivação**, não só a
+    presença do campo. Mexeu na tabela? Atualize **três** lugares: o
+    `resolve_identity()`, a tabela `ROLE_IDENTITY` da `webui/` e o teste.
 18. **`ai-talk` é transporte, não orquestrador (ADR-003, `docs/CHAT.md`).**
     Invariantes obrigatórios:
     - **Não é o `talk` do netkit.** Nada de `talkd`, UDP 517/518 ou protocolo
@@ -502,7 +507,22 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-20 (sessão #42)
+- **Data:** 2026-10-20 (sessão #43)
+- **O que mudou:** 🧑‍🔧 **ADR-002 executado: a identidade do sistema segue a
+  FUNÇÃO.** `resolve_identity()` no `iso/build-iso.sh` mapeia `--role inference`
+  → **`ai-inference`**, `builder` → **`ai-builder`** (usuário e hostname);
+  `--role auto` mantém `ai-cpu-os` **com aviso** — o papel só é conhecido no
+  1º boot e renomear usuário depois mexe em home/`sudoers`/chaves, o que o ADR
+  rejeitou. `--username`/`--hostname` explícitos vencem **sempre** e o GECOS
+  declara a função (`ai-inference (inference)`). A identidade viaja para o alvo
+  no `.iso-config` (`ISO_USERNAME`/`ISO_HOSTNAME`/`IDENTITY_SOURCE`) e o
+  `verify-iso.sh` passou a cobrar a **derivação** (antes cobrava só a presença
+  do campo — e o `grep` de ROLE/FAMILY estava com aspas erradas, então nunca
+  rodou com papel concreto). `make identity-test` (**22 asserções**) no
+  `validate` e no CI; `ci-guards` **100** (7 violações plantadas novas). A UI
+  agora sugere o usuário ao escolher o papel (campos opcionais, validados).
+  ⚠️ **Nenhuma ISO gerada** — a prova é `--check-templates`/`--dir`.
+- **Data anterior:** 2026-10-20 (sessão #42)
 - **O que mudou:** 🗑️ **ADR-001 executado: o caminho Debian da ISO foi
   removido.** `iso/preseed/` saiu (os scripts compartilhados foram para
   `iso/common/`), `--distro debian` **aborta** com exit 2 citando o ADR,

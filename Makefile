@@ -42,7 +42,7 @@ SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
         build mods mods-check mods-test families families-test avx512-test gpu-check \
         iso iso-dry-run iso-lint iso-yaml iso-verify iso-vm \
         iso-select-test iso-repo-test iso-verify-test iso-release-test \
-        iso-space-test ci-guards-test \
+        iso-space-test identity-test ci-guards-test \
         iso-lock-test \
         pendrives pendrive pendrive-test iso-check iso-check-test \
         ui ui-test network-fix network-test apt-fix apt-test \
@@ -88,7 +88,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test talk-test iso-dry-run ## Lint + docs + famílias + AVX-512 + testes de ISO + rede + UI + chat + guardas + dry-run
+validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test identity-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test talk-test iso-dry-run ## Lint + docs + famílias + AVX-512 + identidade + testes de ISO + rede + UI + chat + guardas + dry-run
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -217,6 +217,9 @@ talk-test: ## Prova o contrato do ai-talk (loopback, sem rede externa, sem root)
 
 iso-lock-test: ## Prova a trava de instância única do gerador de ISO (flock real)
 	@bash tests/test-iso-lock.sh
+
+identity-test: ## Prova a identidade derivada do papel: ai-inference/ai-builder (ADR-002)
+	@bash tests/test-role-identity.sh
 
 iso-disk-test: ## Prova o tratamento do disco do autoinstall (auto/inválido/ausente)
 	@bash tests/test-iso-disk.sh

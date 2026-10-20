@@ -776,20 +776,97 @@ if [[ -n "$LATE_LOCAL" ]]; then
     fail "late-command.sh não grava FAMILY no .iso-config"
   fi
 
+  # Os valores vão entre ASPAS SIMPLES no template (`'@@ROLE@@'` → `'inference'`):
+  # o `subst_template` preserva as aspas do arquivo. Procurar só por aspas
+  # duplas dava falso negativo e derrubava o `--check-templates --role X` —
+  # passou despercebido porque o `make iso-yaml` sempre rodou com `auto`.
   if [[ "$EXPECT_ROLE" != "auto" ]]; then
-    if grep -q "\"${EXPECT_ROLE}\"" "$LATE_LOCAL"; then
+    if grep -qE "['\"]${EXPECT_ROLE}['\"]" "$LATE_LOCAL"; then
       pass "late-command.sh grava ROLE=${EXPECT_ROLE}"
     else
       fail "late-command.sh não grava ROLE=${EXPECT_ROLE}"
     fi
   fi
   if [[ "$EXPECT_FAMILY" != "auto" ]]; then
-    if grep -q "\"${EXPECT_FAMILY}\"" "$LATE_LOCAL"; then
+    if grep -qE "['\"]${EXPECT_FAMILY}['\"]" "$LATE_LOCAL"; then
       pass "late-command.sh grava FAMILY=${EXPECT_FAMILY}"
     else
       fail "late-command.sh não grava FAMILY=${EXPECT_FAMILY}"
     fi
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# 5-b. Identidade × papel (ADR-002)
+# ---------------------------------------------------------------------------
+# A identidade do sistema instalado segue a FUNÇÃO da máquina: `--role
+# inference` → `ai-inference`, `builder` → `ai-builder`, `auto` → `ai-cpu-os`
+# (sem derivação, porque o papel só é conhecido no 1º boot).
+#
+# Aqui não dá para "confiar no build-iso.sh": o valor está em DOIS arquivos que
+# precisam concordar — o `identity:` do autoinstall (o usuário que o Subiquity
+# cria) e o `ISO_USERNAME` do `.iso-config` (o que o resto do projeto usa). Se
+# eles divergirem, o alvo nasce com um usuário e a automação procura outro.
+section "Identidade (ADR-002)"
+if [[ -n "$AI_LOCAL" && -n "$LATE_LOCAL" ]]; then
+  id_user="$(sed -n 's/^[[:space:]]*username:[[:space:]]*"\(.*\)"$/\1/p' "$AI_LOCAL" | head -1)"
+  id_host="$(sed -n 's/^[[:space:]]*hostname:[[:space:]]*"\(.*\)"$/\1/p' "$AI_LOCAL" | head -1)"
+  # O late-command já vem com os marcadores SUBSTITUÍDOS: os três valores
+  # (usuário, hostname, origem) aparecem como strings entre aspas simples na
+  # linha do printf que escreve o .iso-config.
+  id_line="$(grep -F 'ISO_USERNAME=%s' "$LATE_LOCAL" | head -1)"
+  if [[ -n "$id_line" ]]; then
+    pass "late-command.sh grava ISO_USERNAME/ISO_HOSTNAME/IDENTITY_SOURCE no .iso-config"
+  else
+    fail "late-command.sh não grava a identidade no .iso-config (ADR-002)"
+  fi
+
+  # Coerência entre os dois arquivos: o que o instalador cria == o que o
+  # projeto assume. Um descompasso aqui só apareceria no alvo instalado.
+  if [[ -n "$id_user" ]]; then
+    if grep -qF "'${id_user}'" "$LATE_LOCAL"; then
+      pass "identidade coerente entre autoinstall ('${id_user}') e late-command"
+    else
+      fail "autoinstall cria '${id_user}' mas o late-command grava outro usuário"
+    fi
+  else
+    fail "identity.username ausente no autoinstall.yaml"
+  fi
+  if [[ -n "$id_host" ]]; then
+    if grep -qF "'${id_host}'" "$LATE_LOCAL"; then
+      pass "hostname coerente entre autoinstall ('${id_host}') e late-command"
+    else
+      fail "autoinstall usa hostname '${id_host}' mas o late-command grava outro"
+    fi
+  else
+    fail "identity.hostname ausente no autoinstall.yaml"
+  fi
+
+  # A derivação em si. `origem=papel` significa "o build derivou do papel" —
+  # então o mapeamento TEM de valer exatamente. Se o usuário passou
+  # `--username`, a origem é `explicito` e qualquer valor é legítimo.
+  case "$EXPECT_ROLE" in
+    inference) want_id="ai-inference" ;;
+    builder)   want_id="ai-builder" ;;
+    *)         want_id="" ;;
+  esac
+  if [[ -n "$want_id" ]]; then
+    if [[ "$id_user" == "$want_id" ]]; then
+      pass "papel ${EXPECT_ROLE} → usuário ${want_id} (derivação do ADR-002)"
+    elif grep -qF "'explicito'" "$LATE_LOCAL"; then
+      pass "papel ${EXPECT_ROLE} com --username explícito ('${id_user}'): permitido, o usuário vence"
+    else
+      fail "papel ${EXPECT_ROLE} deveria dar usuário ${want_id} (achei '${id_user}' e a origem não é explícita)"
+    fi
+  else
+    if [[ "$id_user" == "ai-cpu-os" ]]; then
+      pass "papel auto mantém ai-cpu-os (sem derivação — o papel só existe no 1º boot)"
+    else
+      pass "papel auto com --username explícito ('${id_user}')"
+    fi
+  fi
+else
+  skip "sem autoinstall.yaml/late-command.sh para conferir a identidade"
 fi
 
 # ---------------------------------------------------------------------------

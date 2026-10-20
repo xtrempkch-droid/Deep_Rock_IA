@@ -21,7 +21,7 @@
 | ADR | Título | Status | Código |
 |-----|--------|--------|--------|
 | [ADR-001](#adr-001--uma-única-base-de-iso-ubuntu-server) | Uma única base de ISO: Ubuntu Server | ✅ **Implementada** | `iso/preseed/` apagado; scripts em `iso/common/`; `--distro debian` → exit 2; guardas no CI |
-| [ADR-002](#adr-002--identidade-do-sistema-derivada-do-papel) | Identidade do sistema derivada do papel | ✅ Aceita | **Não implementada** |
+| [ADR-002](#adr-002--identidade-do-sistema-derivada-do-papel) | Identidade do sistema derivada do papel | ✅ **Implementada** | `resolve_identity()` no `build-iso.sh` + `make identity-test` (22 asserções) |
 | [ADR-003](#adr-003--chat-de-frota-ai-talk) | Chat de frota `ai-talk` | ✅ **F1 implementada** | `talk/ai_talk.py` + `make talk-test`; F2/F3 pendentes — ver [`docs/CHAT.md`](CHAT.md) |
 | [ADR-004](#adr-004--latência-espaçamento-e-durabilidade-do-ai-talk) | Latência, espaçamento e durabilidade do `ai-talk` | ✅ **F1 implementada** | `CHAT.md` §6.7/§6.8 + 30 asserções em loopback |
 | [ADR-005](#adr-005--teto-de-15-nós-em-malha-completa) | Teto de **15 nós** em malha completa | ✅ **F1 implementada** (teto validado por teste; falta a bancada) | `CHAT.md` §5.2 |
@@ -180,7 +180,8 @@ as 10 etapas abaixo foram feitas juntas):
 ## ADR-002 — Identidade do sistema derivada do papel
 
 - **Data:** 2026-10-20
-- **Status:** ✅ **Aceita**; **não implementada**.
+- **Status:** ✅ **IMPLEMENTADA** (sessão #43, 2026-10-20) — ver o fim desta
+  seção para o que foi executado e como é cobrado.
 - **Decisor:** dono do projeto (*“o usuário será definido pela função
   (builder ou inference)”*).
 
@@ -236,7 +237,9 @@ usuário depois da instalação.
 - O `autoinstall.yaml` já é templatizado (`@@USERNAME@@`/`@@HOSTNAME@@`), então
   a mudança é concentrada no `build-iso.sh` + validação + testes + docs.
 
-### Plano de implementação (P1)
+### Plano de implementação (P1) — ✅ EXECUTADO na sessão #43
+
+Ordem que foi seguida (as 8 etapas juntas, com `make validate` verde no fim):
 
 1. Em `iso/build-iso.sh`, marcar se `--username` foi passado
    (`USERNAME_EXPLICIT=1`). Hoje o valor já nasce preenchido, então a
@@ -261,18 +264,43 @@ usuário depois da instalação.
    `TUTORIAL.md`, `IMPLANTAR-EM-OUTRO-PC.md`, `VALIDATION.md`, `STATE.md`,
    `ROADMAP.md`, `JOURNAL.md`, `AGENTS.md`).
 
-### Critérios de aceite
+### Critérios de aceite — ✅ todos cobertos por `make identity-test`
 
-- [ ] `--role inference` + sem `--username` → `identity.username:
+Cada linha abaixo é uma asserção do `tests/test-role-identity.sh` (22 no total):
+
+- [x] `--role inference` + sem `--username` → `identity.username:
       ai-inference`, hostname `ai-inference`.
-- [ ] `--role builder` + sem `--username` → `ai-builder` / `ai-builder`.
-- [ ] `--role auto` + sem `--username` → `ai-cpu-os` + aviso explícito.
-- [ ] `--username custom` vence qualquer papel.
-- [ ] `--hostname custom` vence o padrão.
-- [ ] `--role inference --username custom` → `custom` / `custom`.
-- [ ] O `autoinstall.yaml` gerado e o `.iso-config` refletem a identidade.
-- [ ] `--dry-run` imprime a identidade escolhida (testável sem gerar ISO).
-- [ ] `make validate` verde e `verify-iso.sh` aprova a ISO de teste.
+- [x] `--role builder` + sem `--username` → `ai-builder` / `ai-builder`.
+- [x] `--role auto` + sem `--username` → `ai-cpu-os` + aviso explícito (que
+      também diz **como** obter a derivação).
+- [x] `--username custom` vence qualquer papel.
+- [x] `--hostname custom` vence o padrão.
+- [x] `--role inference --username custom` → `custom` / `custom`.
+- [x] O `autoinstall.yaml` gerado e o `.iso-config` refletem a identidade
+      (e o GECOS declara a função).
+- [x] `--dry-run` imprime a identidade escolhida (testável sem gerar ISO).
+- [x] `make validate` verde e `verify-iso.sh` aprova a ISO de teste.
+
+### Resultado (o que foi feito, e o que NÃO foi)
+
+| Peça | Onde | Prova |
+|---|---|---|
+| Derivação | `resolve_identity()` + `role_default_username()` no `build-iso.sh` | `make identity-test` (7 casos de precedência) |
+| Linha estável do `--dry-run` | `identity_line()` → `identidade: usuario=… hostname=… papel=… origem=…` | o próprio teste a lê |
+| Identidade no alvo | `.iso-config` via `ISO_USERNAME`/`ISO_HOSTNAME`/`IDENTITY_SOURCE` | `test-role-identity` + guarda no CI |
+| Coerência cobrada | `verify-iso.sh` § "Identidade (ADR-002)" | teste positivo **e negativo** (planta usuário incoerente e exige FAIL) |
+| UI sugere o nome | `ROLE_IDENTITY` + campos opcionais `username`/`hostname` | `make ui-test` (+5 asserções) |
+| Guardas do CI | 7 violações plantadas em `make ci-guards-test` (100 no total) | `ci-guards` |
+
+**Bug pré-existente encontrado:** o `verify-iso.sh` conferia `ROLE`/`FAMILY` no
+`late-command.sh` procurando **aspas duplas** (`"inference"`), mas o template
+usa **simples** (`'@@ROLE@@'` → `'inference'`). Como o `make iso-yaml` sempre
+rodou com `--role auto`, a checagem nunca era exercitada e ninguém viu. Agora
+aceita as duas formas e é exercitada por `--check-templates --role inference`.
+
+**NÃO feito:** nenhuma ISO foi gerada nem bootada depois da mudança; a
+identidade nunca foi vista num sistema instalado. É a mesma dívida **P5** do
+`STATE.md` § 6 (junto com a remoção do caminho Debian).
 
 ### O que NÃO foi decidido aqui
 

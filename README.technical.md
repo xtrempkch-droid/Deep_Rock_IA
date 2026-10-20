@@ -242,7 +242,7 @@ Estes são os pontos que, se violados, quebram de forma silenciosa e cara.
 | Invariante | Por quê |
 |---|---|
 | **Base única: Ubuntu Server** (ADR-001, executado na sessão #42) | Um caminho de boot/instalador/templates. O Debian/preseed foi **removido**: `--distro debian` aborta e o CI reprova se `preseed/` voltar. O runtime Debian (`build.sh`/`mods/`) continua suportado. |
-| **Identidade = papel** (ADR-002, planejado) | `inference`→`ai-inference`, `builder`→`ai-builder`; `--username`/`--hostname` explícitos vencem; `auto` mantém `ai-cpu-os` + aviso (o papel só é conhecido no 1º boot). |
+| **Identidade = papel** (ADR-002, implementado na #43) | `inference`→`ai-inference`, `builder`→`ai-builder`; `--username`/`--hostname` explícitos vencem; `auto` mantém `ai-cpu-os` + aviso (o papel só é conhecido no 1º boot). A origem fica em `.iso-config` (`IDENTITY_SOURCE`) e o `verify-iso.sh` confere a **derivação**, não só a presença do campo. `make identity-test` (22 asserções). |
 | **`ai-talk` vai na ISO; `webui/` não** (ADR-003) | O chat é runtime da frota; a UI é ferramenta da máquina que gera a mídia. O `ai-talk` é stdlib, air-gapped e mensagem **nunca** vira comando. |
 | A config de instalação **tem** de chegar na ISO | Sem `/autoinstall.yaml` na raiz (ao lado de `casper/`), a instalação deixa de ser automática — e o usuário descobre só no meio do processo. |
 | Nenhum `@@TOKEN@@` pode sobrar | Um token não substituído gera comportamento indefinido no instalador. |
@@ -433,6 +433,7 @@ bash tests/test-families.sh
 bash tests/test-iso-selection.sh     # escolha da ISO oficial (sem rede)
 bash tests/test-iso-repo-filter.sh   # repo apt: filtro e fallback (sem rede)
 bash tests/test-verify-iso-repo.sh # verificador do repo local (sem xorriso)
+bash tests/test-role-identity.sh     # identidade derivada do papel (ADR-002)
 bash tests/test-ci-guards.sh         # os guardas do CI reprovam? (cópia temporária)
 bash tests/test-check-iso.sh         # conferência de ISO baixada (sem xorriso)
 bash tests/test-webui.sh             # interface web: API + salvaguardas
@@ -648,7 +649,7 @@ Leia isto **antes** de afirmar que algo funciona.
 | ISO (conteúdo) | ✅ | ✅ `verify-iso.sh` (com teste negativo) — **na ISO real: PASS=41/FAIL=0** | ❌ |
 | ISO (boot/instalação, **Ubuntu**) | ✅ | ✅ **executado (sessão #21)**: `test-vm.sh` exit 0 — instalou sozinha e o 1º boot aplicou (`status=ok`, família `intel-haswell`) | ❌ (só na VM) |
 | ~~ISO (boot/instalação, **Debian**)~~ | 🗑️ removido | ✅ executado em VM (#35) e em metal (#37) **antes** da remoção (ADR-001, sessão #42) | — |
-| Identidade por papel (ADR-002) | ✅ plano | ❌ **não implementada** | ❌ |
+| Identidade por papel (ADR-002) | ✅ | ✅ **22 asserções** (`make identity-test`): derivação, aviso do `auto`, precedência do `--username`, YAML e `.iso-config` coerentes | ❌ (nenhuma ISO gerada) |
 | Chat da frota `ai-talk` (ADR-003) | ✅ desenho (`docs/CHAT.md`) | ❌ **não implementado** | ❌ |
 | Boot **UEFI** da ISO | ✅ | ❌ nunca testado | ❌ |
 | GPU (qualquer backend) | ✅ | ❌ | ❌ |

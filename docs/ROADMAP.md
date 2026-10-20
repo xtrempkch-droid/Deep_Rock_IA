@@ -140,15 +140,16 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
       apagado, `verify-iso.sh`/`Makefile`/CI/`webui/`/testes limpos e
       `--distro debian` **aborta com exit 2** citando o ADR. `make validate`
       verde (`ci-guards` 93). Ver `STATE.md` § 3.9.
-- [ ] **P5 — Gerar e bootar uma ISO Ubuntu depois da remoção do Debian** —
-      a dívida que a P0 deixou: o `--dry-run` e o `--check-templates` passam,
-      mas **não** há boot desde então (Regra 13). *(início previsto: pode ser
-      feito junto com a P3)*
-- [ ] **P1 — Identidade do sistema derivada do papel** (ADR-002) —
-      `inference`→`ai-inference`, `builder`→`ai-builder`, `auto`→
-      `ai-cpu-os` + aviso; `--username`/`--hostname` explícitos vencem;
-      `tests/test-role-identity.sh` + `make identity-test`. *(próxima sessão —
-      é o topo da fila)*
+- [ ] **P5 — Gerar e bootar uma ISO Ubuntu** — a dívida que a P0/P1 deixaram:
+      o `--dry-run` e o `--check-templates` passam, mas **não** há boot desde a
+      sessão #21 (Regra 13). **É o topo da fila** (as duas mudanças — Debian
+      fora e identidade por papel — nunca foram vistas num sistema instalado).
+- [x] **P1 — Identidade do sistema derivada do papel** (ADR-002) — ✅ **FEITO
+      (sessão #43):** `resolve_identity()` no `build-iso.sh` (`inference`→
+      `ai-inference`, `builder`→`ai-builder`, `auto`→`ai-cpu-os` + aviso),
+      `--username`/`--hostname` explícitos vencem, identidade no `.iso-config`,
+      coerência cobrada pelo `verify-iso.sh`, `make identity-test` (**22
+      asserções**) e a UI sugerindo o nome. Ver `STATE.md` § 3.10.
 - [x] **P2 — `ai-talk` fase 1** (ADR-003/004/005, [`CHAT.md`](CHAT.md)) —
       ✅ **FEITO (sessão #41):** `talk/ai_talk.py` (stdlib) + CLI + **30
       asserções** em loopback (`make talk-test`, no `validate` e no CI).

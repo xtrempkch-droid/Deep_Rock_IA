@@ -930,7 +930,9 @@ bash iso/test-vm.sh --iso iso/out/ai-cpu-os-ubuntu-*.iso --yes
 `serial-getty@ttyS0`, dá para logar pelo console serial sem tela:
 
 ```bash
-# Faça login com o usuário criado (padrão: ai-cpu-os) e a senha anotada.
+# Faça login com o usuário criado e a senha anotada.
+# O NOME depende do papel (ADR-002): --role inference → ai-inference;
+# --role builder → ai-builder; --role auto → ai-cpu-os.
 systemctl status ai-cpu-os-firstboot --no-pager
 cat /var/log/ai-cpu-os-firstboot.log
 cat /opt/ai-cpu-os/.firstboot-status
@@ -953,6 +955,7 @@ cat /opt/ai-cpu-os/.iso-config
 | `.firstboot-status` = `ok`? | _(preencher)_ |
 | Sentinela `.firstboot-pending` removida? | _(preencher)_ |
 | Tuning aplicado (governor/sysctl)? | _(preencher)_ |
+| **Identidade derivada do papel** — `getent passwd ai-inference` existe? | _(preencher — ADR-002; ver M.5-c)_ |
 | Compilou o llama.cpp? (papel `inference`) | _(preencher — pode levar 10-20 min)_ |
 | Funcionou sem rede? (teste proposital) | _(preencher — deve adiar para o próximo boot)_ |
 
@@ -1051,6 +1054,28 @@ outra vez com `hostfwd` na porta 22 para inspeção por SSH.
 
 **O que NÃO foi provado:** modo `static` (só o `auto` foi bootado), hardware
 físico, caminho Debian, UEFI.
+
+### M.5-c Identidade derivada do papel (ADR-002, a partir da sessão #43)
+
+> **Ainda NÃO executado num sistema instalado.** A derivação é provada só por
+> `make identity-test` (dry-run + `--check-templates`) — falta ver o usuário
+> existindo no alvo.
+
+```bash
+# No sistema INSTALADO (console ou SSH):
+getent passwd | grep -E '^ai-(inference|builder|cpu-os):'   # qual existe?
+id -un                       # quem você é
+hostname                     # = usuário, salvo --hostname explícito
+grep -E '^(ISO_USERNAME|ISO_HOSTNAME|IDENTITY_SOURCE)=' /opt/ai-cpu-os/.iso-config
+```
+
+| Campo | Valor |
+|-------|-------|
+| `--role` usado na ISO | _(preencher)_ |
+| Usuário criado | _(preencher — esperado `ai-inference`/`ai-builder`/`ai-cpu-os`)_ |
+| `IDENTITY_SOURCE` no `.iso-config` | _(preencher — esperado `papel` ou `explicito`)_ |
+| Coerência usuário × papel | _(preencher — ✅/❌)_ |
+| Frota (`--hostname ai-inference-2`) | _(preencher, se testado)_ |
 
 ### M.6 Critério de "pronto"
 

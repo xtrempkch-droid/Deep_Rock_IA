@@ -124,8 +124,14 @@ if [ -n "${ISO_SOURCE_NAME}" ]; then
     LLAMA_SRC="${SOURCE_DST}"
 fi
 
-printf 'ROLE=%s\nFAMILY=%s\nFIRSTBOOT_REBOOT=%s\nDISTRO=%s\nISO_BUILD=%s\nMODEL_FILE=%s\nLLAMA_SRC=%s\n' \
+## A identidade vai junto (ADR-002): o `verify-iso.sh` confere a coerência
+## identidade x papel e quem administra o alvo consegue ver DE ONDE ela veio
+## (`papel` = derivada da função; `explicito` = --username venceu; `padrao-auto`
+## = --role auto, sem derivação). Prefixo ISO_ para não colidir com variáveis
+## que o shell já define (HOSTNAME é uma delas).
+printf 'ROLE=%s\nFAMILY=%s\nFIRSTBOOT_REBOOT=%s\nDISTRO=%s\nISO_BUILD=%s\nMODEL_FILE=%s\nLLAMA_SRC=%s\nISO_USERNAME=%s\nISO_HOSTNAME=%s\nIDENTITY_SOURCE=%s\n' \
     '@@ROLE@@' '@@FAMILY@@' '@@FIRSTBOOT_REBOOT@@' '@@DISTRO@@' '@@ISO_BUILD@@' "${MODEL_FILE}" "${LLAMA_SRC}" \
+    '@@USERNAME@@' '@@HOSTNAME@@' '@@IDENTITY_SOURCE@@' \
     > "${DST}/.iso-config"
 
 ## ---------------------------------------------------------------------------

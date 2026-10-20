@@ -200,7 +200,7 @@ tests/smoke-test.sh  (validação rápida)
 | **`kernel.numa_balancing=0` só em single-socket**          | Em single-socket, o balanceamento NUMA adiciona overhead sem benefício.                                    |
 | **Huge pages como `always` (com fallback `madvise`)**      | `always` é mais simples e benéfico para cargas de longa duração; `madvise` é mais conservador.             |
 | **Base única de ISO: Ubuntu Server** (ADR-001, executado na sessão #42) | Um caminho de boot, um instalador, um conjunto de templates. O Debian continua como **hospedeiro** das mods, não como base de mídia; o caminho preseed foi **removido** (`--distro debian` aborta). |
-| **Identidade = papel** (ADR-002)                            | `inference`→`ai-inference`, `builder`→`ai-builder`: SSH, logs e o nó do chat dizem a função. `--username`/`--hostname` explícitos vencem; `auto` não deriva (o papel só é conhecido no 1º boot). |
+| **Identidade = papel** (ADR-002, **implementado**)          | `inference`→`ai-inference`, `builder`→`ai-builder`: SSH, logs e o nó do chat dizem a função. `--username`/`--hostname` explícitos vencem; `auto` não deriva (o papel só é conhecido no 1º boot) e avisa. Decidido na **geração da ISO**, porque renomear usuário depois mexe em home, `sudoers` e chaves. |
 | **Chat de frota `ai-talk`: TCP + JSON lines + HMAC** (ADR-003) | Simétrico, rápido e sem broker. Python stdlib + air-gapped. Mensagem é dado, nunca comando; a ponte com o modelo é opcional e não executa tool calls remotas. |
 
 ---

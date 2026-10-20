@@ -402,14 +402,22 @@ cd .. && rm -rf Deep_Rock_IA
 > **Base única:** a ISO é **Ubuntu Server** (ADR-001). O caminho Debian foi
 > **removido** — `--distro debian` agora **aborta** com uma mensagem que aponta
 > o [`docs/DECISIONS.md`](docs/DECISIONS.md).
-> A **identidade pelo papel** (`ai-inference`/`ai-builder`) e o **chat da frota
-> `ai-talk`** estão **planejados**; veja [`docs/DECISIONS.md`](docs/DECISIONS.md)
+> **A identidade segue a FUNÇÃO da máquina** (ADR-002): `--role inference` cria
+> o usuário/hostname **`ai-inference`**, `--role builder` cria **`ai-builder`**.
+> Sem papel concreto (`auto`) fica `ai-cpu-os` — com aviso, porque o papel só é
+> conhecido no primeiro boot. O **chat da frota `ai-talk`** está **planejado**
+> (só o transporte existe hoje); veja [`docs/DECISIONS.md`](docs/DECISIONS.md)
 > e [`docs/CHAT.md`](docs/CHAT.md).
 
 ```bash
 # Gerar a ISO (precisa de xorriso: sudo apt install -y xorriso curl)
 bash iso/build-iso.sh --distro ubuntu --disk /dev/vda --dry-run   # simular
-sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/vda         # gerar
+
+# Servidor de IA: o usuário do sistema nasce como ai-inference
+sudo bash iso/build-iso.sh --distro ubuntu --role inference --disk /dev/vda
+
+# Máquina de build: nasce como ai-builder
+sudo bash iso/build-iso.sh --distro ubuntu --role builder --disk /dev/vda
 
 # Testar numa máquina virtual (SEMPRE antes de máquina real)
 bash iso/test-vm.sh --iso iso/out/ai-cpu-os-ubuntu-*.iso --yes

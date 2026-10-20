@@ -84,6 +84,16 @@ ACTIONS = {
 # QUALQUER outro valor vindo do navegador.
 DISTROS = ("ubuntu",)
 ROLES = ("auto", "inference", "builder")
+# ADR-002 (docs/DECISIONS.md): a identidade do sistema segue a FUNÇÃO da
+# máquina. Este mapa é a MESMA tabela do `resolve_identity()` no
+# build-iso.sh — ele existe aqui só para a página SUGERIR o valor; quem
+# decide de verdade continua sendo o build. A UI nunca obriga: campo vazio
+# significa "deixe o build derivar do papel".
+ROLE_IDENTITY = {
+    "inference": "ai-inference",
+    "builder": "ai-builder",
+    "auto": "ai-cpu-os",
+}
 PAYLOADS = ("auto", "none")
 # Rede do sistema INSTALADO. O default é `auto` (DHCP) de propósito: sem uma
 # configuração persistente o alvo sobe com a placa DOWN (bug real, sessão #28).
@@ -91,6 +101,11 @@ NETWORK_MODES = ("auto", "dhcp", "static", "none")
 
 # Um dispositivo de bloco: /dev/sdb, /dev/nvme0n1, /dev/vda. Nada além disso.
 RE_DISK = re.compile(r"^/dev/[a-zA-Z0-9]+$")
+# Nome de usuário POSIX e hostname: minúsculas, dígitos, `_` e `-`. Restringir
+# aqui não é preciosismo — o valor vai para o `autoinstall.yaml`, para o
+# `.iso-config` e para o prompt do alvo.
+RE_USERNAME = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+RE_HOSTNAME = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 # Nome de ISO gerada pelo projeto (usado para achar arquivos dentro de iso/out).
 RE_ISO_NAME = re.compile(r"^[A-Za-z0-9._-]+\.iso$")
 # Valores que vão para o netplan/preseed — validados aqui também (a UI nunca
@@ -306,6 +321,30 @@ def v_gateway(value: str) -> str:
     return value
 
 
+def v_username(value: str) -> str:
+    """Usuário administrativo (vazio = o build deriva do papel, ADR-002)."""
+    if value == "":
+        return value
+    if not RE_USERNAME.match(value):
+        raise Invalid(
+            f"usuário inválido: {value!r} (minúsculas, dígitos, '_' e '-'; "
+            "começa com letra ou '_'; até 32 caracteres)"
+        )
+    return value
+
+
+def v_hostname(value: str) -> str:
+    """Hostname (vazio = o build usa o mesmo nome do usuário)."""
+    if value == "":
+        return value
+    if not RE_HOSTNAME.match(value):
+        raise Invalid(
+            f"hostname inválido: {value!r} (minúsculas, dígitos e '-' entre "
+            "eles; até 63 caracteres)"
+        )
+    return value
+
+
 def v_iface(value: str) -> str:
     if value == "":
         return value
@@ -425,8 +464,12 @@ def action_options() -> dict[str, Any]:
         "payloads": list(PAYLOADS),
         "network_modes": list(NETWORK_MODES),
         "mods": mods,
+        # A tabela do ADR-002 vai junto para a página poder SUGERIR o usuário
+        # ao escolher o papel (sem impedir outro valor).
+        "identity": dict(ROLE_IDENTITY),
         "defaults": {"distro": "ubuntu", "disk": "/dev/vda", "role": "auto",
-                     "family": "auto", "payload": "none", "network": "auto"},
+                     "family": "auto", "payload": "none", "network": "auto",
+                     "username": "", "hostname": ""},
     }
 
 
@@ -500,8 +543,17 @@ def _iso_args_from(params: dict[str, Any]) -> list[str]:
     payload = v_payload(str(params.get("payload", "none")))
     netmode = v_network_mode(str(params.get("network", "auto")))
     netiface = v_iface(str(params.get("net_iface", "")))
+    # Identidade (ADR-002). Campo VAZIO = não passa a flag e o build-iso.sh
+    # deriva do papel — o caminho recomendado. Preenchido = o valor explícito
+    # vence (é o caso de frota: `ai-inference` com hostname `ai-inference-2`).
+    username = v_username(str(params.get("username", "")))
+    hostname = v_hostname(str(params.get("hostname", "")))
     args = ["--distro", distro, "--disk", disk, "--role", role,
             "--family", family, "--network", netmode]
+    if username:
+        args += ["--username", username]
+    if hostname:
+        args += ["--hostname", hostname]
     if netiface:
         args += ["--network-interface", netiface]
     if netmode == "static":

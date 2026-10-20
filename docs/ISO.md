@@ -19,9 +19,14 @@
 > | `ubuntu` **(o único)** | Ubuntu Server live | Subiquity/autoinstall | `autoinstall.yaml` na raiz da ISO | ✅ gerada, instalada e bootada em VM (#21); **hardware físico ainda pendente** |
 > | `debian` | — | — | — | ❌ **removido** (ADR-001); existiu até a sessão #41 e chegou a ser instalado em VM (#35) e em metal (#37) |
 >
-> ⚠️ **Em transição (planejado, ainda não implementado):** identidade do
-> sistema derivada do papel (ADR-002: `ai-inference`/`ai-builder`) e chat da
-> frota **`ai-talk`** (ADR-003, contrato em [`docs/CHAT.md`](CHAT.md)).
+> ✅ **Identidade derivada do papel (ADR-002, sessão #43):** `--role inference`
+> → usuário e hostname **`ai-inference`**; `--role builder` → **`ai-builder`**;
+> `--role auto` mantém `ai-cpu-os` **com aviso** (o papel só existe no 1º boot).
+> `--username`/`--hostname` explícitos vencem. A mídia registra a origem em
+> `.iso-config` (`IDENTITY_SOURCE`) e o `verify-iso.sh` confere a coerência.
+>
+> ⚠️ **Planejado, ainda não implementado:** chat da frota **`ai-talk`**
+> (ADR-003, contrato em [`docs/CHAT.md`](CHAT.md)) — só a F1 (transporte/CLI).
 > ⚠️ **Após a remoção do caminho Debian, nenhuma ISO foi gerada nem bootada** —
 > as provas de comportamento (#21/#35/#37) são anteriores a ela.
 
@@ -303,14 +308,14 @@ Opções mais usadas:
 | Opção | Para que serve |
 |-------|----------------|
 | `--distro ubuntu` | Base do SO: **`ubuntu` (o único valor aceito, autoinstall)**. Qualquer outro valor — inclusive `debian` — **aborta** com exit 2 (ADR-001). |
-| `--role auto\|inference\|builder` | Papel gravado na ISO. `auto` (padrão) detecta no hardware real. **Com papel concreto, a próxima fase deriva o usuário/hostname** (`ai-inference`/`ai-builder`, ADR-002); `auto` mantém `ai-cpu-os` + aviso. |
-| `--username` / `--hostname` | Vencem qualquer padrão (inclusive a futura identidade por papel). |
+| `--role auto\|inference\|builder` | Papel gravado na ISO. `auto` (padrão) detecta no hardware real. **Com papel concreto, o usuário e o hostname são derivados** (`ai-inference`/`ai-builder`, ADR-002); `auto` mantém `ai-cpu-os` **com aviso**. |
+| `--username` / `--hostname` | Vencem qualquer padrão — inclusive a identidade derivada do papel. |
 | `--family auto` | Família gravada na ISO. `auto` (padrão) detecta no hardware real. |
 | `--firstboot-reboot` | Reinicia automaticamente ao fim do primeiro boot (aplica C-states). |
-| `--hostname NOME` | Hostname do sistema instalado (padrão: igual ao usuário). |
+| `--hostname NOME` | Hostname do sistema instalado (padrão: igual ao usuário). Para vários nós do mesmo papel: `ai-inference-2`, `ai-inference-3`… |
 | `--password-hash '$6$…'` | Senha do usuário (gere com `mkpasswd -m sha-512`). Se omitido, gera e **mostra** uma. |
 | `--root-password-hash '$6$…'` | Senha do **root** (hash crypt). Se omitido, o root fica **bloqueado** (padrão). |
-| `--username NOME` | Usuário administrativo (padrão `ai-cpu-os`; root fica bloqueado). |
+| `--username NOME` | Usuário administrativo. Sem ele, **deriva do papel** (ADR-002): `inference`→`ai-inference`, `builder`→`ai-builder`, `auto`→`ai-cpu-os`. |
 | `--network auto` | Rede do sistema **instalado**: `auto`/`dhcp` (padrão = DHCP), `static` ou `none`. Ver a subseção "Rede do sistema instalado" em § 4.3. |
 | `--network-ip`, `--network-gateway`, `--network-dns`, `--network-interface` | Valores do modo `static` (IP aceita `192.168.1.50/24`; DNS padrão `1.1.1.1,8.8.8.8`). |
 | `--iso PATH` | Usa uma ISO local (trabalhar offline). |
@@ -803,7 +808,7 @@ sudo apt install -y util-linux
 | Ação | Efeito | Onde desliga |
 |------|--------|--------------|
 | Particiona o disco | ⚠️ **Apaga** o disco de `--disk` | Não desliga — é o objetivo |
-| Cria usuário com sudo | `--username`, senha definida/hash | `--username`, `--password-hash` |
+| Cria usuário com sudo | Nome **derivado do papel** (`ai-inference`/`ai-builder`/`ai-cpu-os`) ou `--username`; senha definida/hash | `--username`, `--password-hash` |
 | Root | bloqueado por padrão; habilitável com `--root-password-hash` (hash crypt): o late-command roda `chpasswd -e` no alvo | omitir `--root-password-hash` |
 | Instala pacotes base | `packages:` do autoinstall | `--extra-packages` |
 | Copia o projeto | `/opt/ai-cpu-os` | — |
@@ -875,7 +880,7 @@ tudo por script, idempotente, auditável.
 | ✅ **FEITO** | **Rodar o caminho Ubuntu contra uma ISO real** — feito; os bugs de layout/`xorriso` que só apareciam aí foram corrigidos (`replay`, `-map`, `-rm --`, GRUB `--id`). |
 | ✅ **FEITO** | **Os 5 requisitos do § 3.1:** fonte, modelo e repositório na mídia; o 1º boot roda **sem rede** (provado). |
 | ✅ **FEITO** | **Remover o caminho Debian** (`--distro debian`/preseed) — ADR-001, **sessão #42**: scripts compartilhados movidos para `iso/common/`, `iso/preseed/` apagado, `verify-iso.sh`/`Makefile`/CI/`webui/`/testes limpos, `--distro debian` **aborta** com `exit 2` citando o ADR. |
-| 🔴 Alta (P1) | **Identidade do sistema derivada do papel** — ADR-002: `inference`→`ai-inference`, `builder`→`ai-builder`, `auto`→`ai-cpu-os` + aviso; testes offline. |
+| ✅ **FEITO** | **Identidade derivada do papel** — ADR-002, **sessão #43**: `resolve_identity()` no `build-iso.sh`, `ai-inference`/`ai-builder`, `auto` mantém `ai-cpu-os` + aviso, identidade no `.iso-config`, coerência cobrada pelo `verify-iso.sh`, `make identity-test` (22 asserções) e a UI sugerindo o nome. |
 | 🔴 Alta (P2/P3) | **`ai-talk`** — ADR-003/`docs/CHAT.md`: transporte + CLI + teste offline; depois ISO/duas VMs + ponte opcional com o `llama-server`. |
 | 🔴 Alta | **Validar a ISO em HARDWARE FÍSICO** (Xeon E5-2680 v4 e Ryzen 5 3500X): repetir instalação + 1º boot e medir (`llama-bench`). Blocos A–O do `VALIDATION.md`. |
 | 🟡 Média | **Fechar o resíduo air-gapped:** confirmar/desligar o download do **UI** do llama.cpp no build (ver § 6). |
@@ -1008,6 +1013,7 @@ config) e `aplicação concluída com sucesso` (o 1º boot **aplicou**).
 
 | Data | Mudança |
 |------|---------|
+| 2026-10-20 | 🧑‍🔧 **Identidade derivada do papel (ADR-002, sessão #43).** `--role inference` → usuário/hostname `ai-inference`; `builder` → `ai-builder`; `auto` mantém `ai-cpu-os` + aviso (o papel só é conhecido no 1º boot). `--username`/`--hostname` explícitos vencem. A identidade vai também para o `.iso-config` (`ISO_USERNAME`/`ISO_HOSTNAME`/`IDENTITY_SOURCE`), o `verify-iso.sh` confere a **derivação** (não só a presença do campo) e a UI sugere o nome ao escolher o papel. `make identity-test` (22 asserções). Nenhuma ISO gerada — só `--check-templates`/`--dir`. |
 | 2026-10-20 | 🗑️ **O caminho Debian foi REMOVIDO (ADR-001, sessão #42).** `iso/preseed/` deixou de existir (scripts compartilhados foram para `iso/common/`), `--distro debian` **aborta** com exit 2 citando o ADR, `verify-iso.sh` ficou com uma base só e o layout da mídia passou a ser **`/ai-cpu-os-boot/`**. O CI reprova se `preseed/` voltar. `make validate` verde (ci-guards 93). ⚠️ Nenhuma ISO gerada/bootada depois da remoção. |
 | 2026-10-20 | 🧭 **Base única: Ubuntu Server (ADR-001).** O caminho Debian/preseed passou a **DEPRECADO**; `--distro debian` emitia aviso. Planejados: identidade pelo papel (ADR-002) e chat da frota `ai-talk` (ADR-003, `docs/CHAT.md`). O topo e o roadmap foram atualizados para refletir o que já foi executado (#21 Ubuntu em VM; #35/#37 Debian em VM/metal) e o que **não** foi (hardware Ubuntu, UEFI). |
 | 2026-10-13 | 🎉 **A ISO foi GERADA e BOOTADA pela primeira vez** (sessão #21): air-gapped, construída num container `ubuntu:24.04` e instalada numa VM com KVM. `verify-iso.sh` **PASS=41/FAIL=0**; `test-vm.sh` **exit 0** (instalou sozinha; o 1º boot aplicou o ai-cpu-os, `.firstboot-status=ok`, família `intel-haswell`; llama.cpp compilado do tarball da mídia). **8 bugs reais corrigidos:** `xorriso` (`-rm --`, `-boot_image replay`, `-map` do modelo/fonte/repo, aspas do `-find`), SIGPIPE no verificador, GRUB sem `--id` (→ instalação interativa), repo apt no chroot do curtin (→ carregar ao alvo `/opt/apt-repo` + `Release`), marcadores fora do console. Atualiza § 3.1, § 4.5, § 6, § 8, § 9 e este § 10. |

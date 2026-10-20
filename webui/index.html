@@ -100,6 +100,18 @@
         </div>
       </div>
 
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
+        <div>
+          <label for="username">Usuário (opcional)</label>
+          <input id="username" spellcheck="false" placeholder="derivado do papel">
+        </div>
+        <div>
+          <label for="hostname">Hostname (opcional)</label>
+          <input id="hostname" spellcheck="false" placeholder="igual ao usuário">
+        </div>
+      </div>
+      <div class="muted" id="identity-hint" style="margin-top:4px"></div>
+
       <label for="payload">Conteúdo embutido</label>
       <select id="payload">
         <option value="none">Nenhum — ISO leve (~2,7 GB), precisa de internet na máquina que gera</option>
@@ -465,6 +477,8 @@ function formValues() {
   return {
     disk: $("disk").value.trim(),
     role: $("role").value,
+    username: $("username").value.trim(),
+    hostname: $("hostname").value.trim(),
     family: $("family").value,
     payload: $("payload").value,
     network: $("network").value,
@@ -476,6 +490,32 @@ function formValues() {
     root_password: $("root-password").value,
   };
 }
+
+/* Identidade (ADR-002): o papel define o usuário padrão. A sugestão vai no
+   placeholder — o campo NUNCA é preenchido sozinho, para o usuário poder
+   deixar vazio (e o build derivar) sem apagar um valor que não digitou.
+   Vários nós do mesmo papel: usuário igual, hostname numerado. */
+function syncIdentityHint() {
+  const role = $("role").value;
+  const map = OPTIONS.identity || {};
+  const suggested = map[role] || map.auto || "ai-cpu-os";
+  const usr = $("username"), hst = $("hostname");
+  usr.placeholder = suggested;
+  hst.placeholder = $("username").value.trim() || suggested;
+  const hint = $("identity-hint");
+  if (!role || role === "auto") {
+    hint.textContent = "Papel auto: a identidade NÃO é derivada (fica " + suggested +
+      ") — o papel só é conhecido no 1º boot. Escolha inference/builder para ter " +
+      "ai-inference/ai-builder.";
+  } else {
+    hint.textContent = "Papel " + role + " → usuário " + suggested + ". " +
+      "Deixe em branco para usar esse padrão. Para vários nós do mesmo papel, " +
+      "ponha o hostname (ex.: " + suggested + "-2).";
+  }
+}
+$("role").onchange = syncIdentityHint;
+$("username").oninput = () => { $("hostname").placeholder = $("username").value.trim() || ""; };
+syncIdentityHint();
 
 /* Os campos de IP fixo só aparecem (e só são exigidos) no modo static. */
 function syncNetworkFields() {

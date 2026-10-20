@@ -118,27 +118,34 @@ Dispara em **todo push para `main` e em todo Pull Request**.
     Existe porque o **modo nº 1** de a instalação automática não acontecer é o
     `match: {path: /dev/vda}` de um disco que o alvo não tem — e a mitigação
     documentada (`--disk auto`) gerava `match: {path: auto}`.
-14. `make ci-guards-test` — planta as violações numa cópia temporária e exige
+14. `make identity-test` — a identidade derivada do **papel** (ADR-002):
+    `inference`→`ai-inference`, `builder`→`ai-builder`, `auto` mantém
+    `ai-cpu-os` **com aviso**, `--username`/`--hostname` explícitos vencem.
+    Confere o `autoinstall.yaml` **real**, o `.iso-config` e a coerência que o
+    `verify-iso.sh` cobra (inclusive **reprovando** um usuário incoerente).
+    Existe porque o modo de falha é silencioso: a ISO instala, o alvo sobe e o
+    usuário é outro — só se descobre ao tentar `ssh`.
+15. `make ci-guards-test` — planta as violações numa cópia temporária e exige
     que o job **falhe**. Existe porque seis guardas estavam na forma `! cmd`,
     que o `set -e` ignora — nunca derrubaram nada.
-15. `make pendrive-test` — travas do gravador (`dd` num dispositivo): recusa o
+16. `make pendrive-test` — travas do gravador (`dd` num dispositivo): recusa o
     disco que contém `/`, exige **disco inteiro** (`TYPE=disk` — um `sr0`/DVD tem
     `RM=1` e passaria), exige a assinatura `CD001`, confere se **cabe** e **lê de
     volta** comparando byte a byte. Grava num **ARQUIVO** com o `lsblk`
     simulado: nenhum dispositivo real é tocado.
-16. `make ui-test` — sobe o servidor da Interface Web numa porta livre e
+17. `make ui-test` — sobe o servidor da Interface Web numa porta livre e
     exercita a **API** (sem navegador e sem rede): a página é servida e **não
     carrega nada de CDN**, a lista branca recusa valores maliciosos, o SSE
     entrega o log e o `done`, e — o ponto central — **sem `xorriso` a geração é
     RECUSADA com o motivo explícito** em vez de falhar em silêncio (Regra 13-a).
     Também prova que **não existe rota de escrita** e que o bind é `127.0.0.1`.
-17. `make talk-test` — prova o contrato do **chat da frota** (`talk/ai_talk.py`)
+18. `make talk-test` — prova o contrato do **chat da frota** (`talk/ai_talk.py`)
     em **loopback**, sem root e sem rede externa: entrega + `ack` + `fsync`,
     **espaçamento de 50 ms por par**, `hello` isento e `ping` throttled, fila
     com **exit 5** no overflow, dedupe de `id`, assinatura **por nó**,
     `ECONNREFUSED` em *fail fast*, chave frouxa recusada, **teto de 15 peers**
     e a checagem de que o código usa **só a stdlib**.
-18. `make iso-dry-run` — dry-run do caminho Ubuntu **sem flags extras**,
+19. `make iso-dry-run` — dry-run do caminho Ubuntu **sem flags extras**,
    exatamente como o `make validate` local (ADR-001: base única).
 
 ### Job `dry-run` (matriz: `xeon` e `ryzen`)

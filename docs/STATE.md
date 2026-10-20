@@ -1,12 +1,13 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-20 (🗑️ **o caminho Debian da ISO foi
-> REMOVIDO** — ADR-001 executado na sessão #42: `iso/common/` no lugar de
-> `iso/preseed/`, `--distro debian` aborta, CI com guardas provados,
-> `make validate` verde. 💬 O `ai-talk` F1 (sessão #41) segue no código.
-> **Pendentes: identidade por papel (ADR-002), F2 do chat e um boot de ISO
-> depois da remoção.** Ver `JOURNAL.md` sessões #39–#42.)
+> **Última atualização:** 2026-10-20 (🧑‍🔧 **a identidade do sistema passou a
+> seguir a FUNÇÃO** — ADR-002 executado na sessão #43: `inference` →
+> `ai-inference`, `builder` → `ai-builder`, `auto` mantém `ai-cpu-os` + aviso;
+> `make identity-test` 22 asserções. Na #42 o caminho Debian da ISO foi
+> **removido** (ADR-001). 💬 O `ai-talk` F1 (sessão #41) segue no código.
+> **Pendentes: F2/F3 do chat e um boot de ISO depois dessas mudanças** — ver
+> `JOURNAL.md` sessões #39–#43.)
 
 ---
 
@@ -89,6 +90,7 @@
 | `webui/server.py` + `webui/index.html` (interface web) | ✅ | ⚠️ py_compile | ⚠️ **34 asserções pela API**; ❌ **nunca aberta num navegador** |
 | `talk/ai_talk.py` (**chat da frota**, F1) | ✅ | ✅ py_compile + **30 asserções** (`make talk-test`) | ❌ só loopback; **sem duas VMs e sem ISO** |
 | `iso/common/*` (late-command, 1º boot) | ✅     | ⚠️ (templating)    | ✅ **instalado em VM (Ubuntu)**; a instalação Debian (#35/#37) foi feita **antes** da remoção (ADR-001) — ver § 3.4 |
+| `tests/test-role-identity.sh` (identidade por papel) | ✅ | ✅ shellcheck | ✅ **22 asserções** (`make identity-test`); ❌ nunca vista num sistema instalado |
 | `docs/ISO.md`                         | ✅      | ⚠️ (revisão manual)| ❌                  |
 | `docs/JOURNAL.md` (continuidade)      | ✅      | ⚠️ (revisão manual)| ☐ **em uso contínuo** |
 
@@ -404,7 +406,7 @@ Três decisões foram firmadas pelo dono e registradas em
 | ADR | Decisão | Estado |
 |-----|---------|--------|
 | **ADR-001** | Uma única base de ISO: **Ubuntu Server**; caminho Debian/preseed **removido** | ✅ **EXECUTADO (P0, sessão #42)** — ver § 3.9 |
-| **ADR-002** | Identidade do sistema derivada do papel (`ai-inference`/`ai-builder`) | **Não implementada** (próxima) |
+| **ADR-002** | Identidade do sistema derivada do papel (`ai-inference`/`ai-builder`) | ✅ **EXECUTADO (P1, sessão #43)** — ver § 3.10 |
 | **ADR-003** | Chat de frota **`ai-talk`** (TCP 7331, JSON lines, HMAC, stdlib) | **F1 no código** — `talk/ai_talk.py` + `docs/CHAT.md` |
 | **ADR-004** | Latência/espaçamento/durabilidade do chat: 50 ms por par, fila 256, p99 ≤ 10 ms, `fsync` por mensagem | ✅ **no código e provado** (`make talk-test`, 30 asserções) |
 | **ADR-005** | **Teto de 15 nós** em malha completa (chave por nó, dedupe 8.192) | ✅ **F1 no código** — provado por `make talk-test` |
@@ -426,11 +428,10 @@ Três decisões foram firmadas pelo dono e registradas em
 
 **O que NÃO existe ainda (não confunda plano com fato):**
 
-- Nenhuma derivação de usuário/hostname por papel (ADR-002).
 - O `talk/` está em **F1**: **não** há `talk/install.sh`, unit systemd,
   integração na ISO, teste com duas VMs nem bancada de 15 nós.
-- Nenhuma ISO nova foi gerada ou bootada **depois da remoção do Debian**
-  (sessão #42).
+- Nenhuma ISO nova foi gerada ou bootada **depois das mudanças** (sessões
+  #42/#43). A dívida está registrada como **P5** no § 6.
 
 ---
 
@@ -488,6 +489,63 @@ supressão dos casos Debian), `ai-talk` 30, `webui` 46, `iso-lint` OK,
 - ❌ O modo `static` de rede continua só testado por template.
 
 ---
+
+---
+
+### 3.10 🧑‍🔧 A identidade do sistema segue a FUNÇÃO (2026-10-20, sessão #43)
+
+**Objetivo:** executar o **ADR-002** — o dono pediu *"o usuário será definido
+pela função (builder ou inference)"*. Quem entra por SSH, lê um log ou procura
+um `known_hosts` precisa saber em qual das duas máquinas está.
+
+**Decisão-chave:** derivar na **geração da ISO**, não no primeiro boot.
+Renomear usuário depois mexe em home, `sudoers`, chaves e serviços (rejeitado
+no ADR); e com `--role auto` o papel só é conhecido no 1º boot, quando o
+usuário já existe. Por isso `auto` **mantém** `ai-cpu-os` e **avisa**.
+
+| `--role` | Usuário | Hostname | `origem` no `.iso-config` |
+|---|---|---|---|
+| `inference` | `ai-inference` | `ai-inference` | `papel` |
+| `builder` | `ai-builder` | `ai-builder` | `papel` |
+| `auto` | `ai-cpu-os` + aviso | `ai-cpu-os` | `padrao-auto` |
+| qualquer + `--username X` | `X` | `X` (ou `--hostname`) | `explicito` |
+
+**O que mudou:**
+
+- `iso/build-iso.sh`: `resolve_identity()` + `role_default_username()` +
+  `identity_line()`; marcadores `USERNAME_EXPLICIT`/`HOSTNAME_EXPLICIT` (o
+  valor já nascia preenchido, então sem eles não dava para distinguir "o
+  usuário pediu ai-cpu-os" de "é o default"). O GECOS passou a declarar a
+  função: `ai-inference (inference)`.
+- `.iso-config` ganhou `ISO_USERNAME`/`ISO_HOSTNAME`/`IDENTITY_SOURCE`
+  (prefixo `ISO_` porque `HOSTNAME` é variável do shell).
+- `iso/verify-iso.sh`: nova seção "Identidade (ADR-002)" que confere a
+  **derivação** (papel concreto → nome esperado, salvo `origem=explicito`) e a
+  coerência entre `autoinstall.yaml` e `late-command.sh`.
+- `webui/`: tabela `ROLE_IDENTITY` em `/api/options`, campos **opcionais** de
+  usuário/hostname com validadores próprios (`RE_USERNAME`/`RE_HOSTNAME`) e
+  sugestão ao trocar o papel. Campo vazio = o build deriva.
+- Novo `tests/test-role-identity.sh` (**22 asserções**) + `make identity-test`,
+  no `validate` e no CI. `ci-guards` 93 → **100**.
+
+**Bug real encontrado (pré-existente, silencioso):** o `verify-iso.sh`
+conferia `ROLE`/`FAMILY` no `late-command.sh` procurando **aspas duplas**
+(`"inference"`), mas o template usa **simples**. Como o `make iso-yaml` sempre
+rodou com `--role auto`, o ramo nunca era exercitado — o primeiro
+`--check-templates --role inference` reprovou com "não grava ROLE=inference"
+numa árvore correta.
+
+**Resultado:** `make validate` **verde** — `role-identity` **22**,
+`ci-guards` **100**, `webui` **51**, `ai-talk` 30, demais inalterados.
+
+**O que NÃO foi testado:**
+
+- ❌ Nenhuma ISO foi gerada nem bootada: a identidade **nunca foi vista** num
+  sistema instalado. A prova é `--dry-run` + `--check-templates` +
+  `verify-iso --dir`.
+- ❌ A UI continua **sem nunca ter sido aberta num navegador** (o teste
+  exercita a API).
+- ❌ Frota real (`ai-inference-2`, `-3`) só por `--dry-run`.
 
 ---
 
@@ -599,19 +657,22 @@ da rede).
 
 > **👉 ESTA É A SEÇÃO REFERENCIADA PELO `AGENTS.md`.**
 
-**🧭 PRÓXIMA AÇÃO (sessão #42, 2026-10-20) — P1: identidade derivada do
-papel (ADR-002).**
+**🧭 PRÓXIMA AÇÃO (sessão #43, 2026-10-20) — P5: gerar e bootar uma ISO, e
+depois a P3 (chat na ISO + duas VMs).**
 
-Estado da fila: **P0 ✅ feita** (§ 3.9) e **P2/F1 do `ai-talk` ✅ feita**. O que
-resta, em ordem:
+Estado da fila: **P0 ✅** (§ 3.9), **P1 ✅** (§ 3.10) e **P2/F1 do `ai-talk` ✅**
+(sessão #41). O que resta, em ordem:
 
-1. **P1 — identidade derivada do papel (ADR-002).** ← **é aqui que se começa**
-   - `inference` → `ai-inference`; `builder` → `ai-builder`; `auto` →
-     `ai-cpu-os` + aviso; `--username`/`--hostname` explícitos vencem.
-   - Adicionar `resolve_identity()` no `build-iso.sh`, linha testável no
-     `--dry-run`, `tests/test-role-identity.sh` + `make identity-test` + CI.
-   - **Aceite:** os 8 critérios do ADR-002; `verify-iso.sh` confere a
-     coerência identidade × papel.
+1. **P5 — gerar e bootar uma ISO Ubuntu** ← **é aqui que se começa**
+   - Duas mudanças grandes desde o último boot (sessão #21): o caminho Debian
+     saiu (#42) e a identidade passou a derivar do papel (#43). Nenhuma das
+     duas foi vista num sistema instalado.
+   - `bash iso/build-iso.sh --role inference --disk auto --yes` e
+     `bash iso/test-vm.sh --iso … --yes`; conferir no alvo
+     `getent passwd ai-inference` e `.iso-config`.
+   - **Aceite:** `test-vm.sh` exit 0 com o 1º boot aplicado e o usuário
+     `ai-inference` existindo. Enquanto isso não acontecer, o que existe é
+     verificação de **conteúdo** — não é boot (Regra 13).
 2. **P2 — `ai-talk` fase 1 (transporte + CLI + teste offline).** ✅ **FEITO
    (sessão #41).**
    - `talk/ai_talk.py` (stdlib), CLI `ai-talk`, `tests/test-ai-talk.sh`; dois
@@ -631,11 +692,6 @@ resta, em ordem:
      broadcast em ~2 RTTs, p99 ≤ 10 ms com 280 msg/s de fundo.
    - **Aceite:** teto confirmado por medição. Se não couber, entra o
      **relay/hub** (ADR-005) — não se aumenta o teto.
-5. **P5 (dívida aberta pela P0) — gerar e bootar uma ISO Ubuntu** depois da
-   remoção do caminho Debian, para provar que o comportamento não regrediu
-   (`make iso-vm`). É a **única** forma de afirmar que a ISO continua boa
-   (Regra 13). Enquanto isso não acontecer, o que existe é `verify-iso`
-   (conteúdo) + `--check-templates` — **não** é boot.
 
 **Critérios de aceite da fase inteira:** `make validate` verde; `docs/ISO.md`
 com uma única base; `AGENTS.md` com as Regras 17/18; nenhuma afirmação de

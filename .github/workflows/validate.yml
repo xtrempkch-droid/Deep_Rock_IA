@@ -177,6 +177,14 @@ jobs:
           set -euo pipefail
           make iso-disk-test
 
+      # ADR-002: a identidade segue a FUNCAO da maquina (inference -> ai-inference,
+      # builder -> ai-builder). Errar isso e' silencioso: a ISO instala, o alvo
+      # sobe e o usuario e' outro — so se descobre ao tentar `ssh`.
+      - name: "ISO (identidade derivada do papel: ADR-002)"
+        run: |
+          set -euo pipefail
+          make identity-test
+
       # `--iso-repo auto` e o que torna a ISO auto-suficiente (leva os .deb,
       # inclusive openssh-server). Isso so' vale se a conferencia de RELEASE
       # funcionar: com --iso o codename/versao tem de sair do ARQUIVO.
@@ -330,6 +338,7 @@ jobs:
             tests/test-avx512-policy.sh
             tests/test-iso-lock.sh
             tests/test-iso-disk.sh
+            tests/test-role-identity.sh
             talk/ai_talk.py
             tests/test-ai-talk.sh
             webui/server.py webui/index.html
@@ -731,6 +740,30 @@ jobs:
           grep -q 'iso-disk-test' Makefile
           grep -q 'validate:.*iso-disk-test' Makefile
           grep -q 'make iso-disk-test' .github/workflows/validate.yml
+          # IDENTIDADE POR PAPEL (ADR-002): o usuario padrao deriva da FUNCAO
+          # (inference -> ai-inference, builder -> ai-builder) e a origem fica
+          # registrada no .iso-config. Se a derivacao sumir, o alvo nasce com
+          # `ai-cpu-os` e ninguem percebe — o modo de falha e' silencioso.
+          grep -q 'identity-test' Makefile
+          grep -q 'validate:.*identity-test' Makefile
+          grep -q 'make identity-test' .github/workflows/validate.yml
+          grep -q '^resolve_identity()' iso/build-iso.sh
+          # Ancorado no BRACO DO CASE, nao no nome solto: `ai-inference` tambem
+          # aparece em comentario e na mensagem de log, entao um `grep` pelo
+          # nome passaria mesmo com a derivacao trocada por ai-cpu-os.
+          grep -qE "^    inference\) printf 'ai-inference'" iso/build-iso.sh
+          grep -qE "^    builder\)   printf 'ai-builder'" iso/build-iso.sh
+          # O `--username` explicito tem de VENCER o papel (senao a flag mente).
+          # Ancorado na CONDICAO: a variavel sozinha aparece na atribuicao.
+          grep -qE '^  if \[\[ \$USERNAME_EXPLICIT -eq 1 \]\]; then' iso/build-iso.sh
+          # A identidade tem de chegar ao alvo, nao so ao autoinstall.
+          grep -q 'ISO_USERNAME=%s' iso/common/late-command.sh
+          grep -q 'IDENTITY_SOURCE=%s' iso/common/late-command.sh
+          # Formato estavel da linha: e' o que o teste le sem gerar ISO.
+          grep -q 'usuario=%s hostname=%s papel=%s origem=%s' iso/build-iso.sh
+          # O verificador confere a DERIVACAO (nao so a presenca do campo).
+          grep -q 'derivação do ADR-002' iso/verify-iso.sh
+          test -f tests/test-role-identity.sh
           grep -qE 'DISK" == "auto"' iso/build-iso.sh
           # O default do CI nao pode ser um caminho que so existe em VM: a ISO
           # do artefato sairia sem instalar sozinha em hardware real.

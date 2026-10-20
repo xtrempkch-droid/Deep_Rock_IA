@@ -20,6 +20,14 @@ sudo bash iso/build-iso.sh --distro ubuntu --disk auto --serial-console \
      --role auto --family auto --iso-source auto --iso-model auto --iso-repo auto
 ```
 
+> 🔑 **Qual `--role`?** Ele decide a **identidade do sistema instalado**
+> (ADR-002): `inference` → usuário/hostname `ai-inference`; `builder` →
+> `ai-builder`; `auto` → `ai-cpu-os` (sem derivação, porque o papel só é
+> conhecido no 1º boot). Se a ISO vai para OUTRA máquina e você **já sabe** se
+> ela é servidor de IA ou de build, passe o papel — é o que dá nome legível ao
+> que você vai encontrar do outro lado do SSH. Use `--hostname` para
+> diferenciar vários nós do mesmo papel (`ai-inference-2`).
+
 Por quê: o `storage` do autoinstall sai como
 `layout: {name: direct, match: {path: /dev/vda}}` se o disco for fixado. Numa
 máquina real (NVMe `/dev/nvme0n1`, SATA `/dev/sda`) **nenhum disco casa** e o

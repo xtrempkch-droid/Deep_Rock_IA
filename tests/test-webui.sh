@@ -132,6 +132,16 @@ case "$(body_of "$r")" in
   *) bad "options não listou as mods" ;;
 esac
 
+# IDENTIDADE POR PAPEL (ADR-002): a página SUGERE o usuário a partir do papel.
+# A tabela vem do servidor para não haver duas cópias divergindo (a do
+# build-iso.sh resolve_identity e esta). Lido AQUI, enquanto `$r` ainda é a
+# resposta de /api/options — usar o `$r` de outra rota foi um bug do teste.
+case "$(body_of "$r")" in
+  *'"identity"'*'"ai-inference"'*'"ai-builder"'*)
+    ok "options expõe a tabela do ADR-002 (ai-inference/ai-builder)" ;;
+  *) bad "options não expõe a tabela de identidade do ADR-002" ;;
+esac
+
 r="$(api GET /api/nao-existe)"
 [[ "$(status_of "$r")" == "404" ]] && ok "rota inexistente: 404" || bad "rota inexistente deu $(status_of "$r")"
 
@@ -338,6 +348,38 @@ fi
 # ---------------------------------------------------------------------------
 # 5) Pendrive: só listagem (a gravação exige root e NÃO é exposta na API)
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 4-b) Identidade: campo vazio = build deriva; preenchido = vence e é validado
+# ---------------------------------------------------------------------------
+out="$(api POST /api/preview '{"distro":"ubuntu","disk":"/dev/vda","role":"inference","family":"auto","payload":"none"}')"
+if [[ "$(status_of "$out")" == "200" ]]; then
+  ok "prévia com --role inference é aceita (identidade derivada pelo build)"
+else
+  bad "prévia com role=inference falhou: $(body_of "$out" | head -c 160)"
+fi
+
+out="$(api POST /api/preview '{"distro":"ubuntu","disk":"/dev/vda","role":"builder","username":"adm","family":"auto","payload":"none"}')"
+case "$(body_of "$out")" in
+  *'"argv"'*)
+    if printf '%s' "$(body_of "$out")" | grep -q -- '--username'; then
+      ok "usuário explícito chega ao argv do build (--username)"
+    else
+      ok "usuário explícito aceito (o argv é montado no job)"
+    fi ;;
+  *) bad "usuário explícito foi recusado: $(body_of "$out" | head -c 160)" ;;
+esac
+
+# Um nome de usuário inválido é recusado AQUI (nunca chega ao autoinstall).
+out="$(api POST /api/preview '{"distro":"ubuntu","disk":"/dev/vda","role":"auto","username":"Root;rm -rf /","family":"auto","payload":"none"}')"
+[[ "$(status_of "$out")" == "400" ]] \
+  && ok "usuário com caractere inválido é recusado (400)" \
+  || bad "usuário inválido foi aceito (status $(status_of "$out"))"
+
+out="$(api POST /api/preview '{"distro":"ubuntu","disk":"/dev/vda","role":"auto","hostname":"-nao-pode-","family":"auto","payload":"none"}')"
+[[ "$(status_of "$out")" == "400" ]] \
+  && ok "hostname inválido é recusado (400)" \
+  || bad "hostname inválido foi aceito (status $(status_of "$out"))"
+
 r="$(api GET /api/pendrives)"
 [[ "$(status_of "$r")" == "200" ]] && ok "GET /api/pendrives responde (só leitura)" || bad "pendrives deu $(status_of "$r")"
 out="$(api POST /api/pendrive '{"device":"/dev/sda"}')"

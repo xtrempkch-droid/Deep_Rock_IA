@@ -147,11 +147,22 @@ FAMILY="auto"
 FIRSTBOOT_REBOOT="no"
 SERIAL_CONSOLE="no"
 NO_VERIFY=0
+# --- identidade do sistema instalado (ADR-002) ------------------------------
+# A identidade segue a FUNÇÃO da máquina, não o modelo de CPU: `--role
+# inference` → `ai-inference`, `--role builder` → `ai-builder`. `--role auto`
+# mantém `ai-cpu-os` (compatibilidade) porque o papel só é conhecido no
+# primeiro boot — e nesse caso avisamos que a identidade NÃO foi derivada.
+#
+# A precedência é: `--username` explícito > papel concreto > padrão. Por isso
+# USERNAME_EXPLICIT existe: o valor já nasce preenchido, então sem um marcador
+# não haveria como distinguir "o usuário pediu ai-cpu-os" de "é o default".
 USERNAME="ai-cpu-os"
+USERNAME_EXPLICIT=0
 USER_FULLNAME="ai-cpu-os"
 # Nome HOSTNAME NÃO é usado de propósito: o bash já define uma variável com esse
 # nome e sobrescrevê-la confunde quem lê o script.
 SYS_HOSTNAME=""
+HOSTNAME_EXPLICIT=0
 PASSWORD_HASH=""
 ROOT_PASSWORD_HASH=""
 GENERATED_PASSWORD=""
@@ -447,6 +458,91 @@ prefix_to_netmask() {
   printf '%s' "$out"
 }
 
+# ---------------------------------------------------------------------------
+# ADR-002 — identidade do sistema derivada do PAPEL
+# ---------------------------------------------------------------------------
+# A máquina tem uma FUNÇÃO (`inference` = servidor de IA; `builder` = build +
+# registry + Gitea). Quem entra por SSH, lê um log ou procura um `known_hosts`
+# precisa saber em qual das duas está — e o nome do usuário é a única coisa que
+# aparece em *todas* essas superfícies.
+#
+# Por que decidir aqui e não no primeiro boot: o papel já é conhecido na
+# GERAÇÃO da ISO quando `--role` é concreto, e renomear usuário depois da
+# instalação mexeria em home, sudoers, chaves e serviços (rejeitado no ADR).
+#
+# Por que `auto` NÃO deriva: com `--role auto` o papel só é descoberto no
+# primeiro boot (via detect-hardware.sh), quando o usuário já existe. Derivar
+# exigiria criar dois usuários e desabilitar um — mais superfície de ataque,
+# `sudoers` e `known_hosts` confusos, para resolver nada.
+#
+# Precedência (nesta ordem):
+#   1. `--username` explícito vence TUDO.
+#   2. papel concreto (inference|builder) define o usuário.
+#   3. `auto` mantém `ai-cpu-os` e AVISA.
+#   4. `--hostname` explícito vence o padrão; sem ele, o hostname é o usuário.
+#
+# Vários nós do mesmo papel: use `--hostname ai-inference-1`, `-2`… O usuário
+# pode continuar o mesmo — o hostname diferencia (ADR-002 § 5).
+IDENTITY_SOURCE=""   # de onde veio o usuário (para o log e para os testes)
+
+role_default_username() {
+  case "$1" in
+    inference) printf 'ai-inference' ;;
+    builder)   printf 'ai-builder' ;;
+    *)         printf 'ai-cpu-os' ;;
+  esac
+}
+
+resolve_identity() {
+  local derived
+  derived="$(role_default_username "$ROLE")"
+
+  if [[ $USERNAME_EXPLICIT -eq 1 ]]; then
+    IDENTITY_SOURCE="explicito"
+    # O `--username` vence o papel, mas isso pode ser um descuido (ex.: gerar
+    # uma ISO de inference com o usuário de build). Aviso, não erro: há casos
+    # legítimos (frota, imagem padronizada, migração).
+    if [[ "$ROLE" != "auto" && "$USERNAME" != "$derived" ]]; then
+      log_warn "--username ${USERNAME} sobrepõe a identidade do papel ${ROLE} (padrão: ${derived})."
+    fi
+  elif [[ "$ROLE" == "auto" ]]; then
+    IDENTITY_SOURCE="padrao-auto"
+    # Regra 13-a: é o DEFAULT, então degrada com aviso — nunca aborta.
+    log_warn "papel 'auto': a identidade NÃO é derivada (fica '${USERNAME}')."
+    log_warn "  O papel só é conhecido no 1º boot, e renomear usuário depois da"
+    log_warn "  instalação está fora do escopo (ADR-002). Para ter identidade por"
+    log_warn "  função, gere com --role inference ou --role builder."
+  else
+    IDENTITY_SOURCE="papel"
+    USERNAME="$derived"
+  fi
+
+  # `--hostname` explícito vence; sem ele, o hostname segue o usuário (o
+  # comportamento antigo continua valendo, agora com o usuário já resolvido).
+  if [[ -z "$SYS_HOSTNAME" ]]; then
+    SYS_HOSTNAME="$(printf '%s' "$USERNAME" | tr '_' '-')"
+  elif [[ $HOSTNAME_EXPLICIT -eq 1 && "$SYS_HOSTNAME" != "$USERNAME" ]]; then
+    # Frota do mesmo papel (ADR-002 §5): usuário igual, hostname numerado.
+    log_info "hostname ${SYS_HOSTNAME} com usuário ${USERNAME} (frota do mesmo papel)."
+  fi
+
+  # Nome completo: legível no GECOS e coerente com a função. Mantido curto e
+  # sem acento de propósito — ele aparece no prompt e em `getent passwd`.
+  if [[ "$ROLE" == "auto" ]]; then
+    USER_FULLNAME="${USERNAME}"
+  else
+    USER_FULLNAME="${USERNAME} (${ROLE})"
+  fi
+}
+
+# Linha única, legível E testável por script (ADR-002, critério de aceite 8).
+# O formato é estável de propósito: `tests/test-role-identity.sh` a lê e o
+# `--dry-run` a imprime antes de qualquer download.
+identity_line() {
+  printf 'identidade: usuario=%s hostname=%s papel=%s origem=%s' \
+    "$USERNAME" "$SYS_HOSTNAME" "$ROLE" "${IDENTITY_SOURCE:-?}"
+}
+
 validate_network() {
   case "$NETWORK_MODE" in
     auto|dhcp|static|none) ;;
@@ -553,8 +649,8 @@ parse_args() {
       --firstboot-reboot) FIRSTBOOT_REBOOT="yes"; shift ;;
       --serial-console)   SERIAL_CONSOLE="yes"; shift ;;
       --no-verify)        NO_VERIFY=1; shift ;;
-      --hostname)        [[ $# -ge 2 ]] || { log_error "--hostname exige valor"; exit 2; }; SYS_HOSTNAME="$2"; shift 2 ;;
-      --username)        [[ $# -ge 2 ]] || { log_error "--username exige valor"; exit 2; }; USERNAME="$2"; shift 2 ;;
+      --hostname)        [[ $# -ge 2 ]] || { log_error "--hostname exige valor"; exit 2; }; SYS_HOSTNAME="$2"; HOSTNAME_EXPLICIT=1; shift 2 ;;
+      --username)        [[ $# -ge 2 ]] || { log_error "--username exige valor"; exit 2; }; USERNAME="$2"; USERNAME_EXPLICIT=1; shift 2 ;;
       --password-hash)   [[ $# -ge 2 ]] || { log_error "--password-hash exige valor"; exit 2; }; PASSWORD_HASH="$2"; shift 2 ;;
       --root-password-hash) [[ $# -ge 2 ]] || { log_error "--root-password-hash exige valor"; exit 2; }; ROOT_PASSWORD_HASH="$2"; shift 2 ;;
       --network)         [[ $# -ge 2 ]] || { log_error "--network exige valor (auto|dhcp|static|none)"; exit 2; }; NETWORK_MODE="$2"; shift 2 ;;
@@ -603,9 +699,9 @@ parse_args() {
     *) log_error "Papel inválido: '${ROLE}' (use auto, inference ou builder)."; exit 2 ;;
   esac
 
-  if [[ -z "$SYS_HOSTNAME" ]]; then
-    SYS_HOSTNAME="$(printf '%s' "$USERNAME" | tr '_' '-')"
-  fi
+  # ADR-002: a identidade só pode ser derivada DEPOIS de o papel ser validado.
+  # A função também resolve o hostname padrão (o mesmo do usuário).
+  resolve_identity
 
   validate_network
 
@@ -1737,6 +1833,7 @@ subst_template() {
     -e "s|@@USERNAME@@|${USERNAME}|g" \
     -e "s|@@USER_FULLNAME@@|${USER_FULLNAME}|g" \
     -e "s|@@HOSTNAME@@|${SYS_HOSTNAME}|g" \
+    -e "s|@@IDENTITY_SOURCE@@|${IDENTITY_SOURCE}|g" \
     -e "s|@@PASSWORD_HASH@@|${hash_esc}|g" \
     -e "s|@@ROOT_PASSWORD_HASH@@|${root_hash_esc}|g" \
     -e "s|@@LOCALE@@|${LOCALE}|g" \
@@ -1781,7 +1878,7 @@ inject_common_templates() {
 # Retorna 1 (não aborta) para que o autoteste possa acumular falhas.
 check_no_leftover_tokens() {
   local -a required_tokens=(
-    DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME PASSWORD_HASH ROOT_PASSWORD_HASH
+    DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME IDENTITY_SOURCE PASSWORD_HASH ROOT_PASSWORD_HASH
     LOCALE KEYMAP TIMEZONE EXTRA_PACKAGES PACKAGES_BLOCK STORAGE_LAYOUT ISO_MODEL
     APT_REPO_PATH APT_LOCAL_SOURCES APT_PRIMARY_URI LLAMA_SRC_NAME
     NETWORK_SECTION NETWORK_MODE NET_IFACE NET_IP NET_GATEWAY NET_DNS
@@ -1805,7 +1902,9 @@ inject_templates() {
 
   if [[ $DRY_RUN -eq 1 ]]; then
     log_info "[dry-run] gravaria ${UBUNTU_STAGE}/autoinstall.yaml e ${UBUNTU_STAGE}/ai-cpu-os-boot/*"
-    log_info "[dry-run] disco: ${DISK:-<não fixado>} · papel: ${ROLE} · família: ${FAMILY} · usuário: ${USERNAME}"
+    log_info "[dry-run] disco: ${DISK:-<não fixado>} · papel: ${ROLE} · família: ${FAMILY}"
+    # Formato estável — é o que o tests/test-role-identity.sh lê (ADR-002).
+    log_info "[dry-run] $(identity_line)"
     return 0
   fi
 
@@ -2242,6 +2341,7 @@ main() {
   printf '%b' "$C_RESET"
 
   log_info "dry_run=${DRY_RUN} · distro=${DISTRO} · papel=${ROLE} · família=${FAMILY} · disco=${DISK:-<auto>} · saída=${OUT_ISO}"
+  log_info "$(identity_line)"
   log_warn "A ISO gerada APAGA o disco indicado durante a instalação. Teste em VM primeiro!"
 
   # Autoteste dos templates: não gera ISO, não precisa de disco nem de root.
@@ -2296,6 +2396,7 @@ main() {
   log_info "Distro base: ubuntu (única suportada — ADR-001)"
   log_info "Papel gravado: ${ROLE} (auto = detecta o hardware no primeiro boot)"
   log_info "Família gravada: ${FAMILY} (auto = detecta o hardware no primeiro boot)"
+  log_info "Identidade (ADR-002): ${USERNAME} @ ${SYS_HOSTNAME} · origem=${IDENTITY_SOURCE}"
   if [[ -n "$ROOT_PASSWORD_HASH" ]]; then
     log_info "Usuário: ${USERNAME} (sudo) · root HABILITADO (hash crypt, não exibido)"
   else

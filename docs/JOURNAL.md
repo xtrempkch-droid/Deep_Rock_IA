@@ -2402,6 +2402,54 @@ garante os arquivos íntegros acima.
   (basta rodar na máquina de teste).
 - **Commits:** *(ver `git log`)*.
 
+### Sessão #43 — 2026-10-20 · 🧑‍🔧 ADR-002: a identidade do sistema segue a FUNÇÃO
+
+- **Objetivo:** o dono pediu *"o usuário será definido pela função (builder ou
+  inference)"*. A decisão estava no ADR-002 desde a #39; esta sessão a executou.
+- **Decisão-chave (por que não no 1º boot):** com `--role` concreto o papel já é
+  conhecido na **geração da ISO**; renomear usuário depois da instalação mexe
+  em home, `sudoers`, chaves e serviços — rejeitado no ADR. E com `--role auto`
+  o papel só aparece no 1º boot, quando o usuário já existe → `auto` mantém
+  `ai-cpu-os` e **avisa** (Regra 13-a: default degrada, nunca aborta).
+- **O que foi feito:**
+  - `iso/build-iso.sh`: `resolve_identity()` + `role_default_username()` +
+    `identity_line()`; marcadores `USERNAME_EXPLICIT`/`HOSTNAME_EXPLICIT` (o
+    valor já nascia preenchido — sem eles não dá para distinguir "o usuário
+    pediu `ai-cpu-os`" de "é o default"); GECOS passou a declarar a função
+    (`ai-inference (inference)`); `--hostname` diferente do usuário é
+    reconhecido como frota do mesmo papel (ADR-002 §5).
+  - `.iso-config` no alvo ganhou `ISO_USERNAME`/`ISO_HOSTNAME`/
+    `IDENTITY_SOURCE` (prefixo `ISO_` porque `HOSTNAME` é variável do shell e o
+    `firstboot.sh` **dá source** nesse arquivo).
+  - `iso/verify-iso.sh`: seção "Identidade (ADR-002)" que confere a
+    **derivação** (papel concreto → nome esperado, salvo `origem=explicito`) e
+    a coerência `autoinstall.yaml` × `late-command.sh`.
+  - `webui/`: `ROLE_IDENTITY` em `/api/options`, campos opcionais de
+    usuário/hostname com `RE_USERNAME`/`RE_HOSTNAME` e sugestão ao trocar o
+    papel. Campo vazio = o build deriva.
+  - Novo `tests/test-role-identity.sh` (**22 asserções**) + `make identity-test`,
+    no `validate` e no CI; `ui-test` 46 → **51**; `ci-guards` 93 → **100**.
+- **Bug real encontrado (pré-existente e silencioso):** o `verify-iso.sh`
+  conferia `ROLE`/`FAMILY` no `late-command.sh` procurando **aspas duplas**
+  (`"inference"`) — mas o template usa **simples** (`'@@ROLE@@'` →
+  `'inference'`). Como o `make iso-yaml` **sempre** rodou com `--role auto`,
+  esse ramo nunca foi exercitado; o primeiro `--check-templates --role
+  inference` reprovou uma árvore correta com "não grava ROLE=inference". Achado
+  só porque o teste novo exercita papel concreto.
+- **Outro guarda decorativo pego pelo próprio teste:** `grep -q 'ai-inference'`
+  passava mesmo trocando a derivação por `ai-cpu-os` (o nome aparece em
+  comentário e na mensagem de log). Ancorado no **braço do case**
+  (`^    inference) printf 'ai-inference'`), e o mesmo para a condição de
+  `USERNAME_EXPLICIT`. `ci-guards-test` denunciou os dois.
+- **Resultado:** `make validate` **verde** — `role-identity` **22**,
+  `ci-guards` **100**, `webui` **51**, `ai-talk` 30, `iso-lint` OK, `docs` OK.
+- **O que NÃO foi provado:** **nenhuma ISO foi gerada nem bootada** — a
+  identidade nunca foi vista num sistema instalado (`getent passwd
+  ai-inference`). A prova é `--dry-run` + `--check-templates` +
+  `verify-iso --dir`. A UI continua **sem ter sido aberta num navegador**.
+  Frota (`ai-inference-2`) só por `--dry-run`. **Dívida = P5 no `STATE.md` § 6.**
+- **Commits:** *(ver `git log`)*.
+
 ### Sessão #42 — 2026-10-20 · 🗑️ ADR-001 executado: o caminho Debian da ISO saiu
 
 - **Objetivo:** o dono disse *"esse projeto está ficando complicado demais com 2
@@ -3087,17 +3135,19 @@ journal e no arquivo de log:
 
 | Thread | Decisão | Estado |
 |--------|---------|--------|
-| **Uma ISO Ubuntu** | Debian/preseed **removido**. O runtime Debian continua suportado. | ✅ **FEITO (#42)** — `iso/common/`, `--distro debian` aborta. **Falta** um boot de ISO depois da remoção (P5) |
-| **Identidade por papel** | `inference`→`ai-inference`; `builder`→`ai-builder`; `auto`→`ai-cpu-os` + aviso; flags explícitas vencem. | ❌ **não implementada** — é o topo da fila (P1) |
+| **Uma ISO Ubuntu** | Debian/preseed **removido**. O runtime Debian continua suportado. | ✅ **FEITO (#42)** — `iso/common/`, `--distro debian` aborta |
+| **Identidade por papel** | `inference`→`ai-inference`; `builder`→`ai-builder`; `auto`→`ai-cpu-os` + aviso; flags explícitas vencem. | ✅ **FEITO (#43)** — `resolve_identity()` + `make identity-test` (22). **Falta** ver num sistema instalado (P5) |
 | **Chat da frota** | `ai-talk`: TCP 7331, JSON lines, HMAC, stdlib; fases F1/F2/F3. | ⚠️ **F1 no código** (`talk/ai_talk.py` + `make talk-test`); F2/F3 pendentes |
 | **Delay entre mensagens** | Intervalo mínimo de **50 ms** entre `msg` do mesmo par (20 msg/s); `ack`/`hello` isentos; fila **256** com **exit 5** no overflow; p99 ≤ 10 ms; `fsync` por mensagem. | ✅ **no código e provado** (`make talk-test`) |
 | **Teto de nós** | **15 nós** em malha completa (14 conexões/nó); acima disso, **relay/hub obrigatório**. Chave por nó, `dedupe_window=8192`, `max_out_per_sec=120`. | ⚠️ **no código**, mas **nunca medido** com 15 nós (P4) |
-| **Ordem** | P0 (Debian) ✅ → P1 (identidade) ← **agora** → P3 (ISO/duas VMs/ponte) → P4 (bancada) e P5 (boot da ISO). | `docs/STATE.md` § 6 |
+| **Ordem** | P0 (Debian) ✅ → P1 (identidade) ✅ → **P5 (boot de uma ISO)** ← agora → P3 (ISO/duas VMs/ponte) → P4 (bancada). | `docs/STATE.md` § 6 |
 
-> ⚠️ **Não confunda plano com fato.** O usuário padrão ainda é `ai-cpu-os`;
-> o `ai-talk` não está na ISO e não tem unit systemd; e **não há medição** de
-> latência nem do teto de 15 nós — os números são cálculo.
-> ⚠️ E, desde a remoção do caminho Debian, **nenhuma ISO foi bootada**.
+> ⚠️ **Não confunda plano com fato.** A identidade por papel está no código,
+> mas **nunca foi vista num sistema instalado**; o `ai-talk` não está na ISO e
+> não tem unit systemd; e **não há medição** de latência nem do teto de 15 nós
+> — os números são cálculo.
+> ⚠️ E, desde a remoção do caminho Debian (#42) e a identidade por papel (#43),
+> **nenhuma ISO foi gerada nem bootada**.
 
 ---
 
@@ -3110,6 +3160,8 @@ journal e no arquivo de log:
 | Dimensionar `dedupe_window` pela **taxa média** | A janela precisa cobrir o **retry de 9 s** na taxa **de pico** (280 msg/s a 15 nós) → 1024 IDs cobrem ~3,7 s e um retry legítimo vira duplicata no log | `dedupe_window = taxa_de_entrada × 20 s` (mínimo 1024; padrão 8.192) |
 | **Apagar um diretório da mídia** (`iso/preseed/`) sem varrer os guardas | Guardas que fazem `grep` num arquivo inexistente **derrubam o job com rc 2** — e o `test-ci-guards` acusa "o job falha numa árvore LIMPA". Pior: ao substituir um bloco grande do workflow, você leva guardas embora **sem perceber** (foi o caso do `--no-mmap`), e o único sinal é uma violação plantada que **para de reprovar** | Depois de mover/apagar arquivo da mídia: rode `make ci-guards-test` **antes** de olhar o `validate`. Ele é o detector de guarda quebrado **e** de guarda ausente |
 | Trocar o **nome** de um invariante e deixar o guarda ancorado no texto antigo | `grep -q 'late_command'` passou a apontar para um arquivo que tem `late-commands:` — o guarda nunca reprovava e ainda assim "passava" | Ancore no **valor** que importa (`-map … /autoinstall.yaml`, `geoip: false`, `dedupe_window": 8192`), nunca num nome solto |
+| **Guarda que só "passa" porque o valor aparece num comentário** | `grep -q 'ai-inference' iso/build-iso.sh` continuava verde mesmo trocando a derivação por `ai-cpu-os` — o nome está nos comentários e na mensagem de log | Ancore na **estrutura** que executa: braço do `case` (`^    inference) printf 'ai-inference'`), condição (`^  if \[\[ $USERNAME_EXPLICIT -eq 1 \]\]`). Se o `ci-guards-test` disser "NÃO reprova", o guarda é decorativo — não insista nele |
+| **Código que nunca é exercitado porque o default não o alcança** | O `verify-iso.sh` cobrava `ROLE`/`FAMILY` procurando **aspas duplas** num template que usa **simples**. Como `make iso-yaml` sempre rodou com `--role auto`, o ramo jamais rodou — e o primeiro teste com papel concreto reprovou uma árvore correta | Todo ramo condicional precisa de **um teste com o valor que o ativa**. Se só existe teste do default, o ramo é código morto até o dia em que alguém o usa |
 | Usar **uma chave** para a frota inteira | Qualquer nó assina como outro (`from` é só um campo) | Chave **por nó** (`peers[nome].key_file`) quando a frota passa de 2–3 máquinas; o receptor verifica com a chave do `from` |
 | Derivar o **usuário do papel** com `--role auto` | O papel `auto` só é conhecido no **1º boot**; nessa hora o usuário do instalador já foi criado | Identidade derivada exige `--role inference|builder` (ADR-002); `auto` mantém `ai-cpu-os` + aviso |
 | Adicionar **feature/teste ao caminho Debian** | Ele está **deprecado** e será removido (ADR-001); o esforço vira retrabalho e o CI cresce | Trabalhe só em `--distro ubuntu`; o Debian continua apenas como **hospedeiro** das mods |
