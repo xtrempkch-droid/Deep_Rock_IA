@@ -149,6 +149,15 @@ jobs:
           set -euo pipefail
           make ui-test
 
+      # A página é JavaScript: o `ui-test` exercita a API e NÃO o script. Um
+      # erro no topo do <script> (ex.: ler dado que só existe depois do fetch)
+      # mata a página inteira e deixa o `ui-test` verde. Este passo executa o
+      # JS num DOM falso e confere o que ele FEZ. Sem node: SKIP.
+      - name: "Interface web (executa o JS da página num DOM falso)"
+        run: |
+          set -euo pipefail
+          make ui-page-test
+
       # O contrato do ai-talk (§6.7/§6.8 do docs/CHAT.md) provado em loopback:
       # espaçamento de 50 ms por par, hello isento, fila com exit 5, dedupe,
       # assinatura por nó e `ECONNREFUSED` em fail fast. Sem rede externa, sem
@@ -352,7 +361,7 @@ jobs:
             tests/test-verify-iso-repo.sh
             tests/test-write-pendrive.sh
             tests/test-check-iso.sh
-            tests/test-webui.sh tests/test-network-mod.sh
+            tests/test-webui.sh tests/test-webui-page.sh tests/test-network-mod.sh
             tests/test-avx512-policy.sh
             tests/test-iso-lock.sh
             tests/test-iso-disk.sh
@@ -436,6 +445,16 @@ jobs:
           # aceitando exclusivamente `ubuntu`. Se `--distro debian` voltar a
           # funcionar sem passar pelo ADR-001, o projeto volta a ter duas ISOs.
           grep -q '@@STORAGE_LAYOUT@@' iso/autoinstall/autoinstall.yaml
+          # BASE INSTALADA EXPLICITA: a ISO oficial oferece ubuntu-server
+          # (default, com git/curl/gnupg) e ubuntu-server-minimal (sem eles).
+          # Deixar no default = depender de uma escolha de terceiro.
+          grep -qE '^source:$' iso/autoinstall/autoinstall.yaml
+          grep -q '@@INSTALL_SOURCE@@' iso/autoinstall/autoinstall.yaml
+          grep -q 'INSTALL_SOURCE="ubuntu-server"' iso/build-iso.sh
+          # e o id pedido tem de existir no install-sources.yaml da ISO
+          grep -q 'install-sources.yaml' iso/build-iso.sh
+          grep -q 'Bases disponíveis' iso/build-iso.sh
+          grep -q 'install-sources.yaml' iso/verify-iso.sh
           grep -q 'autoinstall' iso/autoinstall/autoinstall.yaml
           grep -q 'ubuntu' iso/build-iso.sh
           grep -q -- '--distro' iso/build-iso.sh
@@ -863,6 +882,23 @@ jobs:
           grep -q 'ui-test' Makefile
           grep -q 'validate:.*ui-test' Makefile
           grep -q 'make ui-test' .github/workflows/validate.yml
+          # O JavaScript da pagina tem de ser EXECUTADO no CI, nao so lido:
+          # um erro no topo do <script> mata a pagina inteira e a API continua
+          # respondendo (foi o bug da sessao #43).
+          grep -q 'ui-page-test' Makefile
+          grep -q 'validate:.*ui-page-test' Makefile
+          grep -q 'make ui-page-test' .github/workflows/validate.yml
+          test -f tests/test-webui-page.sh
+          # A REGRA da pagina, em forma estatica: nada no topo do <script> pode
+          # depender de dados que so existem depois do fetch. Chamada de topo =
+          # na COLUNA 0 (dentro de funcao/IIFE ela vem indentada).
+          if grep -qE '^syncIdentityHint\(\);' webui/index.html; then
+            echo "::error file=webui/index.html::syncIdentityHint() no TOPO do script"
+            echo "::error::OPTIONS ainda e null ali: o TypeError mata a pagina inteira"
+            exit 1
+          fi
+          # e a guarda de OPTIONS nulo tem de continuar la (ancorada no valor).
+          grep -qF '(OPTIONS && OPTIONS.identity)' webui/index.html
           # CHAT DA FROTA (ai-talk): o teste offline precisa rodar no CI e ser
           # chamado pelo alvo `validate` (corolario da Regra 13-a: comando
           # duplicado entre CI e make diverge e o local passa enquanto o CI cai).

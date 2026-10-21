@@ -180,6 +180,13 @@ GENERATED_PASSWORD=""
 #   none            → não grava configuração de rede (comportamento antigo)
 NETWORK_MODE="auto"
 
+# --- base instalada pelo autoinstall (--install-source) --------------------
+# O `install-sources.yaml` da ISO oficial oferece `ubuntu-server-minimal` e
+# `ubuntu-server` (a default). A minimal NÃO traz git/curl/gnupg, que o projeto
+# usa — depender do default é depender de uma escolha de terceiro. Ver o
+# comentário no topo do iso/autoinstall/autoinstall.yaml.
+INSTALL_SOURCE="ubuntu-server"
+
 # --- chat da frota (ADR-003, docs/CHAT.md) ---------------------------------
 # O `ai-talk` vai NA ISO (é runtime da frota), com a configuração decidida aqui
 # e aplicada no 1º boot. Sem chave, o serviço é instalado DESABILITADO — um
@@ -388,6 +395,9 @@ Opções principais:
                         root fica BLOQUEADO (padrão). Com ele, o root é
                         habilitado: no Ubuntu via late-command (chpasswd -e);
                         e o root fica habilitado no alvo.
+  --install-source ID   Base que o Subiquity instala: ubuntu-server (padrão) ou
+                        ubuntu-server-minimal. A minimal NÃO traz git/curl/gnupg
+                        (o projeto usa), então mudar exige --extra-packages.
   --chat-node NAME      Nome do nó no chat da frota (padrão: hostname do alvo;
                         com ADR-002 já é ai-inference/ai-builder).
   --chat-port N         Porta TCP do chat (padrão: 7331).
@@ -811,6 +821,7 @@ parse_args() {
       --iso-repo)        [[ $# -ge 2 ]] || { log_error "--iso-repo exige valor (auto|none|DIR)"; exit 2; }; ISO_REPO="$2"; shift 2 ;;
       --iso-repo-packages) [[ $# -ge 2 ]] || { log_error "--iso-repo-packages exige valor"; exit 2; }; ISO_REPO_PACKAGES="$2"; shift 2 ;;
       --iso-repo-allow-mismatch) ISO_REPO_ALLOW_MISMATCH=1; shift ;;
+      --install-source)  [[ $# -ge 2 ]] || { log_error "--install-source exige valor"; exit 2; }; INSTALL_SOURCE="$2"; shift 2 ;;
       --chat-node)       [[ $# -ge 2 ]] || { log_error "--chat-node exige valor"; exit 2; }; CHAT_NODE="$2"; shift 2 ;;
       --chat-port)       [[ $# -ge 2 ]] || { log_error "--chat-port exige valor"; exit 2; }; CHAT_PORT="$2"; shift 2 ;;
       --chat-bind)       [[ $# -ge 2 ]] || { log_error "--chat-bind exige valor"; exit 2; }; CHAT_BIND="$2"; shift 2 ;;
@@ -1157,6 +1168,31 @@ prepare_ubuntu() {
     log_error "Layout inesperado: não encontrei /casper na ISO."
     log_error "--distro ubuntu exige uma ISO **Ubuntu Server live** (releases.ubuntu.com)."
     exit 1
+  fi
+
+  # A "source" (base instalada) tem de EXISTIR nesta ISO. O Subiquity escolhe
+  # pelo `id:` do /casper/install-sources.yaml; um id inventado não dá erro no
+  # build — a instalação é que falha, no meio, na máquina do usuário. Conferir
+  # aqui custa uma extração de poucos KB.
+  local sources_yaml="${UBUNTU_STAGE}/install-sources.yaml"
+  if xorriso -osirrox on -indev "$ISO_PATH" -extract /casper/install-sources.yaml \
+       "$sources_yaml" 2>/dev/null; then
+    if grep -qE "^[[:space:]]*id:[[:space:]]*${INSTALL_SOURCE}[[:space:]]*$" "$sources_yaml"; then
+      log_ok "Base a instalar: '${INSTALL_SOURCE}' (existe no install-sources.yaml)"
+    else
+      local ids
+      ids="$(sed -nE 's/^[[:space:]]*id:[[:space:]]*//p' "$sources_yaml" | tr '\n' ' ')"
+      log_error "--install-source ${INSTALL_SOURCE}: não existe nesta ISO."
+      log_error "Bases disponíveis: ${ids:-<nenhuma>}"
+      log_error "Use --install-source com um desses ids (padrão: ubuntu-server)."
+      exit 2
+    fi
+    rm -f "$sources_yaml"
+  else
+    # Não é fatal: a ISO pode ser de uma release que não usa esse arquivo (ou
+    # um `--iso` recortado). Avisamos porque a garantia deixa de existir.
+    log_warn "Não achei /casper/install-sources.yaml nesta ISO; não consigo"
+    log_warn "  conferir se a base '${INSTALL_SOURCE}' existe. Seguindo."
   fi
 
   UBUNTU_GRUB_BIOS="${UBUNTU_STAGE}/grub-bios.cfg"
@@ -1992,6 +2028,7 @@ subst_template() {
     -e "s|@@USER_FULLNAME@@|${USER_FULLNAME}|g" \
     -e "s|@@HOSTNAME@@|${SYS_HOSTNAME}|g" \
     -e "s|@@IDENTITY_SOURCE@@|${IDENTITY_SOURCE}|g" \
+    -e "s|@@INSTALL_SOURCE@@|${INSTALL_SOURCE}|g" \
     -e "s|@@CHAT_INSTALL@@|${CHAT_INSTALL}|g" \
     -e "s|@@CHAT_NODE@@|${CHAT_NODE}|g" \
     -e "s|@@CHAT_PORT@@|${CHAT_PORT}|g" \
@@ -2101,7 +2138,7 @@ stage_chat_payload() {
 # Retorna 1 (não aborta) para que o autoteste possa acumular falhas.
 check_no_leftover_tokens() {
   local -a required_tokens=(
-    DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME IDENTITY_SOURCE CHAT_INSTALL CHAT_NODE CHAT_PORT CHAT_BIND PASSWORD_HASH ROOT_PASSWORD_HASH
+    DISTRO ROLE FAMILY FIRSTBOOT_REBOOT SERIAL_CONSOLE ISO_BUILD USERNAME USER_FULLNAME HOSTNAME IDENTITY_SOURCE INSTALL_SOURCE CHAT_INSTALL CHAT_NODE CHAT_PORT CHAT_BIND PASSWORD_HASH ROOT_PASSWORD_HASH
     LOCALE KEYMAP TIMEZONE EXTRA_PACKAGES PACKAGES_BLOCK STORAGE_LAYOUT ISO_MODEL
     APT_REPO_PATH APT_LOCAL_SOURCES APT_PRIMARY_URI LLAMA_SRC_NAME
     NETWORK_SECTION NETWORK_MODE NET_IFACE NET_IP NET_GATEWAY NET_DNS
@@ -2770,6 +2807,27 @@ selftest_iso_tools() {
            "${stage}/ai-cpu-os/llama-build.sh" "${stage}/ai-cpu-os/families/resolve.sh" \
            "${stage}/ai-cpu-os/mods/apply.sh" "${stage}/ai-cpu-os-boot/late-command.sh" \
            "${stage}/ai-cpu-os-boot/firstboot.sh" 2>/dev/null || true
+
+  # 2-b) O `install-sources.yaml` da ISO base, reduzido aos dois ids que o
+  # Ubuntu Server realmente oferece. Sem ele a árvore de teste não se parece
+  # com a mídia e a checagem de `source:` ficaria sempre em SKIP (verificação
+  # que nunca roda não vale nada).
+  mkdir -p "${stage}/casper"
+  cat > "${stage}/casper/install-sources.yaml" <<'SRC'
+- description:
+    en: Ubuntu Server (minimized)
+  id: ubuntu-server-minimal
+  path: ubuntu-server-minimal.squashfs
+  type: fsimage
+  variant: server
+- default: true
+  description:
+    en: Ubuntu Server
+  id: ubuntu-server
+  path: ubuntu-server-minimal.ubuntu-server.squashfs
+  type: fsimage-layered
+  variant: server
+SRC
 
   # 3) A entrada de boot, gerada pela MESMA função do build.
   KERNEL_PATH="/casper/vmlinuz"

@@ -113,6 +113,26 @@ oem:
   install: false
 snaps: []
 
+# --- Base instalada (a "source" do Subiquity) ---------------------------------
+# POR QUE EXPLICITO: a ISO oficial oferece DUAS bases no `install-sources.yaml`
+#   * `ubuntu-server-minimal` — 380 pacotes, "small runtime footprint in
+#     environments where humans are not expected to log in";
+#   * `ubuntu-server`         — a default (`default: true`), 707 pacotes.
+# E a diferença não é cosmética: `git`, `curl` e `gnupg` (que o projeto USA)
+# estão na `ubuntu-server` e NÃO na minimal — verificado nos manifests da ISO
+# 24.04.5 (`/casper/*.manifest`) e em `apt-cache depends ubuntu-server`.
+#
+# Deixar no default significa depender de uma escolha que a Canonical pode
+# mudar entre releases: se um dia a default virar a minimal, o 1º boot perde
+# `git` em silêncio (o build do llama.cpp só falharia no alvo). Fixar aqui
+# torna o `EXTRA_PACKAGES` uma decisão consciente, não uma aposta.
+#
+# ⚠️ Mexeu nisto? O `iso/verify-iso.sh` confere se o id pedido EXISTE entre os
+# `id:` do `install-sources.yaml` da própria ISO — um id inventado reprova
+# antes de a mídia ser gravada (em vez de falhar no meio da instalação).
+source:
+  id: @@INSTALL_SOURCE@@
+
 # --- Pacotes extras -----------------------------------------------------------
 # Vira uma sequência em bloco do YAML (uma entrada por linha) — ver
 # `expand_packages_block` no build-iso.sh.

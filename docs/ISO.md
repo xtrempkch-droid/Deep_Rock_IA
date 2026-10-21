@@ -321,6 +321,7 @@ Opções mais usadas:
 | `--password-hash '$6$…'` | Senha do usuário (gere com `mkpasswd -m sha-512`). Se omitido, gera e **mostra** uma. |
 | `--root-password-hash '$6$…'` | Senha do **root** (hash crypt). Se omitido, o root fica **bloqueado** (padrão). |
 | `--username NOME` | Usuário administrativo. Sem ele, **deriva do papel** (ADR-002): `inference`→`ai-inference`, `builder`→`ai-builder`, `auto`→`ai-cpu-os`. |
+| `--install-source ID` | Base que o Subiquity instala: **`ubuntu-server`** (padrão; traz `git`/`curl`/`gnupg`) ou `ubuntu-server-minimal` (380 pacotes, **sem** eles). O build confere se o id existe no `install-sources.yaml` da ISO. Ver § 4.3-b. |
 | `--chat-key-file PATH` | Chave **global** do chat (32 bytes em hex, modo 0640). Sem chave, o serviço nasce desabilitado. |
 | `--chat-keydir DIR` | Um `<nome>.key` por nó (modo recomendado para frota). |
 | `--chat-peers-file FILE` | A frota: uma linha `nome=ip` por nó (até **15**, ADR-005). |
@@ -413,6 +414,41 @@ layouts de disco.
 > mesmo netplan que a ISO nova traz — e move o netplan do instalador/cloud-init
 > para `.bak`. Ver `docs/MODS.md` § 3 e `docs/TROUBLESHOOTING.md` § "sobe sem
 > rede".
+
+#### 4.3-b Qual **base** o instalador instala (`--install-source`)
+
+A ISO oficial oferece **duas** bases no `/casper/install-sources.yaml`, e a
+diferença não é cosmética:
+
+| `id` | Pacotes | `git`/`curl`/`gnupg` | Descrição oficial |
+|---|---|---|---|
+| `ubuntu-server-minimal` | **380** | ❌ | *"small runtime footprint in environments where humans are not expected to log in"* |
+| `ubuntu-server` (**default**) | **707** | ✅ | *"curated set of packages that provide a comfortable experience"* |
+
+**Por que o projeto fixa a base:** antes, o `autoinstall.yaml` não tinha a
+chave `source:` e o Subiquity usava o `default: true` — uma escolha de
+**terceiro**, que pode mudar entre releases. Se a default virar a minimal, o
+alvo perde `git` em **silêncio** e o caminho de build que clona o llama.cpp
+falha no 1º boot, longe de quem gerou a mídia. Agora a base é explícita
+(`source: {id: ubuntu-server}`) e o `EXTRA_PACKAGES` é uma decisão consciente.
+
+**Prova do fato (sem chutar), com a ISO 24.04.5 na mão:**
+
+```bash
+xorriso -osirrox on -indev ubuntu-24.04.5-live-server-amd64.iso \
+    -extract /casper/ubuntu-server-minimal.manifest /tmp/min.manifest
+grep -cE '^git[[:space:]]' /tmp/min.manifest   # 0  -> git NÃO está na minimal
+apt-cache depends ubuntu-server | grep git     # Depende: git
+```
+
+**Duas travas** para não gerar uma mídia que trava na instalação:
+
+1. `iso/build-iso.sh` extrai o `install-sources.yaml` da ISO base e **recusa**
+   (rc 2) um `--install-source` que não exista, listando as bases disponíveis;
+2. `iso/verify-iso.sh` (§ "Base instalada") repete a checagem na ISO gerada.
+
+Quem escolher a minimal de propósito precisa passar os pacotes do projeto em
+`--extra-packages` (o `TROUBLESHOOTING.md` tem a linha pronta).
 
 #### Como a ISO base é escolhida (e o bug que isso já causou)
 
@@ -1025,6 +1061,8 @@ config) e `aplicação concluída com sucesso` (o 1º boot **aplicou**).
 
 | Data | Mudança |
 |------|---------|
+| 2026-10-20 | 🧱 **Base instalada explícita (`--install-source`).** O autoinstall passou a declarar `source: id: ubuntu-server`: antes o build dependia do `default: true` da ISO (escolha de terceiro). Fato verificado nos manifests da 24.04.5 — a minimal tem **380** pacotes e **não** traz `git`/`curl`/`gnupg`; a `ubuntu-server` tem **707** e traz. O build **recusa** (rc 2) um id inexistente e o verificador repete a checagem na mídia. |
+| 2026-10-20 | 🐛 **Bug real na UI: a página ficava vazia.** `syncIdentityHint()` era chamado no TOPO do `<script>`, antes de `loadOptions()` preencher `OPTIONS` → `TypeError` que **abortava o script inteiro** (sem papéis, sem famílias, sem lista de ISOs, e sem mensagem). O `ui-test` (API) seguia verde. Corrigido com `wireForm()` + IIFE com `try/catch` e guarda de `OPTIONS` nulo; agora `make ui-page-test` **executa** o JS num DOM falso (13 asserções). |
 | 2026-10-20 | 💬 **O chat da frota chega à máquina (ADR-003 F2, sessão #44).** Flags `--chat-*` (node/port/bind/peer/peers-file/key-file/keydir/disable); payload em `/ai-cpu-os-boot/chat/` (chaves **0640** na mídia também); `late-command.sh` § 2-f copia para `/etc/ai-talk` e registra `CHAT_KEY`/`CHAT_KEYDIR`/`CHAT_PEERS` no `.iso-config`; `firstboot.sh` repassa `AI_CHAT_*`; `build.sh` ganhou a **etapa 2/5** (chat **antes** do papel; falha é aviso). Sem chave o serviço nasce **desabilitado**. `verify-iso.sh` ganhou a seção "Chat da frota"; `talk-install-test` (39) e `iso-chat-test` (31). ⚠️ Nenhuma ISO gerada; duas VMs não testadas. |
 | 2026-10-20 | 🧑‍🔧 **Identidade derivada do papel (ADR-002, sessão #43).** `--role inference` → usuário/hostname `ai-inference`; `builder` → `ai-builder`; `auto` mantém `ai-cpu-os` + aviso (o papel só é conhecido no 1º boot). `--username`/`--hostname` explícitos vencem. A identidade vai também para o `.iso-config` (`ISO_USERNAME`/`ISO_HOSTNAME`/`IDENTITY_SOURCE`), o `verify-iso.sh` confere a **derivação** (não só a presença do campo) e a UI sugere o nome ao escolher o papel. `make identity-test` (22 asserções). Nenhuma ISO gerada — só `--check-templates`/`--dir`. |
 | 2026-10-20 | 🗑️ **O caminho Debian foi REMOVIDO (ADR-001, sessão #42).** `iso/preseed/` deixou de existir (scripts compartilhados foram para `iso/common/`), `--distro debian` **aborta** com exit 2 citando o ADR, `verify-iso.sh` ficou com uma base só e o layout da mídia passou a ser **`/ai-cpu-os-boot/`**. O CI reprova se `preseed/` voltar. `make validate` verde (ci-guards 93). ⚠️ Nenhuma ISO gerada/bootada depois da remoção. |

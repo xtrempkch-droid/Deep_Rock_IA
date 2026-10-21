@@ -2402,6 +2402,62 @@ garante os arquivos íntegros acima.
   (basta rodar na máquina de teste).
 - **Commits:** *(ver `git log`)*.
 
+### Sessão #45 — 2026-10-20 · 🐛 A página da UI ficava vazia + `git` já vem na base
+
+- **Objetivo:** dois achados do dono: *"bug no webui e se não me engano o git já
+  vem no ubuntu. bom dar uma observada"*. Os dois eram reais.
+- **1) O bug da página.** O `<script>` chamava `syncIdentityHint()` **no topo**
+  — antes de `loadOptions()` preencher `OPTIONS`. `OPTIONS.identity` com
+  `OPTIONS === null` lança `TypeError`, e um erro **no topo** aborta o resto do
+  script: o IIFE de `start` nunca roda. Sintoma: papéis vazios, sem famílias,
+  sem status, sem lista de ISOs — e **nenhuma mensagem**. A página parecia
+  carregar para sempre. Bug meu, da sessão #43.
+  - **Por que os testes não pegaram:** o `ui-test` exercita a **API**, que
+    sempre esteve certa. A limitação ("nunca aberta num navegador") estava
+    documentada desde a #24 — e cobrou o preço.
+  - **Correção:** nada no topo toca dados do `fetch`; handlers em `wireForm()`
+    (que não depende de dados) e a parte assíncrona dentro do IIFE com
+    `try/catch` → erro aparece em `#alert` em vez de morrer calado. Guarda de
+    `OPTIONS` nulo na dica de identidade.
+  - **Teste novo:** `tests/test-webui-page.sh` (**13**) extrai o `<script>`,
+    roda num **DOM falso** (Node) e confere o que a página FEZ. Provado por
+    violação plantada: reintroduzir o bug faz **12 de 13** falharem.
+- **2) O `git` já vem — e o projeto dependia de um default.** Fato verificado,
+  não memória:
+  - `/casper/install-sources.yaml` da ISO 24.04.5 (extraído do arquivo real)
+    oferece `ubuntu-server-minimal` (380 pacotes) e `ubuntu-server`
+    (**default**, 707);
+  - `git`/`curl`/`gnupg` **não** estão na minimal (0 ocorrências de `^git` no
+    `ubuntu-server-minimal.manifest`) e **estão** na `ubuntu-server`
+    (`apt-cache depends ubuntu-server` → `Depende: git`);
+  - o `autoinstall.yaml` **não** tinha `source:`, ou seja: a base era o
+    `default: true` de terceiro. Se a Canonical mudar a default, o alvo perde
+    `git` em **silêncio** e o build que clona o llama.cpp falha no 1º boot.
+  - **Correção:** `--install-source` (padrão `ubuntu-server`) + `source: id:`
+    no autoinstall, com **duas travas**: o build recusa (rc 2) um id
+    inexistente listando os disponíveis, e o `verify-iso.sh` repete a
+    checagem na mídia. `EXTRA_PACKAGES` **mantém** `git`/`curl`/`gnupg` como
+    defesa de quem escolher a minimal.
+- **Bugs/quase-bugs meus nesta sessão:**
+  - esqueci o **alvo do `sed_`** em duas violações plantadas (`sed_ <expr>`
+    sem arquivo) → "variável não associada" sob `set -u`;
+  - plantei violações em arquivos que o job `project-rules` **não executa**
+    (a página é testada no outro job) → o `ci-guards-test` acusou "NÃO
+    reprova". Solução: dois **guardas estáticos** no `project-rules` (chamada
+    de topo na coluna 0 é proibida; a guarda `(OPTIONS && OPTIONS.identity)`
+    tem de existir), e os plants passaram a atacá-los;
+  - dois plants miravam em texto que não era o guarda (`log_error`/`section`),
+    então "não reprovavam" — reancorados no valor (`Bases disponíveis`,
+    `install-sources.yaml`).
+- **Resultado:** `make validate` **verde** — `webui-page` **13** (novo),
+  `ci-guards` **116** (era 110), `webui` 51, `iso-chat` 31,
+  `ai-talk-install` 39, `role-identity` 22, `iso-lint` OK.
+- **O que NÃO foi provado:** a página continua **sem ser aberta num navegador**
+  (o teste executa o JS, mas layout/CSS/`<dialog>` não são cobertos); e
+  `--install-source` foi provado por `--check-templates`/verificador —
+  **nenhuma ISO gerada/instalada** para confirmar a base no alvo.
+- **Commits:** *(ver `git log`)*.
+
 ### Sessão #44 — 2026-10-20 · 💬 ADR-003 F2: o chat da frota chega à máquina
 
 - **Objetivo:** o dono pediu o ADR-003. A F1 (transporte) já existia desde a
@@ -3202,7 +3258,7 @@ journal e no arquivo de log:
 | **Chat da frota** | `ai-talk`: TCP 7331, JSON lines, HMAC, stdlib; fases F1/F2/F3. | ✅ **F1 + F2** (#41/#44): transporte, instalador, unit e ISO. ⚠️ **F3** e **duas VMs** pendentes |
 | **Delay entre mensagens** | Intervalo mínimo de **50 ms** entre `msg` do mesmo par (20 msg/s); `ack`/`hello` isentos; fila **256** com **exit 5** no overflow; p99 ≤ 10 ms; `fsync` por mensagem. | ✅ **no código e provado** (`make talk-test`) |
 | **Teto de nós** | **15 nós** em malha completa (14 conexões/nó); acima disso, **relay/hub obrigatório**. Chave por nó, `dedupe_window=8192`, `max_out_per_sec=120`. | ⚠️ **no código**, mas **nunca medido** com 15 nós (P4) |
-| **Ordem** | P0 ✅ → P1 ✅ → F2 do chat ✅ → **P5 (boot de uma ISO)** ← agora → Bloco R (duas VMs) → P4 (bancada de 15). | `docs/STATE.md` § 6 |
+| **Ordem** | P0 ✅ → P1 ✅ → F2 do chat ✅ → correções da #45 ✅ → **P5 (boot de uma ISO)** ← agora → Bloco R (duas VMs) → P4 (bancada de 15). | `docs/STATE.md` § 6 |
 
 > ⚠️ **Não confunda plano com fato.** A identidade por papel e o chat estão no
 > código e na ISO, mas **nunca foram vistos num sistema instalado**; o
@@ -3226,6 +3282,8 @@ journal e no arquivo de log:
 | **Guarda que só "passa" porque o valor aparece num comentário** | `grep -q 'ai-inference' iso/build-iso.sh` continuava verde mesmo trocando a derivação por `ai-cpu-os` — o nome está nos comentários e na mensagem de log | Ancore na **estrutura** que executa: braço do `case` (`^    inference) printf 'ai-inference'`), condição (`^  if \[\[ $USERNAME_EXPLICIT -eq 1 \]\]`). Se o `ci-guards-test` disser "NÃO reprova", o guarda é decorativo — não insista nele |
 | **Confundir o retorno de um helper com o CONTEÚDO do arquivo** | `fetch` do `verify-iso.sh` imprime o **caminho** do arquivo extraído. Tratar esse caminho como o arquivo fez o verificador contar "1 nó" numa frota de 2, dizer que a chave de 32 bytes era inválida e reprovar uma ISO correta | Ou o helper imprime o caminho e quem chama faz `cat`, ou imprime o conteúdo. Nunca os dois na mesma função — e, ao escrever a checagem, imprima o valor antes de julgar |
 | **Testar um caminho de arquivo com `os.path.isfile` quando há prefixo (`--root`)** | O gerador de config decidia a chave por nó com `isfile(keys/<nome>.key)` no caminho **prefixado** pelo `--root`; o arquivo não existia, o peer saía sem `key_file` e cairia na chave global (falha silenciosa de autenticação) | Passe a decisão de fora para dentro (`--peer-key nome=/caminho/do/ALVO`). Um teste com `--root` pega isso; um teste no sistema real não pegaria |
+| **Testar a API e achar que testou a página** | O `ui-test` exercita `/api/*`; o JavaScript do `index.html` nunca era executado. Um erro no **topo** do `<script>` (ler dado que só existe depois do `fetch`) mata a página inteira e o teste continua verde | Se a UI importa, o **JS tem de ser executado** no CI. O `make ui-page-test` roda o script num DOM falso (Node) e confere o que ele FEZ — inclusive o cenário "servidor fora do ar" |
+| **Confiar no `default` de um arquivo de terceiro** | O `autoinstall` não declarava `source:`; a base era o `default: true` do `install-sources.yaml` da ISO. A default (`ubuntu-server`) traz `git`/`curl`/`gnupg`; a `ubuntu-server-minimal` **não** — se a Canonical trocar a default, o alvo perde `git` em silêncio | Fixe o que importa e **confira que existe**: `source: id:` + checagem contra o `install-sources.yaml` da própria ISO, no build **e** no verificador |
 | **Código que nunca é exercitado porque o default não o alcança** | O `verify-iso.sh` cobrava `ROLE`/`FAMILY` procurando **aspas duplas** num template que usa **simples**. Como `make iso-yaml` sempre rodou com `--role auto`, o ramo jamais rodou — e o primeiro teste com papel concreto reprovou uma árvore correta | Todo ramo condicional precisa de **um teste com o valor que o ativa**. Se só existe teste do default, o ramo é código morto até o dia em que alguém o usa |
 | Usar **uma chave** para a frota inteira | Qualquer nó assina como outro (`from` é só um campo) | Chave **por nó** (`peers[nome].key_file`) quando a frota passa de 2–3 máquinas; o receptor verifica com a chave do `from` |
 | Derivar o **usuário do papel** com `--role auto` | O papel `auto` só é conhecido no **1º boot**; nessa hora o usuário do instalador já foi criado | Identidade derivada exige `--role inference|builder` (ADR-002); `auto` mantém `ai-cpu-os` + aviso |

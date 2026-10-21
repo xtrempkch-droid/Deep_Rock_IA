@@ -1,7 +1,12 @@
 # STATE — Estado atual do projeto ai-cpu-os
 
 > **⚠️ Documento vivo. Atualize SEMPRE ao terminar uma tarefa (regra do AGENTS.md).**
-> **Última atualização:** 2026-10-20 (💬 **o chat da frota chegou à máquina** —
+> **Última atualização:** 2026-10-20 (🐛 **bug real na interface web** — a
+> página ficava **vazia** porque o `<script>` lia `OPTIONS` no topo, antes do
+> `fetch`: o `TypeError` abortava tudo. Corrigido e agora **executado** no CI
+> (`make ui-page-test`, 13 asserções). Também: **base instalada explícita**
+> (`--install-source`; a `ubuntu-server` traz `git`/`curl`/`gnupg`, a minimal
+> não). Antes: 💬 **o chat da frota chegou à máquina** —
 > ADR-003 F2 na sessão #44: `talk/install.sh` + unit systemd + `--chat-*` na ISO
 > + etapa 2.5 do `build.sh`, provado por `talk-install-test` (39) e
 > `iso-chat-test` (31). Antes: #43 identidade por papel (ADR-002), #42 caminho
@@ -92,6 +97,7 @@
 | `tests/test-role-identity.sh` (identidade por papel) | ✅ | ✅ shellcheck | ✅ **22 asserções** (`make identity-test`); ❌ nunca vista num sistema instalado |
 | `talk/install.sh` + `talk/ai-talk.service` (F2 do chat) | ✅ | ✅ shellcheck | ✅ **39 asserções** (`--root`, sem systemd); ❌ nunca rodou como serviço real |
 | `tests/test-iso-chat.sh` (chat na ISO) | ✅ | ✅ shellcheck | ✅ **31 asserções** (dry-run/check-templates) |
+| `tests/test-webui-page.sh` (JS da página) | ✅ | ✅ shellcheck | ✅ **13 asserções** num DOM falso; ⚠️ não é um navegador de verdade |
 | `docs/ISO.md`                         | ✅      | ⚠️ (revisão manual)| ❌                  |
 | `docs/JOURNAL.md` (continuidade)      | ✅      | ⚠️ (revisão manual)| ☐ **em uso contínuo** |
 
@@ -611,6 +617,63 @@ disso chegava a uma máquina instalada.
 
 ---
 
+### 3.12 🐛 A página da UI ficava vazia + a base instalada ficou explícita (2026-10-20, sessão #45)
+
+Dois achados do dono: *"bug no webui e se não me engano o git já vem no Ubuntu"*.
+
+**1) O bug da página (real, e o `ui-test` não pegava).** O `<script>` do
+`index.html` chamava `syncIdentityHint()` **no topo** — antes de
+`loadOptions()` preencher `OPTIONS`. Resultado: `TypeError: Cannot read
+properties of null (reading 'identity')` **no topo**, que **aborta o script
+inteiro**: sem papéis, sem famílias, sem status, sem lista de ISOs, e **sem
+mensagem de erro**. A página parecia "carregando para sempre". O `make ui-test`
+seguia verde porque exercita a **API** — que sempre esteve certa. Foi um bug
+introduzido na sessão #43 (ADR-002), por mim.
+
+| Antes | Depois |
+|---|---|
+| `syncIdentityHint()` no topo | nada no topo toca dados do `fetch` |
+| `OPTIONS.identity` sem guarda | `(OPTIONS && OPTIONS.identity) \|\| {}` |
+| handlers espalhados no topo | `wireForm()` (não depende de dados) |
+| erro mata a página calada | IIFE com `try/catch` → mensagem em `#alert` |
+
+Novo teste: `tests/test-webui-page.sh` (**13 asserções**) extrai o `<script>`,
+roda num **DOM falso** (Node do runner) e confere o que a página **fez**:
+nenhum throw, papéis preenchidos, disco vindo do servidor, dica de identidade
+reagindo à troca de papel, campos de IP só no `static` e mensagem visível com
+o servidor fora do ar. **Provado por violação plantada**: reintroduzir o bug
+faz **12 de 13** falharem (e `ci-guards` 110 → **116**).
+
+**2) O `git` (e o resto) já vem — e o projeto dependia de um default.**
+Verificado com fato, não de memória:
+
+- `/casper/install-sources.yaml` da ISO 24.04.5 oferece **duas** bases:
+  `ubuntu-server-minimal` (380 pacotes) e `ubuntu-server` (**default**, 707);
+- `git`, `curl` e `gnupg` **não** estão na minimal e **estão** na
+  `ubuntu-server` (`apt-cache depends ubuntu-server` → `Depende: git`);
+- o `autoinstall.yaml` **não** declarava `source:`, então a base era o
+  `default: true` da ISO — **escolha de terceiro**, que pode mudar entre
+  releases. Se mudasse, o alvo perderia `git` em silêncio e o caminho de build
+  que **clona** o llama.cpp falharia no 1º boot, longe de quem gerou a mídia.
+
+Entrou `--install-source` (padrão `ubuntu-server`) com `source: id:` no
+autoinstall, mais **duas travas**: o build **recusa** (rc 2) um id inexistente
+listando os disponíveis, e o `verify-iso.sh` repete a checagem na mídia. O
+`EXTRA_PACKAGES` **mantém** `git`/`curl`/`gnupg` de propósito — é a defesa de
+quem escolher a minimal.
+
+**Resultado:** `make validate` **verde** — `webui-page` **13** (novo),
+`ci-guards` **116**, `webui` 51, `iso-chat` 31, `ai-talk-install` 39,
+`role-identity` 22, `iso-lint` OK.
+
+**O que NÃO foi provado:** a página continua **sem nunca ter sido aberta num
+navegador de verdade** (o teste agora executa o JS, mas num DOM falso: layout,
+CSS e comportamento de `<dialog>`/foco não são cobertos). O `--install-source`
+foi validado por `--check-templates` e pelo verificador; **nenhuma ISO foi
+gerada nem instalada** para confirmar a base no alvo.
+
+---
+
 ## 4. Problemas conhecidos no momento
 
 1. **Risco em hardware físico não medido.** O caminho ISO foi provado em VM; o
@@ -719,20 +782,24 @@ da rede).
 
 > **👉 ESTA É A SEÇÃO REFERENCIADA PELO `AGENTS.md`.**
 
-**🧭 PRÓXIMA AÇÃO (sessão #44, 2026-10-20) — P5: gerar e bootar uma ISO, e
+**🧭 PRÓXIMA AÇÃO (sessão #45, 2026-10-20) — P5: gerar e bootar uma ISO, e
 depois o Bloco R (duas VMs).**
 
-Estado da fila: **P0 ✅** (§ 3.9), **P1 ✅** (§ 3.10), **P2/F1 ✅** (#41) e
-**P3/F2 ✅** (§ 3.11). O que resta, em ordem:
+Estado da fila: **P0 ✅** (§ 3.9), **P1 ✅** (§ 3.10), **P2/F1 ✅** (#41),
+**P3/F2 ✅** (§ 3.11) e os dois achados do dono ✅ (§ 3.12). O que resta:
 
 1. **P5 — gerar e bootar uma ISO Ubuntu** ← **é aqui que se começa**
-   - Três mudanças grandes desde o último boot (sessão #21): o caminho Debian
-     saiu (#42), a identidade passou a derivar do papel (#43) e o chat entrou
-     na ISO (#44). Nenhuma das três foi vista num sistema instalado.
+   - Quatro mudanças grandes desde o último boot (sessão #21): o caminho Debian
+     saiu (#42), a identidade passou a derivar do papel (#43), o chat entrou na
+     ISO (#44) e a **base instalada** passou a ser explícita (#45). Nenhuma
+     delas foi vista num sistema instalado.
    - `bash iso/build-iso.sh --role inference --disk auto --yes` e
      `bash iso/test-vm.sh --iso … --yes`; conferir no alvo
-     `getent passwd ai-inference`, o `.iso-config` e
-     `systemctl status ai-talk` (sem chave ele deve estar **disabled**).
+     `getent passwd ai-inference`, o `.iso-config`,
+     `systemctl status ai-talk` (sem chave ele deve estar **disabled**) e
+     `command -v git curl` (a base `ubuntu-server` os traz).
+   - E **abrir a UI num navegador de verdade** uma vez (o `ui-page-test` executa
+     o JS num DOM falso; layout/CSS não são cobertos).
    - **Aceite:** `test-vm.sh` exit 0 com o 1º boot aplicado e o usuário
      `ai-inference` existindo. Enquanto isso não acontecer, o que existe é
      verificação de **conteúdo** — não é boot (Regra 13).

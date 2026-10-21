@@ -497,7 +497,11 @@ function formValues() {
    Vários nós do mesmo papel: usuário igual, hostname numerado. */
 function syncIdentityHint() {
   const role = $("role").value;
-  const map = OPTIONS.identity || {};
+  // `OPTIONS` só existe DEPOIS de `loadOptions()`; antes disso a tabela é vazia
+  // e o texto cai no padrão. (Foi exatamente aqui que a página morreu uma vez:
+  // `OPTIONS.identity` com OPTIONS=null lança TypeError no topo do script e
+  // TODO o resto — inclusive o carregamento — deixa de rodar.)
+  const map = (OPTIONS && OPTIONS.identity) || {};
   const suggested = map[role] || map.auto || "ai-cpu-os";
   const usr = $("username"), hst = $("hostname");
   usr.placeholder = suggested;
@@ -513,16 +517,10 @@ function syncIdentityHint() {
       "ponha o hostname (ex.: " + suggested + "-2).";
   }
 }
-$("role").onchange = syncIdentityHint;
-$("username").oninput = () => { $("hostname").placeholder = $("username").value.trim() || ""; };
-syncIdentityHint();
-
 /* Os campos de IP fixo só aparecem (e só são exigidos) no modo static. */
 function syncNetworkFields() {
   $("net-static").style.display = $("network").value === "static" ? "" : "none";
 }
-$("network").onchange = syncNetworkFields;
-syncNetworkFields();
 
 /* Senha forte gerada NO NAVEGADOR (crypto.getRandomValues) — nada de CDN. */
 function randomPassword(n) {
@@ -531,16 +529,38 @@ function randomPassword(n) {
   crypto.getRandomValues(out);
   return Array.from(out, (v) => chars[v % chars.length]).join("");
 }
-["user", "root"].forEach((k) => {
-  const inp = $(k + "-password");
-  $("btn-gen-" + k).onclick = () => { inp.value = randomPassword(20); };
-  $("btn-see-" + k).onclick = () => { inp.type = inp.type === "password" ? "text" : "password"; };
-});
+
+/* ---------------- wiring (só toca no DOM; não depende de dados) ---------------- */
+function wireForm() {
+  $("role").onchange = syncIdentityHint;
+  $("username").oninput = () => {
+    $("hostname").placeholder = $("username").value.trim() || "";
+  };
+  $("network").onchange = syncNetworkFields;
+  syncNetworkFields();
+  ["user", "root"].forEach((k) => {
+    const inp = $(k + "-password");
+    $("btn-gen-" + k).onclick = () => { inp.value = randomPassword(20); };
+    $("btn-see-" + k).onclick = () => {
+      inp.type = inp.type === "password" ? "text" : "password";
+    };
+  });
+  // Antes das opções: usa o padrão. Depois do `loadOptions`, roda de novo com a
+  // tabela real do servidor (ADR-002).
+  syncIdentityHint();
+}
 
 /* ---------------- start ---------------- */
+// REGRA DA PÁGINA: **nada** aqui no topo pode tocar dados que só existem
+// depois de `loadOptions()`. Um erro no topo mata o script inteiro — e a
+// página fica "viva" (CSS) e inútil (nenhum campo, nenhuma lista), sem dizer
+// por quê. O `tests/test-webui-page.sh` executa este script num DOM falso
+// justamente para pegar isso.
 (async () => {
+  wireForm();            // handlers primeiro: funcionam mesmo se o servidor cair
   try {
     await loadOptions();
+    syncIdentityHint();  // agora com a tabela role → usuário do servidor
     await loadStatus();
   } catch (e) {
     alertBox("err", "Não consegui falar com o servidor: " + e.message);

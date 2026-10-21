@@ -902,6 +902,77 @@ systemctl status systemd-networkd cloud-init
 
 ---
 
+## Interface web (`make ui`)
+
+### A página abre, mas fica VAZIA: nenhum papel, nenhuma família, nenhuma ISO
+
+- **Sintoma:** `make ui` sobe, a página carrega (CSS e textos aparecem), mas os
+  `<select>` estão vazios, o status não aparece e a lista de ISOs está em
+  branco. **Nenhuma mensagem de erro na tela.** O `make ui-test` continua
+  **verde**, porque ele exercita a **API** — a API sempre esteve certa.
+- **Causa (bug real, sessão #43):** o `<script>` da página chamava
+  `syncIdentityHint()` **no topo**, antes de `loadOptions()` preencher
+  `OPTIONS`. A função lia `OPTIONS.identity` com `OPTIONS === null` →
+  `TypeError: Cannot read properties of null (reading 'identity')`. Um erro
+  **não capturado no topo** aborta o resto do script: o IIFE de `start` (que
+  carrega as opções e o status) nunca roda. A página fica "viva" (HTML/CSS) e
+  inútil (nenhum campo, nenhuma lista), **sem dizer por quê**.
+- **Regra que evita a classe inteira:** *nada no topo do `<script>` pode tocar
+  dados que só existem depois do `fetch`*. Handlers são ligados em
+  `wireForm()` (que não depende de dados) e a parte assíncrona roda dentro do
+  IIFE com `try/catch` — se o servidor cair, a página **mostra** o erro em
+  `#alert` em vez de morrer calada.
+- **Como detectar (sem navegador):** `make ui-page-test`. Ele extrai o
+  `<script>`, roda num DOM falso (Node) e confere o que a página **fez**:
+  nenhum throw, papéis preenchidos, disco vindo do servidor, dica de
+  identidade reagindo à troca de papel, campos de IP só no modo `static` e
+  mensagem de erro quando o servidor está fora do ar. Sem Node → `SKIP`.
+- **Lição:** teste de API não cobre JavaScript de página. Se a UI importa, o
+  JS dela tem de ser **executado** no CI — e o caso "servidor fora do ar"
+  precisa ser um cenário, não uma esperança.
+
+## Base instalada e pacotes
+
+### `git`, `curl` e `gnupg` já vêm no Ubuntu Server (por que pedimos mesmo assim)
+
+- **Fato verificado (2026-10-20):** a ISO oficial oferece **duas** bases no
+  `/casper/install-sources.yaml`, e a diferença não é cosmética:
+
+  | `id` | Pacotes | `git`/`curl`/`gnupg` | Observação |
+  |---|---|---|---|
+  | `ubuntu-server-minimal` | **380** | ❌ **não** | "small runtime footprint… humans are not expected to log in" |
+  | `ubuntu-server` (**default**) | **707** | ✅ sim | "curated set of packages" |
+
+  ```bash
+  # a prova, sem chutar:
+  xorriso -osirrox on -indev ubuntu-24.04.5-live-server-amd64.iso \
+      -extract /casper/ubuntu-server-minimal.manifest /tmp/min.manifest
+  grep -cE '^git[[:space:]]' /tmp/min.manifest    # -> 0 (não está na minimal)
+  apt-cache depends ubuntu-server | grep git      # -> "Depende: git"
+  ```
+- **O que o projeto faz:** fixa a base com **`source: id: ubuntu-server`** no
+  `autoinstall.yaml` (flag `--install-source`). Antes, o build dependia do
+  `default: true` da ISO — uma escolha de **terceiro**, que pode mudar entre
+  releases. Se um dia a default virar a minimal, o alvo perderia `git` **em
+  silêncio** e o build do llama.cpp (caminho sem `--source`) falharia no 1º
+  boot, longe de quem gerou a mídia.
+- **`EXTRA_PACKAGES` mantém `git`/`curl`/`gnupg`** de propósito: com a base
+  `ubuntu-server` eles são redundantes (custo: ~0 no alvo, alguns MB no
+  repositório air-gapped), mas a lista é a **defesa** para quem usar
+  `--install-source ubuntu-server-minimal` — sem eles, o 1º boot perde o
+  `git clone` do llama.cpp e o `curl` do build.
+  ```bash
+  # base minimal + os pacotes do projeto (o caminho consciente):
+  sudo bash iso/build-iso.sh --install-source ubuntu-server-minimal \
+       --extra-packages "sudo git curl ca-certificates build-essential pkg-config \
+   libopenblas-dev libgomp1 python3 python3-venv gnupg jq pciutils util-linux openssh-server"
+  ```
+- **Guarda:** o build confere se o id pedido **existe** no
+  `install-sources.yaml` da ISO (e lista os disponíveis se não existir) e o
+  `iso/verify-iso.sh` repete a checagem na ISO gerada. Um `--install-source`
+  digitado errado falha **antes** de gerar a mídia, em vez de travar a
+  instalação no meio.
+
 ## Baixar a ISO do CI
 
 ### Baixei a ISO e o `check-iso` diz que não é ISO 9660

@@ -244,6 +244,7 @@ Estes são os pontos que, se violados, quebram de forma silenciosa e cara.
 | **Base única: Ubuntu Server** (ADR-001, executado na sessão #42) | Um caminho de boot/instalador/templates. O Debian/preseed foi **removido**: `--distro debian` aborta e o CI reprova se `preseed/` voltar. O runtime Debian (`build.sh`/`mods/`) continua suportado. |
 | **Identidade = papel** (ADR-002, implementado na #43) | `inference`→`ai-inference`, `builder`→`ai-builder`; `--username`/`--hostname` explícitos vencem; `auto` mantém `ai-cpu-os` + aviso (o papel só é conhecido no 1º boot). A origem fica em `.iso-config` (`IDENTITY_SOURCE`) e o `verify-iso.sh` confere a **derivação**, não só a presença do campo. `make identity-test` (22 asserções). |
 | **`ai-talk` vai na ISO; `webui/` não** (ADR-003, F2 na #44) | O chat é runtime da frota; a UI é ferramenta da máquina que gera a mídia. Flags `--chat-*`, payload em `/ai-cpu-os-boot/chat/` (chaves 0640), `late-command` § 2-f e etapa **2/5** do `build.sh` (chat **antes** do papel; falha é aviso). **Sem chave o serviço nasce desabilitado** — não existe chave default. stdlib, air-gapped, mensagem nunca vira comando. |
+| A **base instalada** é explícita (`source: id:`) | A ISO oficial oferece `ubuntu-server` (default, com `git`/`curl`/`gnupg`) e `ubuntu-server-minimal` (sem eles). Depender do `default` é depender de escolha de terceiro. O build **recusa** um id inexistente (listando os disponíveis) e o verificador repete na mídia. |
 | A config de instalação **tem** de chegar na ISO | Sem `/autoinstall.yaml` na raiz (ao lado de `casper/`), a instalação deixa de ser automática — e o usuário descobre só no meio do processo. |
 | Nenhum `@@TOKEN@@` pode sobrar | Um token não substituído gera comportamento indefinido no instalador. |
 | Senha **só** como hash crypt | Nunca texto puro numa mídia. |
@@ -439,6 +440,7 @@ bash tests/test-iso-chat.sh         # chat dentro da ISO (--chat-*, 3 elos)
 bash tests/test-ci-guards.sh         # os guardas do CI reprovam? (cópia temporária)
 bash tests/test-check-iso.sh         # conferência de ISO baixada (sem xorriso)
 bash tests/test-webui.sh             # interface web: API + salvaguardas
+bash tests/test-webui-page.sh        # JS da página num DOM falso (precisa de node)
 ```
 
 > **Sem `gh`/token, a API do GitHub é limitada a 60 req/h.** Não faça polling

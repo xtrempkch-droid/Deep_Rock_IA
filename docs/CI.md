@@ -133,19 +133,26 @@ Dispara em **todo push para `main` e em todo Pull Request**.
     `RM=1` e passaria), exige a assinatura `CD001`, confere se **cabe** e **lê de
     volta** comparando byte a byte. Grava num **ARQUIVO** com o `lsblk`
     simulado: nenhum dispositivo real é tocado.
-17. `make ui-test` — sobe o servidor da Interface Web numa porta livre e
+17. `make ui-page-test` — **executa o JavaScript** do `index.html` num **DOM
+    falso** (Node) e confere o que a página fez: nenhum throw no topo, papéis
+    preenchidos, disco vindo do servidor, dica de identidade reagindo à troca
+    de papel, campos de IP só no `static` e mensagem visível com o servidor
+    fora do ar. Existe porque o `ui-test` exercita a **API**: um erro no topo
+    do `<script>` mata a página inteira e o teste de API continua verde (bug
+    real da sessão #45). Sem `node` → `SKIP`.
+18. `make ui-test` — sobe o servidor da Interface Web numa porta livre e
     exercita a **API** (sem navegador e sem rede): a página é servida e **não
     carrega nada de CDN**, a lista branca recusa valores maliciosos, o SSE
     entrega o log e o `done`, e — o ponto central — **sem `xorriso` a geração é
     RECUSADA com o motivo explícito** em vez de falhar em silêncio (Regra 13-a).
     Também prova que **não existe rota de escrita** e que o bind é `127.0.0.1`.
-18. `make talk-test` — prova o contrato do **chat da frota** (`talk/ai_talk.py`)
+19. `make talk-test` — prova o contrato do **chat da frota** (`talk/ai_talk.py`)
     em **loopback**, sem root e sem rede externa: entrega + `ack` + `fsync`,
     **espaçamento de 50 ms por par**, `hello` isento e `ping` throttled, fila
     com **exit 5** no overflow, dedupe de `id`, assinatura **por nó**,
     `ECONNREFUSED` em *fail fast*, chave frouxa recusada, **teto de 15 peers**
     e a checagem de que o código usa **só a stdlib**.
-19. `make iso-dry-run` — dry-run do caminho Ubuntu **sem flags extras**,
+20. `make iso-dry-run` — dry-run do caminho Ubuntu **sem flags extras**,
    exatamente como o `make validate` local (ADR-001: base única).
 
 ### Job `dry-run` (matriz: `xeon` e `ryzen`)
@@ -185,7 +192,7 @@ reais:
 Este é o job que protege as regras do `AGENTS.md` de erosão:
 
 - Verifica que todos os **arquivos obrigatórios** existem (a lista `required`
-  do workflow; hoje são 93 — inclui os documentos de decisão `docs/DECISIONS.md`
+  do workflow; hoje são 99 — inclui os documentos de decisão `docs/DECISIONS.md`
   e `docs/CHAT.md`).
 - Verifica que `AGENTS.md` continua referenciando `docs/TUTORIAL.md` e a
   diretriz por **marco** (Regra 9) e que o `README.md` linka o tutorial.

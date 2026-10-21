@@ -45,7 +45,7 @@ SCRIPTS := $(shell find . -name '*.sh' -not -path './.git/*' | sort)
         iso-space-test identity-test iso-chat-test talk-install-test ci-guards-test \
         iso-lock-test \
         pendrives pendrive pendrive-test iso-check iso-check-test \
-        ui ui-test network-fix network-test apt-fix apt-test \
+        ui ui-test ui-page-test network-fix network-test apt-fix apt-test \
         talk-test talk-install-test iso-chat-test \
         docker docker-check ci clean
 
@@ -88,7 +88,7 @@ docs: ## Verifica se os documentos obrigatórios existem
 	done; \
 	echo "docs: OK"
 
-validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test identity-test iso-chat-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test talk-test talk-install-test iso-dry-run ## Lint + docs + famílias + AVX-512 + identidade + testes de ISO + rede + UI + chat + guardas + dry-run
+validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test identity-test iso-chat-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test ui-page-test talk-test talk-install-test iso-dry-run ## Lint + docs + famílias + AVX-512 + identidade + testes de ISO + rede + UI + chat + guardas + dry-run
 
 dry-run: ## Simula a aplicação completa (nada é alterado)
 	@sudo ./build.sh --role $(ROLE) --family $(FAMILY) --dry-run --yes --skip-tests
@@ -211,6 +211,9 @@ network-fix: ## Conserta a rede DESTA máquina (DHCP); use NET_MODE/NET_IP/NET_G
 
 ui-test: ## Prova a interface web (API + salvaguardas; sem navegador, sem rede)
 	@bash tests/test-webui.sh
+
+ui-page-test: ## Executa o JS da página num DOM falso (pega erro no topo do script)
+	@bash tests/test-webui-page.sh
 
 talk-test: ## Prova o contrato do ai-talk (loopback, sem rede externa, sem root)
 	@bash tests/test-ai-talk.sh

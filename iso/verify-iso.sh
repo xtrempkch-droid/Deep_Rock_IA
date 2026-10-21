@@ -870,6 +870,43 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 5-b2. Base instalada (source do Subiquity) × o que a ISO oferece
+# ---------------------------------------------------------------------------
+# O autoinstall pede uma base pelo `id:` (source: id: …). Se esse id não existir
+# no /casper/install-sources.yaml da própria ISO, o Subiquity falha NO MEIO da
+# instalação — e o motivo não aparece no console serial. Custa 2 KB conferir.
+#
+# Isto também documenta o fato que motivou a escolha: a default histórica
+# (`ubuntu-server`) traz git/curl/gnupg; a `ubuntu-server-minimal` NÃO traz
+# (verificado nos manifests da 24.04.5: 707 × 380 pacotes).
+section "Base instalada (source)"
+if [[ -n "$AI_LOCAL" ]]; then
+  want_source="$(sed -nE 's/^[[:space:]]*id:[[:space:]]*"?([a-z0-9-]+)"?[[:space:]]*$/\1/p' "$AI_LOCAL" | head -1)"
+  if [[ -z "$want_source" ]]; then
+    fail "autoinstall.yaml sem 'source: id:' (a base passa a depender do default da ISO)"
+  else
+    sources_local="$(fetch "/casper/install-sources.yaml" 2>/dev/null || true)"
+    if [[ -n "$sources_local" && -s "$sources_local" ]]; then
+      if grep -qE "^[[:space:]]*id:[[:space:]]*${want_source}[[:space:]]*$" "$sources_local"; then
+        pass "source '${want_source}' existe no install-sources.yaml da ISO"
+      else
+        fail "source '${want_source}' NÃO existe nesta ISO (a instalação falharia no meio)"
+      fi
+      # A base declarada tem de ter os pacotes que o projeto usa. Quando a
+      # escolha é a minimal, avisar — não reprovar: pode ser intencional com
+      # --extra-packages.
+      if [[ "$want_source" == "ubuntu-server-minimal" ]]; then
+        skip "source minimal: git/curl/gnupg NÃO vêm de fábrica — confie no --extra-packages"
+      fi
+    else
+      skip "sem /casper/install-sources.yaml para conferir a base"
+    fi
+  fi
+else
+  skip "sem autoinstall.yaml para conferir a base instalada"
+fi
+
+# ---------------------------------------------------------------------------
 # 5-c. Chat da frota (ADR-003, docs/CHAT.md §13.2)
 # ---------------------------------------------------------------------------
 # O que se pode provar AQUI (conteúdo, sem bootar):

@@ -369,6 +369,26 @@ planta "a unit do chat perder o endurecimento (NoNewPrivileges)" talk/ai-talk.se
   sed_ 's|^NoNewPrivileges=yes|NoNewPrivileges=no|' talk/ai-talk.service
 planta "tirar talk-install-test do validate" Makefile \
   sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test identity-test iso-chat-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test talk-test iso-dry-run|' Makefile
+# --- A página web é JavaScript: tem de ser EXECUTADA, não só lida --------
+# O bug real da sessão #43: `syncIdentityHint()` no topo do <script>, antes de
+# `loadOptions()` preencher OPTIONS → TypeError que mata a página inteira. O
+# `ui-test` (API) continuou verde. Aqui plantamos o bug de volta.
+# O `sed_` precisa do ALVO no fim (é `sed_ <expr> <arquivo>`); esquecer o
+# arquivo dá "variável não associada" sob `set -u` — foi assim que descobri.
+planta "a página voltar a ler OPTIONS no topo do script (mata a página)" webui/index.html \
+  app 'syncIdentityHint();' webui/index.html
+planta "a página perder a guarda de OPTIONS nulo na dica de identidade" webui/index.html \
+  sed_ 's|const map = (OPTIONS \&\& OPTIONS.identity) \|\| {};|const map = OPTIONS.identity \|\| {};|' webui/index.html
+planta "tirar ui-page-test do validate" Makefile \
+  sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test identity-test iso-chat-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test talk-test talk-install-test iso-dry-run|' Makefile
+
+# --- Base instalada explícita (a default da ISO pode mudar) ---------------
+planta "o autoinstall voltar a depender do default da ISO (sem source:)" iso/autoinstall/autoinstall.yaml \
+  sed_ 's|^source:$|# sem source|' iso/autoinstall/autoinstall.yaml
+planta "o build deixar de conferir o id da base na ISO" iso/build-iso.sh \
+  sed_ 's|Bases disponíveis|Bases|' iso/build-iso.sh
+planta "o verificador deixar de conferir a base instalada" iso/verify-iso.sh \
+  sed_ 's|install-sources.yaml|sources.yaml|g' iso/verify-iso.sh
 planta "tirar iso-chat-test do validate" Makefile \
   sed_ 's|^validate: .*$|validate: lint docs families-test avx512-test iso-select-test iso-repo-test iso-verify-test identity-test ci-guards-test iso-lock-test iso-disk-test iso-release-test iso-space-test network-test apt-test pendrive-test iso-check-test ui-test talk-test talk-install-test iso-dry-run|' Makefile
 

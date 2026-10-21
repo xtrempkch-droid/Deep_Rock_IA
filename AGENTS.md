@@ -465,6 +465,13 @@ Estas regras são **obrigatórias**:
     - A UI **não implementa nada**: quando falta `xorriso`, ela diz *por que* não
       dá para gerar ali e aponta o caminho do GitHub Actions — degradar com
       aviso explícito (Regra 13-a), nunca falhar em silêncio.
+    - **Nada no topo do `<script>` pode tocar dados que só existem depois do
+      `fetch`.** Um erro no topo aborta o script inteiro: a página fica viva
+      (CSS) e inútil (nenhum campo, nenhuma lista) **sem dizer por quê** — foi
+      o bug da sessão #45 (`OPTIONS` nulo na dica de identidade). Handlers vão
+      em `wireForm()`; a parte assíncrona roda num IIFE com `try/catch` e
+      mostra o erro em `#alert`. Provado por `make ui-page-test`, que **executa**
+      o JS num DOM falso — teste de API **não** cobre JavaScript de página.
 
 17. **Identidade do sistema = papel (ADR-002 em `docs/DECISIONS.md`).**
     O usuário/hostname padrão de uma ISO com papel concreto é
@@ -518,7 +525,22 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-20 (sessão #44)
+- **Data:** 2026-10-20 (sessão #45)
+- **O que mudou:** 🐛 **A página da interface web ficava VAZIA — e o teste não
+  pegava.** O `<script>` chamava `syncIdentityHint()` **no topo**, antes de
+  `loadOptions()` preencher `OPTIONS`; o `TypeError` resultante **abortava o
+  script inteiro** (sem papéis, sem status, sem lista de ISOs e sem mensagem).
+  O `ui-test` exercita a **API** e seguia verde. Correção: nada no topo toca
+  dados do `fetch`; handlers em `wireForm()` e a parte assíncrona num IIFE com
+  `try/catch`. **Teste novo:** `make ui-page-test` (**13 asserções**) **executa**
+  o JS num DOM falso (Node) — provado por violação plantada (12 de 13 falham
+  com o bug de volta). Também: **base instalada explícita** (`--install-source`,
+  padrão `ubuntu-server`). Fato verificado nos manifests da ISO 24.04.5:
+  `git`/`curl`/`gnupg` **estão** na `ubuntu-server` (707 pacotes) e **não** na
+  `ubuntu-server-minimal` (380) — e o projeto dependia do `default: true` da
+  ISO. O build agora **recusa** (rc 2) um id inexistente e o verificador repete
+  a checagem. `ci-guards` 110 → **116**.
+- **Data anterior:** 2026-10-20 (sessão #44)
 - **O que mudou:** 💬 **ADR-003 F2: o chat da frota chega à máquina.** O
   transporte existia (#41); faltava tudo o que faz dele um serviço.
   Entraram `talk/install.sh` (idempotente, `--dry-run`, `--root`, `--status`;
