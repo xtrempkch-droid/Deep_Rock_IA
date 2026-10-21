@@ -553,67 +553,6 @@ Como funciona, em três linhas:
 > E, desde a remoção do caminho Debian (sessão #42), **nenhuma ISO foi gerada
 > nem bootada de novo**. Detalhes em [`docs/ISO.md`](docs/ISO.md) § 6.
 
-### 10.1 O chat da frota (`ai-talk`) — as máquinas conversando entre si
-
-Se você tem mais de uma máquina do projeto (o servidor de IA e a máquina de
-build, por exemplo), elas podem **trocar mensagens curtas** por um canal
-próprio, sem SSH aberto na sessão e sem servidor central:
-
-```text
- ai-inference  ── TCP 7331 (JSON por linha, assinado) ──▶  ai-builder
-               ◀──────────────── ack ────────────────────
-```
-
-Para que serve, na prática: *"build #42 terminou"*, *"vou reiniciar em 60 s"*,
-*"o benchmark deu 10,4 t/s"*. É um canal de **recados entre máquinas** — não
-substitui SSH nem o serviço de inferência.
-
-**Como ligar:** as chaves e a lista de máquinas são decididas **na geração da
-ISO** (é o mesmo padrão do modelo e dos pacotes: a mídia leva tudo):
-
-```bash
-# 1) uma chave por máquina (32 bytes em hex, modo 640) — é o recomendado
-head -c32 /dev/urandom | xxd -p -c64 > keys/ai-inference.key
-head -c32 /dev/urandom | xxd -p -c64 > keys/ai-builder.key
-chmod 640 keys/*.key
-
-# 2) a lista da frota: uma linha "nome=ip" por máquina
-cat > frota.txt <<'EOF'
-ai-builder=192.168.0.20
-EOF
-
-# 3) gerar a ISO do servidor de IA já com o chat configurado
-sudo bash iso/build-iso.sh --role inference --disk /dev/vda \
-  --chat-keydir keys/ --chat-peers-file frota.txt
-```
-
-Na máquina instalada, o serviço sobe no **primeiro boot** (antes do serviço de
-inferência, para poder avisar se ele falhar). Para usar:
-
-```bash
-ai-talk status                          # quem eu sou, quem eu vejo
-ai-talk send ai-builder "build #42 ok"  # recado para uma máquina
-ai-talk send '*' "vou reiniciar"        # para todas
-ai-talk listen                          # ver o que chega, ao vivo
-```
-
-| Regra | Valor |
-|---|---|
-| Teto de máquinas | **15** em malha completa (acima disso seria preciso um relay — não é o caso de uma casa/escritório) |
-| Intervalo mínimo entre mensagens para o mesmo destino | **50 ms** (evita enxurrada) |
-| Fila por destino | 256 — se encher, o comando diz que falhou (exit 5) em vez de descartar calado |
-| Autenticação | assinatura HMAC-SHA256 com a chave **daquela** máquina |
-| **Sem chave** | o serviço é instalado **desligado** e o instalador avisa: um canal sem assinatura não autentica ninguém, e não existe chave "de fábrica" |
-
-> 🔒 **O que ele não faz:** não executa comando recebido (mensagem é **dado**,
-> nunca comando), não abre porta na internet e não substitui SSH. O modelo de
-> confiança é **rede local**. Detalhes: [`docs/CHAT.md`](docs/CHAT.md).
->
-> ⚠️ **Honestidade:** o transporte, o instalador e a presença na ISO são
-> testados (`make talk-test` 30, `make talk-install-test` 47,
-> `make iso-chat-test` 31) — mas **duas máquinas de verdade conversando ainda
-> não foram testadas**, e portanto a latência real é **cálculo**, não medição.
-
 ### Passo final: gravar num pendrive (bootável)
 
 > 🎯 **É para isto que a ISO existe.** E é o passo mais **perigoso** de todos:
@@ -677,6 +616,73 @@ O `make iso-check` é a checagem que faz sentido numa máquina sem `xorriso`:
 > ✅ Ele **não substitui** o `verify-iso.sh` (que abre a ISO e confere o
 > conteúdo — precisa de `xorriso`). São complementares: um prova que **o
 > arquivo chegou inteiro**; o outro, que **o conteúdo está certo**.
+
+### 10.1 O chat da frota (`ai-talk`) — as máquinas conversando entre si
+
+Se você tem mais de uma máquina do projeto (o servidor de IA e a máquina de
+build, por exemplo), elas podem **trocar mensagens curtas** por um canal
+próprio, sem SSH aberto na sessão e sem servidor central:
+
+```text
+ ai-inference  ── TCP 7331 (JSON por linha, assinado) ──▶  ai-builder
+               ◀──────────────── ack ────────────────────
+```
+
+Para que serve, na prática: *"build #42 terminou"*, *"vou reiniciar em 60 s"*,
+*"o benchmark deu 10,4 t/s"*. É um canal de **recados entre máquinas** — não
+substitui SSH nem o serviço de inferência.
+
+**Como ligar:** as chaves e a lista de máquinas são decididas **na geração da
+ISO** (é o mesmo padrão do modelo e dos pacotes: a mídia leva tudo):
+
+```bash
+# 1) uma chave por máquina (32 bytes em hex, modo 640) — é o recomendado
+head -c32 /dev/urandom | xxd -p -c64 > keys/ai-inference.key
+head -c32 /dev/urandom | xxd -p -c64 > keys/ai-builder.key
+chmod 640 keys/*.key
+
+# 2) a lista da frota: uma linha "nome=ip" por máquina
+cat > frota.txt <<'EOF'
+ai-builder=192.168.0.20
+EOF
+
+# 3) gerar a ISO do servidor de IA já com o chat configurado
+sudo bash iso/build-iso.sh --role inference --disk /dev/vda \
+  --chat-keydir keys/ --chat-peers-file frota.txt
+```
+
+> ⚠️ **O `ai-inference.key` não é enfeite.** Cada máquina precisa da **sua**
+> chave em `keys/` (`keys/<nome>.key`): a do outro serve para **conferir** quem
+> chega; a **sua** é a que **assina** o que sai. Sem ela o serviço é instalado
+> **desligado** e o instalador avisa — porque um serviço habilitado sem chave
+> morre no start, e o sintoma aparece só no `journalctl` do alvo.
+
+Na máquina instalada, o serviço sobe no **primeiro boot** (antes do serviço de
+inferência, para poder avisar se ele falhar). Para usar:
+
+```bash
+ai-talk status                          # quem eu sou, quem eu vejo
+ai-talk send ai-builder "build #42 ok"  # recado para uma máquina
+ai-talk send '*' "vou reiniciar"        # para todas
+ai-talk listen                          # ver o que chega, ao vivo
+```
+
+| Regra | Valor |
+|---|---|
+| Teto de máquinas | **15** em malha completa (acima disso seria preciso um relay — não é o caso de uma casa/escritório) |
+| Intervalo mínimo entre mensagens para o mesmo destino | **50 ms** (evita enxurrada) |
+| Fila por destino | 256 — se encher, o comando diz que falhou (exit 5) em vez de descartar calado |
+| Autenticação | assinatura HMAC-SHA256 com a chave **daquela** máquina |
+| **Sem chave** | o serviço é instalado **desligado** e o instalador avisa: um canal sem assinatura não autentica ninguém, e não existe chave "de fábrica" |
+
+> 🔒 **O que ele não faz:** não executa comando recebido (mensagem é **dado**,
+> nunca comando), não abre porta na internet e não substitui SSH. O modelo de
+> confiança é **rede local**. Detalhes: [`docs/CHAT.md`](docs/CHAT.md).
+>
+> ⚠️ **Honestidade:** o transporte, o instalador e a presença na ISO são
+> testados (`make talk-test` 30, `make talk-install-test` 47,
+> `make iso-chat-test` 31) — mas **duas máquinas de verdade conversando ainda
+> não foram testadas**, e portanto a latência real é **cálculo**, não medição.
 
 ### 10.2 A interface web — o jeito sem decorar flag nenhuma
 

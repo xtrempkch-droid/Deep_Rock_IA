@@ -244,6 +244,7 @@ Estes são os pontos que, se violados, quebram de forma silenciosa e cara.
 | **Base única: Ubuntu Server** (ADR-001, executado na sessão #42) | Um caminho de boot/instalador/templates. O Debian/preseed foi **removido**: `--distro debian` aborta e o CI reprova se `preseed/` voltar. O runtime Debian (`build.sh`/`mods/`) continua suportado. |
 | **Identidade = papel** (ADR-002, implementado na #43) | `inference`→`ai-inference`, `builder`→`ai-builder`; `--username`/`--hostname` explícitos vencem; `auto` mantém `ai-cpu-os` + aviso (o papel só é conhecido no 1º boot). A origem fica em `.iso-config` (`IDENTITY_SOURCE`) e o `verify-iso.sh` confere a **derivação**, não só a presença do campo. `make identity-test` (22 asserções). |
 | **`ai-talk` vai na ISO; `webui/` não** (ADR-003, F2 na #44) | O chat é runtime da frota; a UI é ferramenta da máquina que gera a mídia. Flags `--chat-*`, payload em `/ai-cpu-os-boot/chat/` (chaves 0640), `late-command` § 2-f e etapa **2/5** do `build.sh` (chat **antes** do papel; falha é aviso). **Sem chave o serviço nasce desabilitado** — não existe chave default. stdlib, air-gapped, mensagem nunca vira comando. |
+| **Uma chave tem dois papéis** (#46) | A chave do **peer** verifica (`peers[nome].key_file`); a **do próprio nó assina** (`key_file`). `--keydir` com `keys/<nó>.key` faz a segunda ser derivada (`OWN_KEY_FROM_KEYDIR=1`); `--key-file` vence; sem a chave própria o serviço fica **desabilitado** (habilitar um daemon que morre no start é pior que não subir). A checagem de chave órfã roda **depois** da montagem da frota. |
 | A **base instalada** é explícita (`source: id:`) | A ISO oficial oferece `ubuntu-server` (default, com `git`/`curl`/`gnupg`) e `ubuntu-server-minimal` (sem eles). Depender do `default` é depender de escolha de terceiro. O build **recusa** um id inexistente (listando os disponíveis) e o verificador repete na mídia. |
 | A config de instalação **tem** de chegar na ISO | Sem `/autoinstall.yaml` na raiz (ao lado de `casper/`), a instalação deixa de ser automática — e o usuário descobre só no meio do processo. |
 | Nenhum `@@TOKEN@@` pode sobrar | Um token não substituído gera comportamento indefinido no instalador. |
@@ -654,7 +655,7 @@ Leia isto **antes** de afirmar que algo funciona.
 | ISO (boot/instalação, **Ubuntu**) | ✅ | ✅ **executado (sessão #21)**: `test-vm.sh` exit 0 — instalou sozinha e o 1º boot aplicou (`status=ok`, família `intel-haswell`) | ❌ (só na VM) |
 | ~~ISO (boot/instalação, **Debian**)~~ | 🗑️ removido | ✅ executado em VM (#35) e em metal (#37) **antes** da remoção (ADR-001, sessão #42) | — |
 | Identidade por papel (ADR-002) | ✅ | ✅ **22 asserções** (`make identity-test`): derivação, aviso do `auto`, precedência do `--username`, YAML e `.iso-config` coerentes | ❌ (nenhuma ISO gerada) |
-| Chat da frota `ai-talk` (ADR-003) | ✅ | ✅ **F1+F2**: `ai-talk` 30, `ai-talk-install` **39**, `iso-chat` **31** | ⚠️ só loopback e `--root`; ❌ duas VMs e systemd real |
+| Chat da frota `ai-talk` (ADR-003) | ✅ | ✅ **F1+F2**: `ai-talk` 30, `ai-talk-install` **47**, `iso-chat` **31** | ⚠️ só loopback e `--root`; ❌ duas VMs e systemd real |
 | Boot **UEFI** da ISO | ✅ | ❌ nunca testado | ❌ |
 | GPU (qualquer backend) | ✅ | ❌ | ❌ |
 
