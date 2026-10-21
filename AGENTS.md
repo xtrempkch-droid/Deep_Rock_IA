@@ -21,6 +21,9 @@ make ci            # lint + docs + dry-run (igual ao job 'validate')
 
 # 3. Saber o que já foi PROVADO e o que NÃO foi:
 #    validate ✅ · build-llama ✅ · container ✅ · /iso ✅ GERADA E BOOTADA (VM, #21)
+#    ⚠️ mas as mudanças de #42–#46 (Debian fora, identidade por papel, chat na
+#    ISO, base explícita, chaves do chat) AINDA NÃO VIRARAM MÍDIA — P5. Falta
+#    também: duas VMs conversando (Bloco R) e um navegador de verdade na UI.
 ```
 
 > **Regra de ouro:** não confie na memória — confie no **`docs/STATE.md` § 6
@@ -525,7 +528,23 @@ Estas regras são **obrigatórias**:
 
 ## 8. Última atualização
 
-- **Data:** 2026-10-20 (sessão #45)
+- **Data:** 2026-10-20 (sessão #46)
+- **O que mudou:** 📖 **`README.md` reescrito** (bloco "O que mudou nesta
+  rodada", tabela de CPUs corrigida para **14** famílias, `--install-source`,
+  identidade por papel, **§ 10.1 chat da frota** e **§ 10.2 interface web**,
+  FAQ +3, status `0.3.0-dev`). E, ao documentar o modo **recomendado** do chat
+  (`--chat-keydir` + `--chat-peers-file`), o **6º bug real** do `ai-talk`:
+  uma chave tem **dois papéis** — a do peer **verifica**, a do próprio nó
+  **assina** (`keys/<nó>.key`). Sem ela, o `key_file` ia para um `fleet.key`
+  que **só existe no modo `--key-file`**: config válido, unit escrita, serviço
+  **habilitado** e daemon **morto no start**. Agora a chave própria é derivada
+  do `--keydir` (`--key-file` ainda vence) e, sem ela, o serviço nasce
+  **desabilitado** com aviso. Segundo erro da mesma família: a checagem de
+  **chave órfã** rodava **antes** de ler `--peers-file` — corrigida. Provas:
+  `talk-install-test` **39 → 47** (uma asserção carrega as chaves pelo próprio
+  `ai_talk.py`) e `ci-guards` **116 → 118** (dois guardas novos com violação
+  plantada). `make validate` verde.
+- **Data anterior:** 2026-10-20 (sessão #45)
 - **O que mudou:** 🐛 **A página da interface web ficava VAZIA — e o teste não
   pegava.** O `<script>` chamava `syncIdentityHint()` **no topo**, antes de
   `loadOptions()` preencher `OPTIONS`; o `TypeError` resultante **abortava o

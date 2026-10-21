@@ -160,8 +160,11 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
       unit endurecida, etapa **2/5** do `build.sh` (chat antes do papel),
       flags `--chat-*` na ISO, payload em `/ai-cpu-os-boot/chat/`,
       `late-command` copiando para `/etc/ai-talk`, seção do `verify-iso.sh`.
-      Provas: `talk-install-test` (**39**) e `iso-chat-test` (**31**);
-      `ci-guards` 100 → **110**. Ver `STATE.md` § 3.11.
+      Provas: `talk-install-test` (**47**) e `iso-chat-test` (**31**);
+      `ci-guards` 100 → **110** (→ **118** na #46). Ver `STATE.md` § 3.11.
+      🔧 **#46 corrigiu o modelo de chaves:** a chave do **próprio nó**
+      (`keys/<nó>.key`) é a que **assina** — sem ela o serviço era habilitado
+      e morria no start. Ver `STATE.md` § 3.13.
 - [ ] **P3-b — Bloco R: duas VMs e a F3** — duas VMs trocando mensagens de
       verdade (é o **único** teste que mede latência real; o loopback é mais
       rápido que qualquer LAN) e a ponte opcional com o `llama-server`, que
@@ -244,6 +247,7 @@ Formato dos itens: `[status] Descrição — início: AAAA-MM-DD · responsável
 |------------|----------------------------------------------------------------|
 | 2026-10-20 | 🧭 **Fase de simplificação aberta (sessão #39):** uma ISO **Ubuntu** (ADR-001), identidade por papel (ADR-002) e chat de frota **`ai-talk`** (ADR-003). Só decisões/desenho; implementação P0–P3 pendente. |
 | 2026-10-20 | 💬 **Contrato do `ai-talk` fechado (sessão #40):** **ADR-004** (50 ms entre `msg` do mesmo par, fila 256 com exit 5, p99 ≤ 10 ms, `fsync` por mensagem) e **ADR-005** (**teto de 15 nós** em malha completa, chave por nó). Corrigido o pior caso de ack (9 s) e adicionado `connect_timeout`. |
+| 2026-10-20 | 📖 **`README.md` reescrito + correção do modelo de chaves do chat (sessão #46):** ao documentar o modo recomendado (`--chat-keydir` + `--peers-file`), descobri que a chave do **próprio nó** faltava — o `key_file` caía em `fleet.key` (inexistente nesse modo) e o serviço era habilitado **morto no start**. Agora ela é derivada de `keys/<nó>.key` e, sem ela, o serviço nasce desabilitado. `talk-install-test` 39 → **47**, `ci-guards` 116 → **118**. README: 14 famílias, identidade por papel, `--install-source`, **§ 10.1 chat** e **§ 10.2 UI**. |
 | 2026-10-20 | 💬 **`ai-talk` F1 implementado (sessão #41):** `talk/ai_talk.py` + `tests/test-ai-talk.sh` (**30 asserções**, sem root e sem rede externa), `make talk-test` no `validate` e no CI; `ci-guards` 89 → 98. Faltam F2 (ISO/duas VMs), F3 (ponte) e P4 (bancada de 15 nós). |
 | 2026-10-16 | 🧬 **14 famílias** (Xeon Scalable v5–v9/Xeon 6 P + `amd-zen5`) e **AVX-512 como padrão** nas famílias que o têm (política `auto`, decisão do dono; `--no-avx512` para comparar com AVX2). |
 | 2026-10-18 | ⚡ **A ISO passou a instalar sem internet** (sessão #38): as 3 telas do d-i que paravam a instalação foram eliminadas e o `Release` do repositório local ganhou o codename real (com `./` o repo da mídia era descartado). Provado em VM isolada. |

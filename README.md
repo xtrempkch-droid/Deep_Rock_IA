@@ -27,7 +27,7 @@ possível — usando só o processador, sem placa de vídeo.**
 7. [Medindo o resultado (e entendendo o número)](#7-medindo-o-resultado-e-entendendo-o-número)
 8. [Só quero uma melhoria, não o sistema todo](#8-só-quero-uma-melhoria-não-o-sistema-todo)
 9. [Como desfazer](#9-como-desfazer)
-10. [A ISO: instalar já pronto](#10-a-iso-instalar-já-pronto) — inclui [a interface web](#a-interface-web--o-jeito-sem-decorar-flag-nenhuma)
+10. [A ISO: instalar já pronto](#10-a-iso-instalar-já-pronto) — inclui o [chat da frota](#101-o-chat-da-frota-ai-talk--as-máquinas-conversando-entre-si) e a [interface web](#102-a-interface-web--o-jeito-sem-decorar-flag-nenhuma)
 11. [Usar uma GPU (opcional)](#11-usar-uma-gpu-opcional)
 12. [Problemas comuns](#12-problemas-comuns)
 13. [Perguntas frequentes](#13-perguntas-frequentes)
@@ -36,11 +36,27 @@ possível — usando só o processador, sem placa de vídeo.**
 
 ---
 
+## 🆕 O que mudou nesta rodada (2026-10-20)
+
+Se você já conhecia o projeto, estas são as mudanças que afetam **você**:
+
+| Mudança | Em uma frase | Onde |
+|---|---|---|
+| **Uma ISO só (Ubuntu)** | O caminho Debian da ISO foi **removido**. `--distro debian` **aborta** com uma mensagem clara. O Debian continua valendo como **sistema hospedeiro** do `build.sh`/mods | § 10 |
+| **O usuário nasce com o nome da função** | `--role inference` → usuário `ai-inference`; `--role builder` → `ai-builder`. Sem papel concreto fica `ai-cpu-os`, **com aviso** | § 10 |
+| **Chat da frota (`ai-talk`)** | As máquinas conversam entre si pela rede local, sem servidor central. Vai na ISO e sobe no 1º boot. **Sem chave, nasce desligado** | § 10.1 |
+| **A base instalada ficou explícita** | A ISO agora diz *qual* base instalar (`ubuntu-server`, que já traz `git`/`curl`/`gnupg`) em vez de depender do default do Ubuntu | § 10 |
+| **Bug da interface web** | A página podia abrir **vazia** (erro no topo do script). Corrigido e agora o JS é **executado** no CI | § 10.2 |
+
+---
+
 ## 1. O que é isto, em uma frase
 
 É um **conjunto de ajustes** que você aplica no seu Linux (Ubuntu Server ou
 Debian) para que, ao rodar um modelo de IA no processador, ele responda mais
-rápido **sem comprar hardware novo**.
+rápido **sem comprar hardware novo**. E, se você quiser o sistema já pronto, o
+projeto gera uma **ISO de instalação** (base **Ubuntu Server**) que nasce
+afinada — seção 10.
 
 E onde ele melhora? Em quatro coisas, explicadas sem jargão:
 
@@ -105,7 +121,7 @@ duas vezes — e veja a seção 8 (você pode aplicar só parte dos ajustes).
 
 | Item | Requisito |
 |---|---|
-| **Sistema** | Ubuntu Server 22.04+ / 24.04+ (recomendado) ou Debian 12+ |
+| **Sistema** | Ubuntu Server 22.04+ / 24.04+ (recomendado) ou Debian 12+ — para o `build.sh`/mods. **A ISO é Ubuntu only** (desde 2026-10-20) |
 | **Acesso** | `root` ou `sudo` |
 | **Internet** | Sim, na primeira vez (baixa pacotes e o llama.cpp) |
 | **Disco** | ~10 GB livres (código + modelos pequenos) |
@@ -116,18 +132,33 @@ duas vezes — e veja a seção 8 (você pode aplicar só parte dos ajustes).
 ### Meu processador é suportado?
 
 Provavelmente sim. O projeto reconhece automaticamente o seu CPU e escolhe o
-ajuste certo, por **família de geração**:
+ajuste certo, por **família de geração**. São **14 famílias** (com herança entre
+gerações), então qualquer x86-64 cai em alguma. As mais comuns:
 
-| Seu processador | O que o projeto usa |
+| Seu processador | Família |
 |---|---|
-| Intel Xeon E5 **v3** (Haswell-EP) | `haswell` |
-| Intel Xeon E5 **v4** (Broadwell-EP) | `broadwell` |
-| Intel Xeon Scalable **v5/v6** (tem AVX-512) | `skylake-avx512` *(só se você pedir)* |
-| AMD Ryzen **1000 / 2000** | `znver1` |
-| AMD Ryzen **3000 / 4000** | `znver2` |
-| AMD Ryzen **5000 / 6000** | `znver3` |
-| AMD Ryzen **7000 / 8000 / 9000** | `znver4` |
-| **Qualquer outro** x86-64 | detecção automática no seu próprio CPU |
+| Intel Xeon E5 **v3** (Haswell-EP) | `intel-haswell` |
+| Intel Xeon E5 **v4** (Broadwell-EP) | `intel-broadwell` *(herda de haswell)* |
+| Intel Xeon Scalable **v5** (Skylake-SP) | `intel-skylake-avx512` |
+| Intel Xeon Scalable **v6** (Cascade Lake-SP) | `intel-cascadelake-sp` |
+| Intel Xeon Scalable **v7** (Ice Lake-SP) | `intel-icelake-sp` |
+| Intel Xeon Scalable **v8** (Sapphire Rapids) | `intel-sapphirerapids-sp` |
+| Intel Xeon Scalable **v9** (Emerald Rapids) | `intel-emeraldrapids-sp` |
+| Intel Xeon 6 **P-cores** (Granite Rapids) | `intel-graniterapids-sp` |
+| AMD Ryzen **1000 / 2000** (Zen, Zen+) | `amd-zen1` |
+| AMD Ryzen **3000 / 4000** / EPYC Rome | `amd-zen2` |
+| AMD Ryzen **5000 / 6000** / EPYC Milan | `amd-zen3` |
+| AMD Ryzen **7000 / 8000** / EPYC Genoa | `amd-zen4` |
+| AMD Ryzen **9000** / Ryzen AI 300 / EPYC Turin | `amd-zen5` |
+| **Qualquer outro** x86-64 | `generic` (fallback seguro) |
+
+> **Sobre AVX-512:** nas famílias cujas CPUs **têm** AVX-512 (Skylake-SP em
+> diante, Zen 4/5), ele é usado **por padrão** — mas só depois de conferir em
+> `/proc/cpuinfo` que a flag existe. Não é "ligar no escuro": se a sua CPU não
+> tiver, o projeto não usa. Quem quiser desligar tem `--no-avx512`.
+>
+> A lista completa (e como adicionar uma família) está em
+> [`docs/FAMILIES.md`](docs/FAMILIES.md).
 
 > Não precisa saber qual é a sua. O comando da seção 5 descobre sozinho e te
 > mostra antes de aplicar qualquer coisa.
@@ -403,27 +434,53 @@ cd .. && rm -rf Deep_Rock_IA
 > **removido** — `--distro debian` agora **aborta** com uma mensagem que aponta
 > o [`docs/DECISIONS.md`](docs/DECISIONS.md).
 > **A identidade segue a FUNÇÃO da máquina** (ADR-002): `--role inference` cria
-> o usuário/hostname **`ai-inference`**, `--role builder` cria **`ai-builder`**.
-> Sem papel concreto (`auto`) fica `ai-cpu-os` — com aviso, porque o papel só é
-> conhecido no primeiro boot. O **chat da frota `ai-talk`** já vai na ISO
-> (flags `--chat-*`): ele instala o serviço, as chaves e a lista de peers —
-> **sem chave ele nasce desabilitado**, porque um canal sem HMAC não autentica
-> ninguém. Veja [`docs/DECISIONS.md`](docs/DECISIONS.md) e
-> [`docs/CHAT.md`](docs/CHAT.md).
+> o usuário/hostname **`ai-inference`**, `--role builder` cria **`ai-builder`**
+> (sem papel concreto fica `ai-cpu-os`, com aviso — o papel só é conhecido no
+> primeiro boot). E a ISO também instala o **chat da frota** — veja § 10.1.
+> Decisões registradas em [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
 ```bash
 # Gerar a ISO (precisa de xorriso: sudo apt install -y xorriso curl)
-bash iso/build-iso.sh --distro ubuntu --disk /dev/vda --dry-run   # simular
+bash iso/build-iso.sh --disk /dev/vda --dry-run   # simular (não altera nada)
 
 # Servidor de IA: o usuário do sistema nasce como ai-inference
-sudo bash iso/build-iso.sh --distro ubuntu --role inference --disk /dev/vda
+sudo bash iso/build-iso.sh --role inference --disk /dev/vda
 
 # Máquina de build: nasce como ai-builder
-sudo bash iso/build-iso.sh --distro ubuntu --role builder --disk /dev/vda
+sudo bash iso/build-iso.sh --role builder --disk /dev/vda
 
 # Testar numa máquina virtual (SEMPRE antes de máquina real)
 bash iso/test-vm.sh --iso iso/out/ai-cpu-os-ubuntu-*.iso --yes
 ```
+
+`--distro ubuntu` continua aceito (é o único valor válido), mas já é o padrão —
+não precisa digitar.
+
+**O nome do usuário segue a função** (ADR-002), e isso vale para o `ssh`, para
+o prompt e para os logs:
+
+| `--role` | Usuário | Hostname |
+|---|---|---|
+| `inference` | `ai-inference` | `ai-inference` |
+| `builder` | `ai-builder` | `ai-builder` |
+| *(nenhum)* / `auto` | `ai-cpu-os` — **com aviso**, porque o papel só é descoberto no 1º boot | `ai-cpu-os` |
+
+`--username`/`--hostname` explícitos **vencem sempre**. Para vários nós do mesmo
+papel, diferencie pelo hostname:
+
+```bash
+# três servidores de inferência: mesmo usuário, hostnames distintos
+sudo bash iso/build-iso.sh --role inference --hostname ai-inference-2 --disk auto
+```
+
+**Qual base o Ubuntu instala** (`--install-source`): a ISO usa
+`ubuntu-server` por padrão — a base "completa" (707 pacotes), que **já traz
+`git`, `curl` e `gnupg`**. A outra opção da mídia oficial,
+`ubuntu-server-minimal` (380 pacotes), **não** os traz; se você escolhê-la de
+propósito, precisa passar os pacotes do projeto junto (a linha pronta está no
+[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)). O build **recusa** um
+nome de base que não exista na ISO, em vez de deixar a instalação falhar no
+meio.
 
 **O modelo vai dentro da ISO.** Por padrão, gerar a ISO baixa o modelo sugerido
 (~1,1 GB) na **sua máquina** e o embute na mídia — assim ela funciona sozinha,
@@ -444,7 +501,7 @@ sistema instalado podia subir **sem IP** — era preciso configurar a rede à m�
 em todo boot. Para IP fixo:
 
 ```bash
-sudo bash iso/build-iso.sh --distro ubuntu --disk /dev/vda \
+sudo bash iso/build-iso.sh --role inference --disk /dev/vda \
   --network static --network-interface enp5s0 \
   --network-ip 192.168.1.50/24 --network-gateway 192.168.1.1
 ```
@@ -496,6 +553,67 @@ Como funciona, em três linhas:
 > E, desde a remoção do caminho Debian (sessão #42), **nenhuma ISO foi gerada
 > nem bootada de novo**. Detalhes em [`docs/ISO.md`](docs/ISO.md) § 6.
 
+### 10.1 O chat da frota (`ai-talk`) — as máquinas conversando entre si
+
+Se você tem mais de uma máquina do projeto (o servidor de IA e a máquina de
+build, por exemplo), elas podem **trocar mensagens curtas** por um canal
+próprio, sem SSH aberto na sessão e sem servidor central:
+
+```text
+ ai-inference  ── TCP 7331 (JSON por linha, assinado) ──▶  ai-builder
+               ◀──────────────── ack ────────────────────
+```
+
+Para que serve, na prática: *"build #42 terminou"*, *"vou reiniciar em 60 s"*,
+*"o benchmark deu 10,4 t/s"*. É um canal de **recados entre máquinas** — não
+substitui SSH nem o serviço de inferência.
+
+**Como ligar:** as chaves e a lista de máquinas são decididas **na geração da
+ISO** (é o mesmo padrão do modelo e dos pacotes: a mídia leva tudo):
+
+```bash
+# 1) uma chave por máquina (32 bytes em hex, modo 640) — é o recomendado
+head -c32 /dev/urandom | xxd -p -c64 > keys/ai-inference.key
+head -c32 /dev/urandom | xxd -p -c64 > keys/ai-builder.key
+chmod 640 keys/*.key
+
+# 2) a lista da frota: uma linha "nome=ip" por máquina
+cat > frota.txt <<'EOF'
+ai-builder=192.168.0.20
+EOF
+
+# 3) gerar a ISO do servidor de IA já com o chat configurado
+sudo bash iso/build-iso.sh --role inference --disk /dev/vda \
+  --chat-keydir keys/ --chat-peers-file frota.txt
+```
+
+Na máquina instalada, o serviço sobe no **primeiro boot** (antes do serviço de
+inferência, para poder avisar se ele falhar). Para usar:
+
+```bash
+ai-talk status                          # quem eu sou, quem eu vejo
+ai-talk send ai-builder "build #42 ok"  # recado para uma máquina
+ai-talk send '*' "vou reiniciar"        # para todas
+ai-talk listen                          # ver o que chega, ao vivo
+```
+
+| Regra | Valor |
+|---|---|
+| Teto de máquinas | **15** em malha completa (acima disso seria preciso um relay — não é o caso de uma casa/escritório) |
+| Intervalo mínimo entre mensagens para o mesmo destino | **50 ms** (evita enxurrada) |
+| Fila por destino | 256 — se encher, o comando diz que falhou (exit 5) em vez de descartar calado |
+| Autenticação | assinatura HMAC-SHA256 com a chave **daquela** máquina |
+| **Sem chave** | o serviço é instalado **desligado** e o instalador avisa: um canal sem assinatura não autentica ninguém, e não existe chave "de fábrica" |
+
+> 🔒 **O que ele não faz:** não executa comando recebido (mensagem é **dado**,
+> nunca comando), não abre porta na internet e não substitui SSH. O modelo de
+> confiança é **rede local**. Detalhes: [`docs/CHAT.md`](docs/CHAT.md).
+>
+> ⚠️ **Honestidade:** o transporte, o instalador e a presença na ISO são
+> testados (`make talk-test` 30, `make talk-install-test` 47,
+> `make iso-chat-test` 31) — mas **duas máquinas de verdade conversando ainda
+> não foram testadas**, e portanto a latência real é **cálculo**, não medição.
+
 ### Passo final: gravar num pendrive (bootável)
 
 > 🎯 **É para isto que a ISO existe.** E é o passo mais **perigoso** de todos:
@@ -534,8 +652,9 @@ Caminho completo, sem instalar nada de pesado na sua:
 
 ```bash
 # 1. Gere a ISO no GitHub Actions (navegador): Actions → workflow "iso" →
-#    Run workflow → escolha ubuntu/debian e marque air_gapped se quiser
-#    a ISO que se basta (fonte + modelo + pacotes na mídia).
+#    Run workflow → escolha o papel e marque air_gapped se quiser a ISO
+#    que se basta (fonte + modelo + pacotes na mídia). Não há escolha de
+#    distro: a base é sempre Ubuntu.
 
 # 2. Baixe o artifact dessa execução (o .iso E o .iso.sha256) e confira:
 make iso-check ISO=~/Downloads/ai-cpu-os-ubuntu.iso
@@ -559,7 +678,7 @@ O `make iso-check` é a checagem que faz sentido numa máquina sem `xorriso`:
 > conteúdo — precisa de `xorriso`). São complementares: um prova que **o
 > arquivo chegou inteiro**; o outro, que **o conteúdo está certo**.
 
-### A interface web — o jeito sem decorar flag nenhuma
+### 10.2 A interface web — o jeito sem decorar flag nenhuma
 
 Se você só quer clicar e ver acontecer, o projeto traz uma **página local**:
 
@@ -604,9 +723,16 @@ aviso explícito, nunca falhar em silêncio*.
 > página que gera ISO e escolhe disco.
 
 > ⚠️ **Honestidade:** a interface é exercitada por **testes de API**
-> (`make ui-test`, 34 asserções: lista branca, validadores, SSE, recusa sem
-> `xorriso`), mas **nunca foi aberta num navegador de verdade** — nem por quem
-> escreveu. Se algum detalhe visual te incomodar, é aí que ninguém olhou ainda.
+> (`make ui-test`, **51** asserções: lista branca, validadores, SSE, recusa sem
+> `xorriso`) **e** por um teste que **executa o JavaScript da página**
+> (`make ui-page-test`, **13** asserções, num DOM falso). Isso não é o mesmo que
+> um navegador: **layout, CSS e comportamento de janela não são cobertos** — se
+> algum detalhe visual te incomodar, é aí que ninguém olhou ainda.
+>
+> 🐛 **Um bug real saiu daí:** a página podia abrir **vazia** (os campos sem
+> opções, nenhuma ISO listada e nenhuma mensagem), porque um erro no início do
+> script interrompia o resto. Os testes de API ficavam verdes. Corrigido, e o
+> teste que executa a página existe justamente para isso não voltar.
 
 ---
 
@@ -677,6 +803,19 @@ Regra de bolso (a quantização `Q4` é o padrão prático):
 Não. Funciona sobre um Ubuntu/Debian já instalado. (Instalar já pronto é o
 objetivo da ISO — seção 10.)
 
+**E o Debian? Eu uso Debian.**
+Como **sistema hospedeiro**, continua funcionando: clone o projeto e rode
+`build.sh` normalmente. O que saiu foi o caminho Debian **da ISO** (a mídia de
+instalação): hoje ela é Ubuntu only, para o projeto ter **um** instalador, **um**
+conjunto de templates e **um** caminho de boot. `--distro debian` aborta com
+uma mensagem que explica isso.
+
+**Quantas máquinas podem conversar pelo `ai-talk`?**
+Até **15** em malha completa (cada uma falando direto com as outras). É o teto
+que o projeto suporta **sem** precisar de um servidor central; acima disso
+entraria um relay, que ainda não existe. Para uma casa/escritório com o
+servidor de IA e algumas máquinas de build, sobra folga. Ver § 10.1.
+
 **Meus dados vão para algum lugar?**
 Não. Nada sai da sua máquina: o modelo roda local, sem API externa. Na primeira
 vez o script só baixa pacotes e o código do llama.cpp.
@@ -710,6 +849,8 @@ Hoje não. O projeto é x86-64.
 | Processadores suportados (famílias) | [`docs/FAMILIES.md`](docs/FAMILIES.md) |
 | Usar GPU | [`docs/GPU.md`](docs/GPU.md) |
 | A ISO de instalação | [`docs/ISO.md`](docs/ISO.md) |
+| **O chat da frota (`ai-talk`)** — protocolo, limites, segurança | [`docs/CHAT.md`](docs/CHAT.md) |
+| **As decisões de arquitetura** (e por que cada uma foi tomada) | [`docs/DECISIONS.md`](docs/DECISIONS.md) |
 | O que já foi testado e o que **não** foi | [`docs/STATE.md`](docs/STATE.md) |
 
 ### Quero mexer no projeto
@@ -727,11 +868,24 @@ Hoje não. O projeto é x86-64.
 ### O que dá para rodar aqui, agora
 
 ```bash
-make help          # lista todos os comandos
-make validate      # checagens que o CI faz (não altera nada)
-sudo make dry-run  # simula a instalação completa
-make mods          # catálogo de melhorias
-make gpu-check     # relata GPUs disponíveis (só leitura)
+make help            # lista todos os comandos
+make validate        # checagens que o CI faz (não altera nada)
+sudo make dry-run    # simula a instalação completa
+make mods            # catálogo de melhorias
+make gpu-check       # relata GPUs disponíveis (só leitura)
+
+# ISO e frota
+make iso             # gera a ISO (precisa de xorriso)
+make iso-vm          # boota a ISO numa VM e espera instalação + 1º boot
+make pendrives       # o que está plugado (só removíveis)
+make ui              # a interface web local
+
+# testes rápidos, sem alterar nada
+make talk-test           # o chat: transporte (loopback, sem rede externa)
+make talk-install-test   # o chat: instalador (chave, config, serviço)
+make iso-chat-test       # o chat: dentro da ISO
+make identity-test       # o usuário derivado do papel
+make ui-page-test        # executa o JavaScript da página
 ```
 
 ### Quero os binários já compilados
@@ -753,7 +907,13 @@ MIT — veja [`LICENSE`](LICENSE). Use, modifique e distribua à vontade.
 
 ---
 
-> **Status:** `0.2.0` (alpha). O projeto está escrito e verificado por
-> ferramentas automatizadas, mas **ainda não foi validado em hardware real** —
-> veja [`docs/STATE.md`](docs/STATE.md) para saber exatamente o que já foi
-> provado e o que não foi. Trate como um esqueleto funcional, não como release.
+> **Status:** `0.3.0-dev` (alpha). O projeto é escrito e verificado por
+> ferramentas automatizadas, e **já foi validado numa máquina física** (AMD
+> A8-9600: instalou pela ISO, o 1º boot aplicou o tuning e o `llama-bench` deu
+> **pp64 17,05 · tg32 10,40 t/s**). O que **não** foi validado: as duas máquinas
+> de referência (Xeon E5-2680 v4 e Ryzen 5 3500X), o boot **UEFI**, o chat entre
+> **duas máquinas reais** e a interface num **navegador** de verdade.
+>
+> A fonte da verdade sobre "o que já foi provado" é
+> [`docs/STATE.md`](docs/STATE.md). Trate como um esqueleto funcional, não como
+> release.

@@ -214,6 +214,15 @@ planta "o ack sair ANTES do fsync (perde durabilidade)" talk/ai_talk.py \
   sed_ 's|os.fsync(self.handle.fileno())|pass|' talk/ai_talk.py
 planta "o teto de 15 nós virar 30" talk/ai_talk.py \
   sed_ 's|^MAX_PEERS = 15|MAX_PEERS = 30|' talk/ai_talk.py
+# `--keydir` sozinho (o modo recomendado) tem de gerar serviço que INICIA.
+# Sem derivar a chave do próprio nó, a config aponta para fleet.key (inexistente
+# nesse modo) e o daemon morre no start — com o serviço habilitado.
+planta "o instalador deixar de derivar a chave do próprio nó do --keydir" talk/install.sh \
+  sed_ 's|^      OWN_KEY_FROM_KEYDIR=1$|      :|' talk/install.sh
+# A checagem de chave órfã tem de vir DEPOIS de montar a frota: antes dela todo
+# peer vindo de --peers-file era acusado de órfão (bug real, sessão #46).
+planta "a checagem de chave órfã voltar para antes dos peers do arquivo" talk/install.sh \
+  sed_ 's|^# Peers do arquivo (uma linha|# A chave do PRÓPRIO nó não é "órfã" (violação plantada)\n# Peers do arquivo (uma linha|' talk/install.sh
 planta "o ai-talk aceitar chave legível por outros" talk/ai_talk.py \
   sed_ 's|if st.st_mode & stat.S_IROTH:|if False:|' talk/ai_talk.py
 planta "o dedupe_window voltar a 1024 (não cobre o retry de 9 s)" talk/ai_talk.py \

@@ -2402,6 +2402,56 @@ garante os arquivos íntegros acima.
   (basta rodar na máquina de teste).
 - **Commits:** *(ver `git log`)*.
 
+### Sessão #46 — 2026-10-20 · 📖 README reescrito + o 6º bug real do chat (chaves)
+
+- **Objetivo:** *"para fechar, atualize o readme pois teve muitas atualizações e
+  mudanças"*. Acabou sendo também a sessão em que o **modelo de chaves do
+  `ai-talk` foi consertado** — porque documentar é testar.
+- **O README (novo, para o usuário final):** bloco "O que mudou nesta rodada"
+  logo depois do índice; tabela de CPUs corrigida (**14** famílias, estava 8);
+  `--install-source` e a identidade por papel (ADR-002) com o aviso de que
+  `--role auto` **não** deriva nome; **§ 10.1 nova — o chat da frota** (como
+  ligar, tabela de regras, o que ele **não** faz, e o que falta provar) e a
+  antiga § 10.1 virou **§ 10.2 (interface web)**, com o bug da página e os
+  testes novos; FAQ +3 perguntas; bloco `make` de início rápido; tabela de
+  docs com `CHAT.md`/`DECISIONS.md`; status final `0.3.0-dev` com a validação
+  em hardware físico (A8-9600).
+- **O que a escrita revelou (bug real, o 6º do chat):** o modo **recomendado**
+  do chat — `--chat-keydir keys/` + `--chat-peers-file` — gerava um config cujo
+  `key_file` era `/etc/ai-talk/fleet.key`, arquivo que **só existe no modo
+  `--key-file` (chave global)**. Resultado: config válido, unit escrita,
+  serviço **habilitado** e o daemon **morto no start** (`chave não encontrada`).
+  - **A confusão de fundo:** uma chave tem **dois papéis** — a do peer
+    **verifica**, a do próprio nó **assina**. `--keydir` só fornecia as de
+    verificação, e o `key_file` (que é o lado que assina) ficou sem dono.
+  - **Correção:** se `--key-file` não veio e `keys/<nó>.key` existe, ela vira a
+    chave própria (`OWN_KEY_FROM_KEYDIR=1`); a config aponta para
+    `/etc/ai-talk/keys/<nó>.key` e a chave é copiada para o alvo.
+    `--key-file` continua vencendo. Sem chave própria: **aviso explícito** e
+    serviço **desabilitado** (não se habilita um serviço que morre).
+  - **Segundo erro, da mesma família:** a checagem de **chave órfã** rodava
+    **antes** de ler `--peers-file` → todo peer vindo do arquivo era acusado
+    de órfão. Movida para **depois** da montagem da frota (o modo de 15 nós,
+    que é o recomendado, era justamente o mais afetado).
+- **Bugs meus nesta sessão (todos pegos por execução, não por revisão):**
+  - guarda de ordenação com `awk` que **sempre reprovava** (havia `done` depois
+    do ponto checado) → reescrito comparando **posições** de duas linhas-âncora;
+  - a mesma comparação com `grep -n` **sem `head -1`**: duas ocorrências →
+    string multilinha → `[[ -lt ]]` estourava e o guarda passava **calado**
+    (o `ci-guards-test` acusou "NÃO reprova");
+  - **heredoc dentro de `run:` do workflow**: a linha final (`PYGUARD`) saía do
+    bloco YAML e quebrava o arquivo (o `yamllint` pegou na hora);
+  - violação plantada com `app` (que **acrescenta** ao fim) para um guarda que
+    olha a **primeira** ocorrência → não reprovava; trocada por um `sed_` que
+    insere **antes** da âncora.
+- **Resultado:** `make validate` **verde** — `ci-guards` **118** (era 116),
+  `ai-talk-install` **47** (era 39), `ai-talk` 30, `iso-chat` 31,
+  `webui` 51, `webui-page` 13, `role-identity` 22, `docs`/`lint`/`iso-lint` OK.
+- **O que NÃO foi provado:** nenhuma máquina conversando de verdade (o
+  `ai-talk serve` subiu em **loopback**, não sob `systemd`); nenhuma ISO gerada
+  desde a sessão #21 — as mudanças de #42–#46 **ainda não viram mídia**.
+- **Commits:** *(ver `git log`)*.
+
 ### Sessão #45 — 2026-10-20 · 🐛 A página da UI ficava vazia + `git` já vem na base
 
 - **Objetivo:** dois achados do dono: *"bug no webui e se não me engano o git já
@@ -3258,7 +3308,8 @@ journal e no arquivo de log:
 | **Chat da frota** | `ai-talk`: TCP 7331, JSON lines, HMAC, stdlib; fases F1/F2/F3. | ✅ **F1 + F2** (#41/#44): transporte, instalador, unit e ISO. ⚠️ **F3** e **duas VMs** pendentes |
 | **Delay entre mensagens** | Intervalo mínimo de **50 ms** entre `msg` do mesmo par (20 msg/s); `ack`/`hello` isentos; fila **256** com **exit 5** no overflow; p99 ≤ 10 ms; `fsync` por mensagem. | ✅ **no código e provado** (`make talk-test`) |
 | **Teto de nós** | **15 nós** em malha completa (14 conexões/nó); acima disso, **relay/hub obrigatório**. Chave por nó, `dedupe_window=8192`, `max_out_per_sec=120`. | ⚠️ **no código**, mas **nunca medido** com 15 nós (P4) |
-| **Ordem** | P0 ✅ → P1 ✅ → F2 do chat ✅ → correções da #45 ✅ → **P5 (boot de uma ISO)** ← agora → Bloco R (duas VMs) → P4 (bancada de 15). | `docs/STATE.md` § 6 |
+| **Modelo de chaves do chat** | Uma chave por nó, com **dois papéis**: a do peer verifica, a do próprio nó **assina** (`keys/<nó>.key`). Sem ela o serviço nasce **desabilitado** (nunca habilitado e morto). `--key-file` (global) vence. | ✅ **corrigido e provado (#46)** — `talk-install-test` 47; **falta** ver com duas máquinas |
+| **Ordem** | P0 ✅ → P1 ✅ → F2 do chat ✅ → correções da #45 ✅ → README + fix de chaves (#46) ✅ → **P5 (boot de uma ISO)** ← agora → Bloco R (duas VMs) → P4 (bancada de 15). | `docs/STATE.md` § 6 |
 
 > ⚠️ **Não confunda plano com fato.** A identidade por papel e o chat estão no
 > código e na ISO, mas **nunca foram vistos num sistema instalado**; o
@@ -3266,7 +3317,9 @@ journal e no arquivo de log:
 > `--root`); e **não há medição** de latência nem do teto de 15 nós — os
 > números são cálculo.
 > ⚠️ E, desde a remoção do caminho Debian (#42), **nenhuma ISO foi gerada nem
-> bootada**.
+> bootada**. As cinco mudanças de #42–#46 (Debian fora, identidade por papel,
+> chat na ISO, base explícita, chaves do chat) só existem no código: **nenhuma
+> foi vista num sistema instalado**.
 
 ---
 
@@ -3286,6 +3339,11 @@ journal e no arquivo de log:
 | **Confiar no `default` de um arquivo de terceiro** | O `autoinstall` não declarava `source:`; a base era o `default: true` do `install-sources.yaml` da ISO. A default (`ubuntu-server`) traz `git`/`curl`/`gnupg`; a `ubuntu-server-minimal` **não** — se a Canonical trocar a default, o alvo perde `git` em silêncio | Fixe o que importa e **confira que existe**: `source: id:` + checagem contra o `install-sources.yaml` da própria ISO, no build **e** no verificador |
 | **Código que nunca é exercitado porque o default não o alcança** | O `verify-iso.sh` cobrava `ROLE`/`FAMILY` procurando **aspas duplas** num template que usa **simples**. Como `make iso-yaml` sempre rodou com `--role auto`, o ramo jamais rodou — e o primeiro teste com papel concreto reprovou uma árvore correta | Todo ramo condicional precisa de **um teste com o valor que o ativa**. Se só existe teste do default, o ramo é código morto até o dia em que alguém o usa |
 | Usar **uma chave** para a frota inteira | Qualquer nó assina como outro (`from` é só um campo) | Chave **por nó** (`peers[nome].key_file`) quando a frota passa de 2–3 máquinas; o receptor verifica com a chave do `from` |
+| **Esquecer que a chave tem DOIS papéis** | A do peer **verifica** (`peers[nome].key_file`); a **do próprio nó assina** (`key_file`). Oferecer só chaves de peer (o `--keydir` com `keys/` incompleto) gera config **válido** e serviço **habilitado** que morre no start com `chave não encontrada` — e o `check-config` do alvo, rodado antes, teria avisado | Ao instalar, derive a chave própria de `keys/<nó>.key`; sem ela, **desabilite** o serviço em vez de habilitar. Prove com o daemon **lendo as chaves de verdade** (o `talk-install-test` faz isso via `ai_talk.read_key`) |
+| Checar **chave órfã** antes de montar a lista de peers | Todo peer vindo de `--peers-file` ainda não existe nesse ponto → é acusado de órfão. O modo recomendado (15 nós, arquivo) é justamente o mais afetado | A validação de "chave sem peer" tem de rodar **depois** de todas as fontes de peers (arquivo + `--peer`) |
+| **Heredoc dentro de um `run:` do workflow** | A linha final do heredoc (`EOF`/`PYX`) fica na **coluna 0** e sai do bloco YAML: o arquivo fica inválido e o job nem começa | Nada de heredoc em YAML. Use `grep -n … \| head -1 \| cut -d: -f1` e compare **posições** em `(( ))`, ou um `python3 -c` de uma linha |
+| Comparar **números** com `grep -n` sem `head -1` | Duas ocorrências → a variável vira string multilinha → `[[ "$a" -lt "$b" ]]` estoura a expressão aritmética, o `if` dá falso e o guarda **passa calado** (o `test-ci-guards` acusa "NÃO reprova") | `head -1` no `grep -n`, e use `(( a < b ))` (que falha alto) em vez de `-lt` dentro de `[[ ]]` |
+| Plantar violação com o helper **`app`** (que acrescenta ao FIM) para um guarda que olha a **primeira** ocorrência | O guarda passa e o `test-ci-guards` diz "NÃO reprova" — parece guarda decorativo, mas o plant estava no lugar errado | Para guarda de **ordem**, plante **antes** da âncora (`sed_ 's|^ANCORA|injecao\\nANCORA|'`) |
 | Derivar o **usuário do papel** com `--role auto` | O papel `auto` só é conhecido no **1º boot**; nessa hora o usuário do instalador já foi criado | Identidade derivada exige `--role inference|builder` (ADR-002); `auto` mantém `ai-cpu-os` + aviso |
 | Adicionar **feature/teste ao caminho Debian** | Ele está **deprecado** e será removido (ADR-001); o esforço vira retrabalho e o CI cresce | Trabalhe só em `--distro ubuntu`; o Debian continua apenas como **hospedeiro** das mods |
 | Assumir que a preparação da sessão #39 **já removeu** o Debian ou criou o chat | `--distro debian` ainda funciona, o usuário ainda é `ai-cpu-os` e não existe `talk/` | Leia `docs/STATE.md` § 3.8/§ 6 e `docs/DECISIONS.md`; a implementação é P0–P3 |

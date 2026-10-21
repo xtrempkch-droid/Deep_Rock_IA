@@ -187,6 +187,99 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 5-b) MODO "UMA CHAVE POR NÓ" (--keydir): a chave do PRÓPRIO nó tem de existir
+# ---------------------------------------------------------------------------
+# Este bloco existe por um bug real: com apenas `--keydir` (o modo recomendado
+# pelo ADR-005), a config apontava para /etc/ai-talk/fleet.key — que não existe
+# nesse modo — e o daemon MORRIA no start. O serviço era habilitado assim mesmo.
+RKD="${WORK}/keydir"
+mkdir -p "$RKD"
+new_key "${RKD}/ai-inference.key"      # a chave do PRÓPRIO nó (assina)
+new_key "${RKD}/ai-builder.key"        # a chave do peer (verifica)
+out="$(run_install "${WORK}/kd" --node ai-inference --role inference \
+        --keydir "$RKD" --peer ai-builder=192.168.0.20)"
+
+cfg_kd="${WORK}/kd/etc/ai-talk/config.json"
+if [[ -f "$cfg_kd" ]]; then
+  ok "--keydir: config gerado (sem --key-file)"
+  # A chave própria TEM de virar o `key_file` — é o que permite assinar.
+  if python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1]))
+sys.exit(0 if d.get('key_file') == '/etc/ai-talk/keys/ai-inference.key' else 1)" "$cfg_kd"; then
+    ok "--keydir: a chave do nó (ai-inference.key) virou o key_file da config"
+  else
+    bad "--keydir: key_file não aponta para a chave do nó (o daemon não assinaria)"
+  fi
+  # E o arquivo tem de existir NO ALVO (sob o --root, no caminho simulado).
+  if [[ -f "${WORK}/kd/etc/ai-talk/keys/ai-inference.key" ]]; then
+    ok "--keydir: a chave do nó foi copiada para o alvo"
+  else
+    bad "--keydir: a chave do nó NÃO foi copiada para o alvo"
+  fi
+  # O daemon tem de conseguir ler a chave com que assina. Aqui o caminho é do
+  # alvo (/etc/...), então apontamos o leitor para a cópia local.
+  if python3 - "$cfg_kd" "${WORK}/kd" <<'PY'
+import importlib.util, json, sys
+cfg_path, root = sys.argv[1], sys.argv[2]
+spec = importlib.util.spec_from_file_location("ai_talk", "talk/ai_talk.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+cfg = m.load_config(cfg_path)
+# Remapeia /etc/ai-talk → <root>/etc/ai-talk (é o mesmo arquivo no alvo).
+def remap(p): return p.replace("/etc/ai-talk", root + "/etc/ai-talk")
+m.read_key(remap(cfg["key_file"]))
+for name in cfg["peers"]:
+    path = m.peer_key_file(cfg, name)
+    if path:
+        m.read_key(remap(path))
+PY
+  then
+    ok "--keydir: o daemon consegue ler TODAS as chaves (própria + peers)"
+  else
+    bad "--keydir: o daemon NÃO conseguiria ler as chaves (não iniciaria no alvo)"
+  fi
+else
+  bad "--keydir: nenhum config foi gerado"
+fi
+
+# Só chaves de PEERS, sem a do próprio nó → o serviço NÃO pode ser habilitado.
+RO="${WORK}/so-peers"
+mkdir -p "$RO"
+new_key "${RO}/ai-builder.key"
+out="$(run_install "${WORK}/sp" --node ai-inference --keydir "$RO" --peer ai-builder=10.0.0.2)"
+case "$out" in
+  *"PRÓPRIO nó"*|*"sem ela o serviço não consegue assinar"*)
+    ok "só chave de peer (sem ai-inference.key): avisa que não dá para assinar" ;;
+  *) bad "só chave de peer: não avisou que falta a chave do próprio nó" ;;
+esac
+case "$out" in
+  *"NÃO habilitado"*|*"NÃO será habilitado"*|*"DESABILITADO"*)
+    ok "só chave de peer: o serviço fica desabilitado (não subiria mesmo)" ;;
+  *) bad "só chave de peer: o serviço seria habilitado e morreria no start" ;;
+esac
+
+# Chave de um nó que não é peer E não é o próprio → aviso de órfã, e só agora
+# (o aviso tem de vir DEPOIS de ler a frota, senão todo peer do arquivo seria
+# acusado de órfão — bug real, sessão #46).
+RO2="${WORK}/orfas"
+mkdir -p "$RO2"
+new_key "${RO2}/ai-inference.key"
+new_key "${RO2}/ai-builder.key"
+new_key "${RO2}/ai-fantasma.key"
+printf 'ai-builder=10.0.0.2\n' > "${WORK}/frota-1.txt"
+out="$(run_install "${WORK}/of" --node ai-inference --keydir "$RO2" --peers-file "${WORK}/frota-1.txt")"
+case "$out" in
+  *"ai-fantasma"*"sem peer"*)
+    ok "chave órfã (nó que não é peer) é avisada" ;;
+  *) bad "chave órfã não foi avisada" ;;
+esac
+case "$out" in
+  *"ai-builder.key sem peer"*)
+    bad "peer vindo do ARQUIVO foi acusado de órfão (a checagem roda antes da frota)" ;;
+  *) ok "peer vindo do arquivo de frota NÃO é acusado de órfão" ;;
+esac
+
+# ---------------------------------------------------------------------------
 # 6) ERROS DE USO → exit 2 (entrada do usuário; nada de ISO pela metade)
 # ---------------------------------------------------------------------------
 expect_rc() { # <descrição> <esperado> <args...>

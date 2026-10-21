@@ -1467,7 +1467,7 @@ llama-bench -m Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf -p 64 -n 32 -t 4
 ## Bloco R — 💬 Chat da frota `ai-talk` (roteiro — F2 pronta, execução pendente)
 
 > **Status:** ❌ **não executado.** A **F1** e a **F2** estão prontas e
-> provadas offline (`make talk-test` 30, `talk-install-test` 39,
+> provadas offline (`make talk-test` 30, `talk-install-test` 47,
 > `iso-chat-test` 31); o que falta é a execução **em duas máquinas de verdade**
 > — o único teste que mede latência real. Contrato em
 > [`docs/CHAT.md`](CHAT.md); decisões em [`docs/DECISIONS.md`](DECISIONS.md).

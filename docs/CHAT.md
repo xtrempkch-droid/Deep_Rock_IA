@@ -520,6 +520,12 @@ Flags do `iso/build-iso.sh`:
 - **Frota no teto (até 15 nós):** `--chat-peers-file frota.txt` + `--chat-keydir keys/`.
   O arquivo é a fonte única; gerar 14 flags por ISO seria erro de digitação
   esperando acontecer (§5.2).
+  ⚠️ O `keys/` precisa conter **a chave do próprio nó** (`<nó>.key`), não só as
+  dos peers: é ela que **assina** o que ele envia (`key_file` do config). Sem
+  ela o daemon **não inicia** (`chave não encontrada`) — o instalador avisa e
+  deixa o serviço **desabilitado** em vez de habilitar um serviço que morre.
+  Bug real da sessão #46: `--keydir` sozinho apontava o `key_file` para
+  `fleet.key`, que não existe nesse modo.
 - **Sem chave** (nem global nem por nó), o `talk/install.sh` instala o serviço
   **desabilitado** e avisa: não existe chave default, e um canal sem HMAC não é
   aceitável.
@@ -737,7 +743,21 @@ na F1):
 - os três elos existem e **na ordem certa** (`run_chat_install` antes de
   `run_role_install`);
 
-`tests/test-ai-talk-install.sh` (**39 asserções**) prova o instalador em si
+**Bug real do modelo de chaves (sessão #46, achado ao escrever o `README`):**
+o modo recomendado (`--keydir` + `--peers-file`) gerava um config em que
+`key_file` apontava para `/etc/ai-talk/fleet.key` — arquivo que **só existe no
+modo `--key-file` (chave global)**. Resultado: config válido, unit escrita,
+serviço **habilitado** e o daemon morrendo no start com
+`chave não encontrada`. A correção deriva a chave própria de
+`keys/<nó>.key` (`OWN_KEY_FROM_KEYDIR=1`), com `--key-file` ainda vencendo.
+Junto veio um segundo erro, da mesma família: a checagem de **chave órfã**
+rodava **antes** de ler `--peers-file`, então todo peer vindo do arquivo era
+acusado de órfão. Provas: `talk-install-test` **47** (7 asserções novas, uma
+delas carrega as chaves pelo próprio `ai_talk.py` e prova que o daemon
+consegue ler todas) e dois guardas no CI com violação plantada
+(`ci-guards` 118).
+
+`tests/test-ai-talk-install.sh` (**47 asserções**) prova o instalador em si
 (com `--root`, sem root/systemd): config gerado e validado pelo próprio daemon,
 permissões `0640`, chave por nó dentro do peer, unit endurecida, idempotência,
 `--dry-run` sem escrever nada e recusa de árvore sem chave.
@@ -795,7 +815,7 @@ permissões `0640`, chave por nó dentro do peer, unit endurecida, idempotência
 |------|---------|-------|
 | **F0** (sessão #39) | ADR-003 + este desenho | revisão humana; links no `AGENTS.md`/`STATE.md` |
 | **F1** ✅ (sessão #41) | `talk/ai_talk.py` + CLI + `tests/test-ai-talk.sh`; **chave por nó**, `dedupe_window`, `max_out_per_sec`, `log.control`, espaçamento | **`make talk-test`: 30 asserções em loopback**; nenhuma mudança na ISO |
-| **F2** ✅ (sessão #44) | `talk/install.sh` (com `--dry-run`) + unit + integração no `build.sh` (etapa 2.5) + flags `--chat-*` (inclui `--chat-peers-file`/`--chat-keydir`) + `verify-iso.sh` | **`make talk-install-test` (39)** + **`make iso-chat-test` (31)** + seção do `verify-iso.sh`; ❌ duas VMs (Bloco R) ainda não |
+| **F2** ✅ (sessão #44) | `talk/install.sh` (com `--dry-run`) + unit + integração no `build.sh` (etapa 2.5) + flags `--chat-*` (inclui `--chat-peers-file`/`--chat-keydir`) + `verify-iso.sh` | **`make talk-install-test` (47)** + **`make iso-chat-test` (31)** + seção do `verify-iso.sh`; ❌ duas VMs (Bloco R) ainda não |
 | **F3** | `ai-talk agent` (ponte com `llama-server`) + métricas/observabilidade | teste com fake + teste de injeção; opcional |
 | **F4** (só se precisar) | **salas/tópicos** (`room` no envelope) e/ou **relay/hub** | bancada de 15 nós (§13.5); decidido por medição, não por vontade |
 
@@ -803,7 +823,7 @@ permissões `0640`, chave por nó dentro do peer, unit endurecida, idempotência
 
 ```bash
 make talk-test                        # 30 asserções: transporte (loopback)
-make talk-install-test                # 39 asserções: instalador (--root)
+make talk-install-test                # 47 asserções: instalador (--root)
 make iso-chat-test                    # 31 asserções: chat dentro da ISO
 bash tests/test-ai-talk.sh -v         # com o nome de cada asserção
 ```

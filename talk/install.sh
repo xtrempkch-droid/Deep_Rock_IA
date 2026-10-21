@@ -231,6 +231,7 @@ done
 # A chave é hexadecimal de 32 bytes (64 caracteres). Aceitar qualquer coisa
 # "por flexibilidade" só adiaria o erro para o primeiro `send`.
 KEY_HEX=""
+OWN_KEY_FROM_KEYDIR=0
 if [[ -n "$KEY_FILE" ]]; then
   [[ -f "$KEY_FILE" ]] || { log_error "chave não encontrada: ${KEY_FILE}"; exit 2; }
   KEY_HEX="$(tr -d '[:space:]' < "$KEY_FILE")"
@@ -260,19 +261,6 @@ if [[ -n "$KEYDIR" ]]; then
     KEYDIR_KEYS+=("${name}:${f}")
   done
   shopt -u nullglob
-  # Chave por nó só vale para um peer que exista: uma chave órfã é um erro de
-  # configuração que passaria calado (o receptor simplesmente não acharia nada).
-  for entry in "${KEYDIR_KEYS[@]:-}"; do
-    [[ -n "$entry" ]] || continue
-    name="${entry%%:*}"
-    found=0
-    for i in "${!PEER_NAMES[@]}"; do
-      [[ "${PEER_NAMES[$i]}" == "$name" ]] && found=1
-    done
-    if [[ $found -eq 0 ]]; then
-      log_warn "chave em ${KEYDIR}/${name}.key sem peer '${name}' correspondente (ignorada na config)."
-    fi
-  done
 fi
 
 # ---------------------------------------------------------------------------
@@ -319,20 +307,77 @@ for i in "${!EXPLICIT_NAMES[@]}"; do
   add_peer "${EXPLICIT_NAMES[$i]}=${EXPLICIT_ADDRS[$i]}"
 done
 
+# Chave por nó só vale para um peer que exista: uma chave órfã é um erro de
+# configuração que passaria calado. Esta checagem vem DEPOIS da montagem da
+# frota (arquivo + --peer) — antes dela, um peer vindo do arquivo ainda não
+# existia e a chave dele era acusada de órfã (bug real, visto na sessão #46).
+for entry in "${KEYDIR_KEYS[@]:-}"; do
+  [[ -n "$entry" ]] || continue
+  name="${entry%%:*}"
+  # A chave do PRÓPRIO nó não é "órfã": é a que assina o que ele envia.
+  [[ "$name" == "$NODE" ]] && continue
+  found=0
+  for i in "${!PEER_NAMES[@]}"; do
+    [[ "${PEER_NAMES[$i]}" == "$name" ]] && found=1
+  done
+  if [[ $found -eq 0 ]]; then
+    log_warn "chave em ${KEYDIR}/${name}.key sem peer '${name}' correspondente (ignorada na config)."
+  fi
+done
+
 if (( ${#PEER_NAMES[@]} > MAX_PEERS )); then
   log_error "${#PEER_NAMES[@]} peers excedem o teto de ${MAX_PEERS} (ADR-005)."
   log_error "Acima disso é preciso relay/hub — ver docs/CHAT.md §5.2."
   exit 2
 fi
 
+# ---------------------------------------------------------------------------
+# A chave do PRÓPRIO nó (a que ASSINA) — o elo que faltava
+# ---------------------------------------------------------------------------
+# No modo "uma chave por nó" (ADR-005) o `--keydir` traz uma chave por máquina:
+# a do peer serve para VERIFICAR quem chega; a do próprio nó serve para ASSINAR
+# o que sai. Sem a segunda, o daemon não inicia (`read_key` falha) — e o
+# serviço ficaria habilitado tentando subir em loop.
+#
+# Por isso, quem passa `--keydir` com `keys/<node>.key` já tem a chave própria:
+# ela vira o `key_file` da config. `--key-file` continua vencendo (chave global
+# explícita).
+if [[ -z "$KEY_FILE" && ${#KEYDIR_KEYS[@]} -gt 0 ]]; then
+  for entry in "${KEYDIR_KEYS[@]}"; do
+    if [[ "${entry%%:*}" == "$NODE" ]]; then
+      KEY_FILE="${entry#*:}"
+      OWN_KEY_FROM_KEYDIR=1
+      log_info "chave do nó '${NODE}' encontrada em ${KEY_FILE} (é a que assina)"
+      break
+    fi
+  done
+fi
+
 HAVE_KEY=0
-[[ -n "$KEY_HEX" || ${#KEYDIR_KEYS[@]} -gt 0 ]] && HAVE_KEY=1
+[[ -n "$KEY_HEX" || $OWN_KEY_FROM_KEYDIR -eq 1 ]] && HAVE_KEY=1
+
+# Só chaves de PEERS, sem a do próprio nó, não habilitam o serviço: ele não
+# teria como assinar e morreria no start. Avisar agora é melhor que descobrir
+# pelo `journalctl` no dia seguinte.
+ONLY_PEER_KEYS=0
+if [[ $HAVE_KEY -eq 0 && ${#KEYDIR_KEYS[@]} -gt 0 ]]; then
+  ONLY_PEER_KEYS=1
+  log_warn "--keydir tem chave(s) de peers, mas nenhuma '${NODE}.key' (a do PRÓPRIO nó)."
+  log_warn "  Sem ela o serviço não consegue assinar e não inicia."
+  log_warn "  Gere: head -c32 /dev/urandom | xxd -p -c64 > ${KEYDIR}/${NODE}.key && chmod 640 ..."
+fi
 
 log_info "nó='${NODE}' papel='${ROLE}' porta=${PORT} bind=${BIND_ADDR} peers=${#PEER_NAMES[@]}"
 if [[ $HAVE_KEY -eq 0 ]]; then
-  log_warn "NENHUMA chave informada (nem --key-file nem --keydir)."
-  log_warn "  O serviço será instalado DESABILITADO: um canal sem HMAC não"
-  log_warn "  autentica ninguém, e não existe chave default (docs/CHAT.md §9)."
+  # A mensagem tem de dizer o que FALTA, não repetir "nenhuma chave" quando o
+  # usuário passou `--keydir` (era o texto de antes — confundia o diagnóstico).
+  if [[ $ONLY_PEER_KEYS -eq 1 ]]; then
+    log_warn "Nenhuma chave do PRÓPRIO nó: o serviço será instalado DESABILITADO."
+  else
+    log_warn "NENHUMA chave informada (nem --key-file nem --keydir)."
+    log_warn "  O serviço será instalado DESABILITADO: um canal sem HMAC não"
+    log_warn "  autentica ninguém, e não existe chave default (docs/CHAT.md §9)."
+  fi
   ENABLE_SERVICE=0
 fi
 
@@ -441,7 +486,9 @@ for entry in "${KEYDIR_KEYS[@]:-}"; do
   for i in "${!PEER_NAMES[@]}"; do
     [[ "${PEER_NAMES[$i]}" == "$name" ]] && known=1
   done
-  [[ $known -eq 1 ]] || continue
+  # A chave do PRÓPRIO nó também é copiada: é a que ele usa para ASSINAR
+  # (vai no `key_file` da config). Sem ela o serviço não inicia.
+  [[ $known -eq 1 || "$name" == "$NODE" ]] || continue
   install -m 0640 "$src" "$dest"
 done
 if [[ ${#KEYDIR_KEYS[@]} -gt 0 ]]; then
@@ -459,7 +506,12 @@ fi
 # sobrando" e escapa nomes de forma correta. É stdlib e já é dependência.
 CFG_ARGS=(--node "$NODE" --role "$ROLE" --port "$PORT" --bind "$BIND_ADDR"
           --out "$CONFIG_PATH")
-[[ -n "$KEY_HEX" ]] && CFG_ARGS+=(--global-key "$KEY_COPY_CFG")
+if [[ -n "$KEY_HEX" ]]; then
+  CFG_ARGS+=(--global-key "$KEY_COPY_CFG")
+elif [[ $OWN_KEY_FROM_KEYDIR -eq 1 ]]; then
+  # Chave própria veio do --keydir: no alvo ela fica em /etc/ai-talk/keys/.
+  CFG_ARGS+=(--global-key "${KEYS_DIR_CFG}/${NODE}.key")
+fi
 [[ -f "$PEERS_COPY" ]] && CFG_ARGS+=(--peers-file "$PEERS_COPY")
 (( ${#PEER_NAMES[@]} > 0 )) && {
   for i in "${!PEER_NAMES[@]}"; do

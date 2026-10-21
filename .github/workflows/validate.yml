@@ -933,6 +933,24 @@ jobs:
           grep -qF '(( (8#$perms & 8#004) != 0 ))' iso/build-iso.sh
           # A chave POR NO tem de ser passada explicitamente (nome + caminho).
           grep -q -- '--peer-key' talk/install.sh
+          # `--keydir` sozinho tem de produzir um servico que INICIA: a chave
+          # do proprio no (keys/<no>.key) vai para o key_file. Sem isso a
+          # config aponta para /etc/ai-talk/fleet.key, que nao existe nesse
+          # modo, e o daemon morre no start — com o servico habilitado.
+          grep -q 'OWN_KEY_FROM_KEYDIR=1' talk/install.sh
+          # A checagem de chave orfa tem de vir DEPOIS da montagem da frota:
+          # antes dela todo peer vindo de --peers-file era acusado de orfao.
+          # Compara POSICOES de duas linhas-ancora (nome solto passaria mesmo
+          # com o bloco na posicao errada).
+          # (sem heredoc: a linha final dele sairia do bloco YAML do `run:`)
+          # `head -1`: pode haver mais de uma ocorrência (o comentário é citado
+          # em outros pontos) e a comparação numérica explodiria calada.
+          orf_pos="$(grep -n 'A chave do PRÓPRIO nó não é' talk/install.sh | head -1 | cut -d: -f1)"
+          fleet_pos="$(grep -n '^# Peers do arquivo' talk/install.sh | head -1 | cut -d: -f1)"
+          if [[ -z "$orf_pos" || -z "$fleet_pos" ]] || (( orf_pos < fleet_pos )); then
+            echo "::error file=talk/install.sh::a checagem de chave orfa roda antes dos peers do arquivo"
+            exit 1
+          fi
           # Teto de 15 tambem na geracao da ISO (ADR-005), nao so no daemon.
           grep -q 'teto de 15' iso/build-iso.sh
           # Os tres elos da corrente ISO -> alvo tem de existir.
