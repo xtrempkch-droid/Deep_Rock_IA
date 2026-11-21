@@ -637,7 +637,7 @@ ISO** (é o mesmo padrão do modelo e dos pacotes: a mídia leva tudo):
 
 ```bash
 # 0) crie o diretorio keys caso contrario nao funcionara!
-mkdir keys
+sudo mkdir keys
 # 1) uma chave por máquina (32 bytes em hex, modo 640) — é o recomendado
 head -c32 /dev/urandom | xxd -p -c64 > keys/ai-inference.key
 head -c32 /dev/urandom | xxd -p -c64 > keys/ai-builder.key
